@@ -1,0 +1,84 @@
+import { describe, expect, it } from "vitest";
+import { MASK, maskSecrets, mergeSecrets, profileHosts, validateProfile, type ProfileData } from "../src/model";
+import { openJson, pairCode, sealJson } from "../src/crypto";
+import { probe } from "../src/reachability";
+
+const profile: ProfileData = {
+  sources: [
+    { id: "a", type: "xtream", name: "Main", serverUrls: ["http://line.example.com:8080", "http://backup.example.net"], username: "u", password: "secret" },
+    { id: "b", type: "m3u", name: "Extra", m3uUrl: "https://lists.example.org/get.m3u", epgUrl: "https://epg.example.org/guide.xml.gz" },
+  ],
+  parentalPin: "1234",
+};
+
+describe("profile secrets", () => {
+  it("masks passwords and PIN for the admin page", () => {
+    const m = maskSecrets(profile);
+    expect(m.sources[0].password).toBe(MASK);
+    expect(m.parentalPin).toBe(MASK);
+    expect(m.sources[1].password).toBeUndefined();
+  });
+
+  it("keeps stored secrets when the page sends the mask back", () => {
+    const merged = mergeSecrets(maskSecrets(profile), profile);
+    expect(merged.sources[0].password).toBe("secret");
+    expect(merged.parentalPin).toBe("1234");
+  });
+
+  it("takes a new password when one is typed", () => {
+    const edited = maskSecrets(profile);
+    edited.sources[0].password = "new";
+    expect(mergeSecrets(edited, profile).sources[0].password).toBe("new");
+  });
+});
+
+describe("validateProfile", () => {
+  it("accepts a valid profile", () => expect(validateProfile(structuredClone(profile)).sources).toHaveLength(2));
+  it("rejects an Xtream source without a server", () =>
+    expect(() => validateProfile({ sources: [{ id: "x", name: "X", type: "xtream", username: "u" }] })).toThrow(/server URL/));
+  it("rejects non-http URLs", () =>
+    expect(() => validateProfile({ sources: [{ id: "x", name: "X", type: "m3u", m3uUrl: "file:///etc/passwd" }] })).toThrow(/http/));
+});
+
+describe("profileHosts", () => {
+  it("collects every host a TV may use", () => {
+    expect([...profileHosts(profile)].sort()).toEqual(["backup.example.net", "epg.example.org", "line.example.com:8080", "lists.example.org"]);
+  });
+});
+
+describe("crypto", () => {
+  const key = btoa(String.fromCharCode(...new Uint8Array(32).fill(7)));
+  it("round-trips sealed JSON", async () => {
+    const sealed = await sealJson(key, profile);
+    expect(sealed.startsWith("v1.")).toBe(true);
+    expect(sealed).not.toContain("secret");
+    expect(await openJson(key, sealed)).toEqual(profile);
+  });
+  it("makes readable pairing codes", () => {
+    for (let i = 0; i < 50; i++) expect(pairCode()).toMatch(/^[A-HJ-NP-Z2-9]{6}$/);
+  });
+});
+
+describe("probe", () => {
+  it("refuses private addresses", async () => {
+    expect((await probe("http://192.168.0.10:8080/x")).error).toBe("not probeable");
+    expect((await probe("http://localhost/")).error).toBe("not probeable");
+  });
+  it("probes the server root without credentials", async () => {
+    let seen = "";
+    const fake = (async (u: string) => {
+      seen = u;
+      return new Response(null, { status: 401 });
+    }) as unknown as typeof fetch;
+    const r = await probe("http://line.example.com:8080/player_api.php?username=u&password=p", fake);
+    expect(seen).toBe("http://line.example.com:8080/");
+    expect(r.ok).toBe(true);
+  });
+  it("reports a timeout as unreachable", async () => {
+    const fake = (async () => {
+      throw Object.assign(new Error("t"), { name: "TimeoutError" });
+    }) as unknown as typeof fetch;
+    const r = await probe("http://line.example.com/", fake);
+    expect(r).toMatchObject({ ok: false, error: "TimeoutError" });
+  });
+});
