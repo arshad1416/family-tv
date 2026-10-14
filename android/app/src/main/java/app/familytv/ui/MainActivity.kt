@@ -36,11 +36,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.lifecycleScope
-import androidx.tv.material3.Button
-import androidx.tv.material3.MaterialTheme
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.tv.material3.Surface
+import androidx.tv.material3.SurfaceDefaults
 import androidx.tv.material3.Text
-import androidx.tv.material3.darkColorScheme
 import app.familytv.BuildConfig
 import app.familytv.app
 import app.familytv.sync.CommandRunner
@@ -60,18 +60,20 @@ class MainActivity : ComponentActivity() {
             }
         }
         setContent {
-            MaterialTheme(colorScheme = darkColorScheme()) {
-                Surface(modifier = Modifier.fillMaxSize()) {
+            FamilyTvTheme {
+                Surface(modifier = Modifier.fillMaxSize(), colors = SurfaceDefaults.colors(containerColor = Tv.Bg, contentColor = Tv.Text)) {
                     val screen by vm.screen.collectAsState()
                     when (val s = screen) {
                         Screen.Loading -> Centered { Text("Starting…", fontSize = 22.sp) }
                         is Screen.Pairing -> PairingScreen(s.code)
                         is Screen.Syncing -> SyncingScreen(s)
                         is Screen.Failed -> Centered {
+                            val retry = remember { FocusRequester() }
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                 Text(s.message, fontSize = 22.sp)
                                 Spacer(Modifier.height(16.dp))
-                                Button(onClick = { vm.stop(); vm.start() }) { Text("Try again") }
+                                TvButton("Try again", { vm.stop(); vm.start() }, Modifier.focusRequester(retry))
+                                LaunchedEffect(Unit) { runCatching { retry.requestFocus() } }
                             }
                         }
                         is Screen.Ready -> HomeScreen(vm, s.config)
@@ -79,12 +81,14 @@ class MainActivity : ComponentActivity() {
                     message?.let { text ->
                         Dialog(onDismissRequest = { message = null }) {
                             Column(
-                                Modifier.background(Color(0xFF1F2937)).padding(32.dp).width(560.dp),
+                                Modifier.background(Tv.Raised, Tv.Shape).padding(32.dp).width(560.dp),
                                 verticalArrangement = Arrangement.spacedBy(20.dp),
                             ) {
                                 Text("Message from your TV admin", fontWeight = FontWeight.Bold, fontSize = 20.sp)
                                 Text(text, fontSize = 18.sp)
-                                Button(onClick = { message = null }) { Text("OK") }
+                                val ok = remember { FocusRequester() }
+                                TvButton("OK", { message = null }, Modifier.focusRequester(ok))
+                                LaunchedEffect(Unit) { runCatching { ok.requestFocus() } }
                             }
                         }
                     }
@@ -116,7 +120,7 @@ private fun SyncingScreen(s: Screen.Syncing) = Centered {
         Spacer(Modifier.height(20.dp))
         // Plain boxes rather than a Material progress bar: tv-material has none, and this stays light.
         Box(Modifier.fillMaxWidth().height(10.dp).clip(RoundedCornerShape(5.dp)).background(Color(0x33FFFFFF))) {
-            Box(Modifier.fillMaxWidth(s.fraction).fillMaxHeight().background(Color(0xFF4A90E2)))
+            Box(Modifier.fillMaxWidth(s.fraction).fillMaxHeight().background(Tv.Accent))
         }
         Spacer(Modifier.height(12.dp))
         Text(
