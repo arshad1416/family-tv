@@ -6,7 +6,7 @@ compatibility_date = "2024-10-22"
 [[d1_databases]]
 binding = "DB"
 database_name = "family_tv"
-database_id = "REPLACE_WITH_D1_ID"
+database_id = "12893bd7-f93d-49b9-8cc0-2472e4f8370a"
 
 [vars]
 # Latest TV app build offered to devices (0 = no update offered).
