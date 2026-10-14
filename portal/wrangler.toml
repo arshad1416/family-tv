@@ -2,6 +2,11 @@ name = "family-tv-portal"
 main = "src/index.ts"
 compatibility_date = "2024-10-22"
 
+# Short address for the portal and the app download (familytv.arshadkazi.ca/tv).
+# Wrangler creates the DNS record; workers.dev keeps working for TVs already installed.
+routes = [{ pattern = "familytv.arshadkazi.ca", custom_domain = true }]
+workers_dev = true
+
 # Create with: npx wrangler d1 create family_tv  (then paste the id below)
 [[d1_databases]]
 binding = "DB"

@@ -60,7 +60,7 @@ npx wrangler d1 create family_tv            # paste the database_id into wrangle
 npm run db:migrate:remote
 npx wrangler secret put ADMIN_TOKEN         # a long random string; the admin page asks for it once
 openssl rand -base64 32 | npx wrangler secret put CONFIG_KEY
-npm run deploy                               # prints https://family-tv-portal.<you>.workers.dev
+npm run deploy                               # serves https://familytv.arshadkazi.ca (routes in wrangler.toml) and workers.dev
 ```
 Keep `CONFIG_KEY` safe: losing it means re-entering the line passwords.
 For a nicer sign-in, put the Worker on your own domain behind Cloudflare Access as well.
