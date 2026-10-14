@@ -113,15 +113,25 @@ class PlayerActivity : ComponentActivity() {
         }
     }
 
-    private fun playChannel() {
+    private var tune: Job? = null
+
+    /**
+     * Shows the channel name at once, stops the old stream so its connection is closed (many lines
+     * allow only one), and waits briefly so holding the button flips through channels without
+     * opening a stream for each one.
+     */
+    private fun playChannel(delayMs: Long = 0) {
         val ch = channels.getOrNull(index) ?: return
         val p = profile ?: return
         triedHls = false
-        lifecycleScope.launch {
-            val url = Streams(app.db, p).live(ch) ?: return@launch
-            title = "${ch.num}  ${ch.name}"
+        title = "${ch.num}  ${ch.name}"
+        show(title, 3000)
+        player.stop()
+        tune?.cancel()
+        tune = lifecycleScope.launch {
+            delay(delayMs)
+            val url = Streams(app.db, p).live(ch) ?: return@launch show("$title\nThis channel has no stream address.", 4000, isError = true)
             start(url, title)
-            show(title, 3000)
         }
     }
 
@@ -175,7 +185,7 @@ class PlayerActivity : ComponentActivity() {
     private fun zap(delta: Int) {
         if (channels.isEmpty()) return
         index = (index + delta + channels.size) % channels.size
-        playChannel()
+        playChannel(delayMs = 600)
     }
 
     override fun onStart() {

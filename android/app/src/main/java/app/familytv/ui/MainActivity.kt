@@ -10,12 +10,15 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -25,6 +28,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.font.FontWeight
@@ -62,7 +66,7 @@ class MainActivity : ComponentActivity() {
                     when (val s = screen) {
                         Screen.Loading -> Centered { Text("Starting…", fontSize = 22.sp) }
                         is Screen.Pairing -> PairingScreen(s.code)
-                        is Screen.Syncing -> Centered { Text("${s.step}…", fontSize = 22.sp) }
+                        is Screen.Syncing -> SyncingScreen(s)
                         is Screen.Failed -> Centered {
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                 Text(s.message, fontSize = 22.sp)
@@ -103,6 +107,26 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun Centered(content: @Composable () -> Unit) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { content() }
+}
+
+@Composable
+private fun SyncingScreen(s: Screen.Syncing) = Centered {
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(520.dp)) {
+        Text("${s.step}…", fontSize = 22.sp)
+        Spacer(Modifier.height(20.dp))
+        // Plain boxes rather than a Material progress bar: tv-material has none, and this stays light.
+        Box(Modifier.fillMaxWidth().height(10.dp).clip(RoundedCornerShape(5.dp)).background(Color(0x33FFFFFF))) {
+            Box(Modifier.fillMaxWidth(s.fraction).fillMaxHeight().background(Color(0xFF4A90E2)))
+        }
+        Spacer(Modifier.height(12.dp))
+        Text(
+            listOfNotNull("${(s.fraction * 100).toInt()}%", s.detail).joinToString("  ·  "),
+            fontSize = 16.sp,
+            color = Color(0xAAFFFFFF),
+        )
+        Spacer(Modifier.height(8.dp))
+        Text("The first load takes a minute or two. After that the TV opens straight away.", fontSize = 14.sp, color = Color(0x88FFFFFF))
+    }
 }
 
 @Composable

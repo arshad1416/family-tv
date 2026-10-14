@@ -29,22 +29,48 @@ import java.util.zip.GZIPInputStream
 class Catalog(private val db: AppDb) {
     private val dao = db.catalog()
 
-    data class Progress(val step: String)
+    /** [fraction] is 0..1 across the whole refresh; [detail] is a live count such as "12,400 channels". */
+    data class Progress(val step: String, val fraction: Float, val detail: String? = null)
+
+    /**
+     * Turns per-step progress into one overall fraction. Providers rarely say how long a list is
+     * (gzip drops Content-Length), so inside a list step the bar eases towards 90% of that step as
+     * rows arrive and jumps to the end when the list finishes; the row count shown is exact.
+     */
+    private class Tracker(private val sources: Int, private val report: (Progress) -> Unit) {
+        private var done = 0f
+        private var weight = 0f
+        private var step = ""
+
+        fun startSource(index: Int) { done = index.toFloat(); weight = 0f }
+        fun step(name: String, share: Float) {
+            done += weight
+            step = name; weight = share
+            emit(0f, null)
+        }
+        fun rows(n: Int, typical: Int, noun: String) =
+            emit(0.9f * (1f - kotlin.math.exp(-n.toFloat() / typical)), "%,d %s".format(n, noun))
+        private fun emit(within: Float, detail: String?) =
+            report(Progress(step, ((done + weight * within) / sources.coerceAtLeast(1)).coerceIn(0f, 1f), detail))
+    }
 
     suspend fun refresh(profile: Profile, onProgress: (Progress) -> Unit = {}) = withContext(Dispatchers.IO) {
         dao.dropSourcesExcept(profile.sources.map { it.id }.ifEmpty { listOf("") })
         dao.dropOrphanChannels(); dao.dropOrphanMovies(); dao.dropOrphanSeries(); dao.dropOrphanCategories()
         val errors = mutableListOf<String>()
-        for (s in profile.sources) {
+        val t = Tracker(profile.sources.size, onProgress)
+        for ((i, s) in profile.sources.withIndex()) {
+            t.startSource(i)
             try {
                 when (s.type) {
-                    "xtream" -> refreshXtream(s, onProgress)
-                    "m3u" -> refreshM3u(s, onProgress)
+                    "xtream" -> refreshXtream(s, t)
+                    "m3u" -> refreshM3u(s, t)
                 }
             } catch (e: IOException) {
                 errors += "${s.name}: ${e.message}"
             }
         }
+        onProgress(Progress("Finishing", 1f))
         val now = System.currentTimeMillis()
         dao.pruneProgrammes(before = now - 2 * HOUR, after = now + GUIDE_HOURS * HOUR)
         if (errors.isNotEmpty() && errors.size == profile.sources.size) throw IOException(errors.joinToString("; "))
@@ -64,7 +90,8 @@ class Catalog(private val db: AppDb) {
         throw IOException("no server answered for ${s.name}", last)
     }
 
-    private suspend fun refreshXtream(s: Source, onProgress: (Progress) -> Unit) {
+    private suspend fun refreshXtream(s: Source, t: Tracker) {
+        t.step("Signing in", 0.05f)
         val user = s.username!!
         val pass = s.password.orEmpty()
         val (server, account) = activeServer(s)
@@ -82,32 +109,32 @@ class Catalog(private val db: AppDb) {
             dao.pruneCategories(s.id, kind, gen)
         }
 
-        onProgress(Progress("Loading channels"))
-        streamBatches(XtreamUrls.api(server, user, pass, "get_live_streams"), { dao.upsertChannels(it) }) { st ->
+        t.step("Loading channels", 0.2f)
+        streamBatches(XtreamUrls.api(server, user, pass, "get_live_streams"), { dao.upsertChannels(it) }, { t.rows(it, 5_000, "channels") }) { st ->
             ChannelEntity(s.id, st.id, st.name, st.num, st.icon, st.categoryId, st.epgId, null, st.catchupDays, gen)
         }
         dao.pruneChannels(s.id, gen)
 
-        onProgress(Progress("Loading movies"))
-        streamBatches(XtreamUrls.api(server, user, pass, "get_vod_streams"), { dao.upsertMovies(it) }) { st ->
+        t.step("Loading movies", 0.35f)
+        streamBatches(XtreamUrls.api(server, user, pass, "get_vod_streams"), { dao.upsertMovies(it) }, { t.rows(it, 20_000, "movies") }) { st ->
             MovieEntity(s.id, st.id, st.name, st.icon, st.categoryId, st.rating, st.ext, null, st.added, gen)
         }
         dao.pruneMovies(s.id, gen)
 
-        onProgress(Progress("Loading series"))
-        streamBatches(XtreamUrls.api(server, user, pass, "get_series"), { dao.upsertSeries(it) }) { st ->
+        t.step("Loading series", 0.2f)
+        streamBatches(XtreamUrls.api(server, user, pass, "get_series"), { dao.upsertSeries(it) }, { t.rows(it, 5_000, "series") }) { st ->
             SeriesEntity(s.id, st.id, st.name, st.icon, st.categoryId, st.plot, st.rating, gen)
         }
         dao.pruneSeries(s.id, gen)
 
-        onProgress(Progress("Loading guide"))
-        loadGuide(s.id, s.epgUrl ?: XtreamUrls.xmltv(server, user, pass))
+        t.step("Loading guide", 0.2f)
+        loadGuide(s.id, s.epgUrl ?: XtreamUrls.xmltv(server, user, pass), t)
     }
 
-    private suspend fun refreshM3u(s: Source, onProgress: (Progress) -> Unit) {
+    private suspend fun refreshM3u(s: Source, t: Tracker) {
         val gen = System.currentTimeMillis()
         dao.upsertSource(SourceEntity(s.id, s.name, s.type, null, gen, gen))
-        onProgress(Progress("Loading playlist"))
+        t.step("Loading playlist", if (s.epgUrl != null) 0.8f else 1f)
         val liveCats = LinkedHashMap<String, Int>()
         val movieCats = LinkedHashMap<String, Int>()
         val channels = ArrayList<ChannelEntity>(BATCH)
@@ -116,6 +143,7 @@ class Catalog(private val db: AppDb) {
         open(s.m3uUrl!!).use { res ->
             M3uParser.parse(reader(res)) { e ->
                 n++
+                if (n % BATCH == 0) t.rows(n, 20_000, "items")
                 // Xtream-style M3U exports put VOD under /movie/ and /series/ paths.
                 val isVod = e.url.contains("/movie/") || e.url.contains("/series/")
                 val id = e.url.hashCode().toUInt().toString(16)
@@ -137,11 +165,11 @@ class Catalog(private val db: AppDb) {
         for (k in listOf(Kind.LIVE, Kind.MOVIE, Kind.SERIES)) dao.pruneCategories(s.id, k, gen)
         dao.pruneChannels(s.id, gen)
         dao.pruneMovies(s.id, gen)
-        s.epgUrl?.let { onProgress(Progress("Loading guide")); loadGuide(s.id, it) }
+        s.epgUrl?.let { t.step("Loading guide", 0.2f); loadGuide(s.id, it, t) }
     }
 
     /** Guide failures never fail the refresh: channels still play without a guide. */
-    private suspend fun loadGuide(sourceId: String, url: String) {
+    private suspend fun loadGuide(sourceId: String, url: String, t: Tracker) {
         val wanted = HashSet<String>()
         var offset = 0
         while (true) {
@@ -158,9 +186,13 @@ class Catalog(private val db: AppDb) {
                 val parser = Xml.newPullParser().apply { setInput(input, null) }
                 dao.clearProgrammesFor(sourceId)
                 val pending = ArrayList<ProgrammeEntity>(BATCH)
+                var kept = 0
                 XmltvParser.parse(parser, now - 2 * HOUR, now + GUIDE_HOURS * HOUR, wanted) { p ->
                     pending += ProgrammeEntity(epgId = p.channel, start = p.start, stop = p.stop, title = p.title, description = p.description)
-                    if (pending.size >= BATCH) { val chunk = pending.toList(); pending.clear(); runBlocking { dao.insertProgrammes(chunk) } }
+                    if (pending.size >= BATCH) {
+                        val chunk = pending.toList(); pending.clear(); runBlocking { dao.insertProgrammes(chunk) }
+                        kept += chunk.size; t.rows(kept, 30_000, "programmes")
+                    }
                 }
                 if (pending.isNotEmpty()) dao.insertProgrammes(pending)
             }
@@ -177,15 +209,16 @@ class Catalog(private val db: AppDb) {
     // --- streaming helpers ---
 
     /** Streams an Xtream list and writes it [BATCH] rows at a time (runs on an IO thread). */
-    private suspend fun <T> streamBatches(url: String, write: suspend (List<T>) -> Unit, map: (XtStream) -> T) {
+    private suspend fun <T> streamBatches(url: String, write: suspend (List<T>) -> Unit, progress: (Int) -> Unit, map: (XtStream) -> T) {
         val buf = ArrayList<T>(BATCH)
+        var n = 0
         open(url).use { res ->
             XtreamParser.streams(reader(res)) { st ->
                 buf += map(st)
-                if (buf.size >= BATCH) { val chunk = buf.toList(); buf.clear(); runBlocking { write(chunk) } }
+                if (buf.size >= BATCH) { val chunk = buf.toList(); buf.clear(); runBlocking { write(chunk) }; n += chunk.size; progress(n) }
             }
         }
-        if (buf.isNotEmpty()) write(buf)
+        if (buf.isNotEmpty()) { write(buf); n += buf.size; progress(n) }
     }
 
     private fun open(url: String): Response {

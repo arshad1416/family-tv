@@ -6,6 +6,8 @@ import app.familytv.BuildConfig
 import app.familytv.core.Http
 import com.google.gson.Gson
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
@@ -28,8 +30,10 @@ class PortalClient(context: Context, private val baseUrl: String = BuildConfig.P
         get() = prefs.getString("config", null)?.let { runCatching { gson.fromJson(it, DeviceConfig::class.java) }.getOrNull() }
         set(v) = prefs.edit().putString("config", v?.let { gson.toJson(it.copy(commands = null)) }).apply()
 
-    suspend fun ensureRegistered() {
-        if (token != null) return
+    // The screen and the background worker start together; without this lock each registered
+    // its own device and the TV kept a different one from the code it showed.
+    suspend fun ensureRegistered() = registerLock.withLock {
+        if (token != null) return@withLock
         val r = post(
             "/api/device/register",
             RegisterRequest(Build.MANUFACTURER, Build.MODEL, Build.VERSION.SDK_INT, BuildConfig.VERSION_NAME),
@@ -48,7 +52,11 @@ class PortalClient(context: Context, private val baseUrl: String = BuildConfig.P
             get("/api/device/config", DeviceConfig::class.java).also { if (it.paired) cachedConfig = it }
         } catch (e: PortalException) {
             if (e.code == 401) {
-                reset(); ensureRegistered(); get("/api/device/config", DeviceConfig::class.java)
+                val stale = token
+                // Only forget the device once, even if several callers saw the same 401.
+                registerLock.withLock { if (token == stale) reset() }
+                ensureRegistered()
+                get("/api/device/config", DeviceConfig::class.java)
             } else throw e
         }
     }
@@ -79,5 +87,9 @@ class PortalClient(context: Context, private val baseUrl: String = BuildConfig.P
             if (!res.isSuccessful) throw PortalException(res.code, text.take(200))
             gson.fromJson(text, type)
         }
+    }
+
+    private companion object {
+        val registerLock = Mutex()
     }
 }

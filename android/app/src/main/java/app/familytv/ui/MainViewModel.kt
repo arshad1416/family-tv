@@ -18,7 +18,7 @@ import kotlinx.coroutines.launch
 sealed interface Screen {
     data object Loading : Screen
     data class Pairing(val code: String, val expires: Long) : Screen
-    data class Syncing(val step: String) : Screen
+    data class Syncing(val step: String, val fraction: Float = 0f, val detail: String? = null) : Screen
     data class Ready(val config: DeviceConfig) : Screen
     data class Failed(val message: String) : Screen
 }
@@ -68,7 +68,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (app.db.catalog().channelCount() == 0) {
             _screen.value = Screen.Syncing("Loading channels")
             try {
-                app.catalog.refresh(profile) { _screen.value = Screen.Syncing(it.step) }
+                app.catalog.refresh(profile) { _screen.value = Screen.Syncing(it.step, it.fraction, it.detail) }
                 PlaybackStatus.lastRefresh = System.currentTimeMillis()
             } catch (e: Exception) {
                 PlaybackStatus.lastRefreshError = e.message
@@ -86,7 +86,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             is Screen.Pairing, is Screen.Failed -> boot()
             is Screen.Ready -> runCatching {
                 val hb = app.portal.heartbeat(PlaybackStatus.snapshot())
-                if (!hb.paired) { app.portal.reset(); boot(); return }
+                // Unpaired in the portal: show the pairing code again (same device, no re-register).
+                if (!hb.paired) { boot(); return }
                 app.commands.runAll(hb.commands, s.config.profile)
             }
             else -> Unit
