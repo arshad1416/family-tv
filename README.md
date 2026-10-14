@@ -79,7 +79,7 @@ Host it from the portal, so every TV installs from `<portal>/tv`:
 ```bash
 cd portal
 npx wrangler r2 bucket create family-tv-apps     # once
-npx wrangler r2 object put family-tv-apps/family-tv.apk --file ../android/app/build/outputs/apk/release/app-release.apk --remote
+npx wrangler r2 object put family-tv-apps/family-tv.apk --file ../android/app/build/outputs/apk/release/app-release.apk
 ```
 
 Installing:
