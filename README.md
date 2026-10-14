@@ -69,21 +69,28 @@ For a nicer sign-in, put the Worker on your own domain behind Cloudflare Access 
 ```bash
 cd android
 ./gradlew assembleRelease -PportalUrl=https://family-tv-portal.<you>.workers.dev
-# APK: app/build/outputs/apk/release/app-universal-release.apk (about 2.6 MB)
+# APK: app/build/outputs/apk/release/app-release.apk (about 2.6 MB)
 ```
 Sign release builds with your own key: set `FAMILYTV_KEYSTORE`, `FAMILYTV_KEYSTORE_PASSWORD`,
 `FAMILYTV_KEY_ALIAS` and `FAMILYTV_KEY_PASSWORD`. Without them the debug key is used.
 Every install must keep the same key, or Android refuses updates.
 
+Host it from the portal, so every TV installs from `<portal>/tv`:
+```bash
+cd portal
+npx wrangler r2 bucket create family-tv-apps     # once
+npx wrangler r2 object put family-tv-apps/family-tv.apk --file ../android/app/build/outputs/apk/release/app-release.apk --remote
+```
+
 Installing:
-- **Fire TV:** Settings → My Fire TV → Developer options → Install unknown apps → *Downloader*. Then open
-  the APK's URL in Downloader. You can host the APK on R2 or a GitHub release.
+- **Fire TV:** Settings → My Fire TV → Developer options → Install unknown apps → *Downloader*. Then type
+  `<portal>/tv` into Downloader.
 - **Google TV / Android TV:** the same idea with *Downloader* or *Send Files to TV*, after allowing
   unknown sources for that app.
 
 ### 3. Remote updates
-Upload a new APK with a higher `versionCode`, then set `LATEST_APP_VERSION_CODE` and `LATEST_APP_URL`
-in `wrangler.toml` and redeploy. Press **Update app** on a TV and the installer opens there; someone
+Upload a new APK with a higher `versionCode` (same `r2 object put` command), then set
+`LATEST_APP_VERSION_CODE` and `LATEST_APP_URL` (`<portal>/tv`) in `wrangler.toml` and redeploy. Press **Update app** on a TV and the installer opens there; someone
 presses Install once.
 
 ## Develop

@@ -9,7 +9,10 @@ export interface Env {
   CONFIG_KEY: string;
   LATEST_APP_VERSION_CODE?: string;
   LATEST_APP_URL?: string;
+  APPS?: R2Bucket;
 }
+
+const APK_KEY = "family-tv.apk";
 
 const PAIR_TTL_MS = 30 * 60 * 1000;
 const COMMAND_TYPES = new Set(["refresh", "diagnose", "clear_cache", "restart", "message", "update"]);
@@ -320,6 +323,18 @@ async function adminSaveProfile(req: Request, env: Env, id: string | null) {
   return json({ id });
 }
 
+async function appDownload(env: Env, method: string): Promise<Response> {
+  const obj = env.APPS ? await env.APPS.get(APK_KEY) : null;
+  if (!obj) return json({ error: "no app uploaded yet" }, 404);
+  const headers = {
+    "content-type": "application/vnd.android.package-archive",
+    "content-disposition": 'attachment; filename="family-tv.apk"',
+    "content-length": String(obj.size),
+    "cache-control": "no-store",
+  };
+  return new Response(method === "HEAD" ? null : obj.body, { headers });
+}
+
 // ---------- router ----------
 
 function clip(s: string | undefined | null, n = 80) {
@@ -344,6 +359,9 @@ export async function handle(req: Request, env: Env): Promise<Response> {
       },
     });
   }
+
+  // TV app download: short enough to type into Downloader on a remote.
+  if ((m === "GET" || m === "HEAD") && (p === "/tv" || p === "/app.apk")) return appDownload(env, m);
 
   // Device endpoints
   if (m === "POST" && p === "/api/device/register") return deviceRegister(req, env);
