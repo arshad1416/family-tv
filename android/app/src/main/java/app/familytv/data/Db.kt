@@ -126,7 +126,10 @@ interface CatalogDao {
     @Query("SELECT * FROM channels WHERE categoryId = :categoryId AND sourceId = :sourceId ORDER BY num, name") fun channels(sourceId: String, categoryId: String): Flow<List<ChannelEntity>>
     @Query("SELECT * FROM channels ORDER BY sourceId, num, name LIMIT :limit OFFSET :offset") suspend fun allChannels(limit: Int, offset: Int): List<ChannelEntity>
     @Query("SELECT * FROM channels WHERE sourceId = :sourceId LIMIT 1") suspend fun anyChannel(sourceId: String): ChannelEntity?
-    @Query("SELECT * FROM channels WHERE name LIKE '%' || :q || '%' ORDER BY num LIMIT 100") suspend fun searchChannels(q: String): List<ChannelEntity>
+    @Query("SELECT * FROM channels WHERE name LIKE '%' || :q || '%' ORDER BY num, name LIMIT :limit") suspend fun searchChannels(q: String, limit: Int): List<ChannelEntity>
+    @Query("SELECT * FROM movies WHERE name LIKE '%' || :q || '%' ORDER BY name LIMIT :limit") suspend fun searchMovies(q: String, limit: Int): List<MovieEntity>
+    @Query("SELECT * FROM series WHERE name LIKE '%' || :q || '%' ORDER BY name LIMIT :limit") suspend fun searchSeries(q: String, limit: Int): List<SeriesEntity>
+    @Query("SELECT * FROM movies ORDER BY added DESC LIMIT :limit") suspend fun recentMovies(limit: Int): List<MovieEntity>
     @Query("SELECT * FROM movies WHERE categoryId = :categoryId AND sourceId = :sourceId ORDER BY added DESC") fun movies(sourceId: String, categoryId: String): Flow<List<MovieEntity>>
     @Query("SELECT * FROM series WHERE categoryId = :categoryId AND sourceId = :sourceId ORDER BY name") fun series(sourceId: String, categoryId: String): Flow<List<SeriesEntity>>
 
@@ -135,6 +138,8 @@ interface CatalogDao {
            WHERE epgId IN (:epgIds) AND stop > :now AND start < :until ORDER BY epgId, start""",
     )
     suspend fun programmes(epgIds: List<String>, now: Long, until: Long): List<NowNext>
+
+    @Query("SELECT description FROM programmes WHERE epgId = :epgId AND start = :start LIMIT 1") suspend fun description(epgId: String, start: Long): String?
 
     @Query("SELECT COUNT(*) FROM channels") suspend fun channelCount(): Int
 }

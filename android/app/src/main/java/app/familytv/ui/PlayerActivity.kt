@@ -4,12 +4,19 @@ import android.graphics.Color
 import android.os.Bundle
 import android.view.Gravity
 import android.view.KeyEvent
+import android.view.ViewGroup
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
 import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.TextView
 import androidx.activity.ComponentActivity
+import androidx.activity.OnBackPressedCallback
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.ComposeView
 import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
@@ -23,6 +30,7 @@ import androidx.media3.ui.PlayerView
 import app.familytv.app
 import app.familytv.core.Http
 import app.familytv.data.ChannelEntity
+import app.familytv.data.NowNext
 import app.familytv.iptv.Streams
 import app.familytv.portal.Profile
 import app.familytv.sync.PlaybackStatus
@@ -32,9 +40,14 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /**
- * Full-screen player. Live TV: D-pad up/down (or channel keys) zaps through the category.
+ * Full-screen player. Live TV: D-pad up/down (or channel keys) zaps through the category, each
+ * tune shows an info banner, and OK opens a mini guide on the left (Back closes it).
  * When a stream fails it falls back from .ts to .m3u8 once, then runs a network check and
  * shows the person a plain-language reason instead of a spinner.
+ *
+ * Live keys are handled in onKeyDown/onKeyUp. That only works if no view consumes the D-pad
+ * first, so in live mode PlayerView and the overlay are kept out of focus unless the mini guide
+ * is open.
  */
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 class PlayerActivity : ComponentActivity() {
@@ -43,11 +56,27 @@ class PlayerActivity : ComponentActivity() {
     private lateinit var overlay: TextView
     private var hideOverlay: Job? = null
 
-    private var channels: List<ChannelEntity> = emptyList()
+    private var channels by mutableStateOf<List<ChannelEntity>>(emptyList())
     private var index = 0
     private var triedHls = false
     private var profile: Profile? = null
     private var title = ""
+    private var tunedAt = 0L
+    private var retries = 0
+
+    // Live overlay state, drawn by LiveOverlay in a ComposeView.
+    private var overlayView: ComposeView? = null
+    private var playing by mutableIntStateOf(0)
+    private var banner by mutableStateOf<Int?>(null)
+    private var guideOpen by mutableStateOf(false)
+    private var programmes by mutableStateOf<Map<String, List<NowNext>>>(emptyMap())
+    private var programmesAt = 0L
+    private var bannerJob: Job? = null
+    private var guideJob: Job? = null
+    private var okPending = false
+    private val closeGuideOnBack = object : OnBackPressedCallback(false) {
+        override fun handleOnBackPressed() = closeGuide()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -103,11 +132,25 @@ class PlayerActivity : ComponentActivity() {
             start(url, title)
         } else {
             view.useController = false
+            view.isFocusable = false
+            view.descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
+            overlayView = ComposeView(this).apply {
+                descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
+                setContent {
+                    FamilyTvTheme {
+                        LiveOverlay(channels, playing, banner, guideOpen, programmes, onTune = ::tuneFromGuide, onFocusChannel = { if (guideOpen) banner = it })
+                    }
+                }
+            }
+            root.addView(overlayView, 1, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT)) // under the error text
+            onBackPressedDispatcher.addCallback(this, closeGuideOnBack)
             lifecycleScope.launch {
                 val src = intent.getStringExtra(EXTRA_SOURCE) ?: return@launch finish()
                 val cat = intent.getStringExtra(EXTRA_CATEGORY) ?: return@launch finish()
                 channels = app.db.catalog().channels(src, cat).first()
-                index = intent.getIntExtra(EXTRA_INDEX, 0).coerceIn(0, (channels.size - 1).coerceAtLeast(0))
+                val stream = intent.getStringExtra(EXTRA_STREAM)
+                index = channels.indexOfFirst { it.streamId == stream }.takeIf { it >= 0 }
+                    ?: intent.getIntExtra(EXTRA_INDEX, 0).coerceIn(0, (channels.size - 1).coerceAtLeast(0))
                 playChannel()
             }
         }
@@ -124,8 +167,13 @@ class PlayerActivity : ComponentActivity() {
         val ch = channels.getOrNull(index) ?: return
         val p = profile ?: return
         triedHls = false
+        retries = 0
+        tunedAt = System.currentTimeMillis()
         title = "${ch.num}  ${ch.name}"
-        show(title, 3000)
+        playing = index
+        overlay.visibility = TextView.GONE
+        overlay.tag = null
+        showBanner(index)
         player.stop()
         tune?.cancel()
         tune = lifecycleScope.launch {
@@ -146,6 +194,17 @@ class PlayerActivity : ComponentActivity() {
         PlaybackStatus.error("${error.errorCodeName} on $title")
         val ch = channels.getOrNull(index)
         val p = profile
+        // One-connection lines can refuse a new stream for a moment after the old one closes:
+        // straight after a tune, try the same channel again (twice, backing off) before anything else.
+        if (ch != null && p != null && retries < 2 && System.currentTimeMillis() - tunedAt < 15_000) {
+            retries++
+            val attempt = index
+            lifecycleScope.launch {
+                delay(1_500L * retries)
+                if (attempt == index) Streams(app.db, p).live(ch, if (triedHls) "m3u8" else "ts")?.let { start(it, title) }
+            }
+            return
+        }
         // Some panels only serve HLS for live; retry once before telling anyone.
         if (ch != null && ch.url == null && !triedHls && p != null) {
             triedHls = true
@@ -168,18 +227,84 @@ class PlayerActivity : ComponentActivity() {
         if (ms > 0) hideOverlay = lifecycleScope.launch { delay(ms); overlay.visibility = TextView.GONE }
     }
 
-    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if (channels.isNotEmpty() && event.action == KeyEvent.ACTION_DOWN) {
-            when (event.keyCode) {
-                KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_CHANNEL_UP -> { zap(-1); return true }
-                KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_CHANNEL_DOWN -> { zap(1); return true }
-                KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
-                    if (overlay.tag == "error") playChannel() else show(title, 3000)
-                    return true
-                }
+    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+        if (channels.isEmpty() || keyCode == KeyEvent.KEYCODE_BACK) return super.onKeyDown(keyCode, event)
+        // With the mini guide open, Compose moves focus through the list; whatever reaches here
+        // fell off its edge and must not zap.
+        if (guideOpen) return keyCode in LIVE_KEYS || super.onKeyDown(keyCode, event)
+        when (keyCode) {
+            KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_CHANNEL_UP -> zap(-1)
+            KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_CHANNEL_DOWN -> zap(1)
+            in OK_KEYS -> if (event.repeatCount == 0) {
+                if (overlay.tag == "error") playChannel() else okPending = true
             }
+            else -> return super.onKeyDown(keyCode, event)
         }
-        return super.dispatchKeyEvent(event)
+        return true
+    }
+
+    // The guide opens on key-up, so the release of the same OK press can't also click a row in it.
+    override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
+        if (channels.isNotEmpty() && keyCode in OK_KEYS) {
+            if (okPending && !guideOpen) openGuide()
+            okPending = false
+            return true
+        }
+        return super.onKeyUp(keyCode, event)
+    }
+
+    override fun onUserInteraction() {
+        super.onUserInteraction()
+        if (guideOpen) closeGuideLater()
+    }
+
+    private fun showBanner(i: Int) {
+        banner = i
+        refreshProgrammes()
+        bannerJob?.cancel()
+        if (!guideOpen) bannerJob = lifecycleScope.launch { delay(4_000); banner = null }
+    }
+
+    private fun openGuide() {
+        guideOpen = true
+        closeGuideOnBack.isEnabled = true
+        overlayView?.apply { descendantFocusability = ViewGroup.FOCUS_AFTER_DESCENDANTS; requestFocus() }
+        showBanner(index)
+        closeGuideLater()
+    }
+
+    private fun closeGuide() {
+        guideOpen = false
+        closeGuideOnBack.isEnabled = false
+        guideJob?.cancel()
+        // Block first: clearing focus otherwise hands it straight back to the first focusable view.
+        overlayView?.apply { descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS; clearFocus() }
+        showBanner(index)
+    }
+
+    private fun closeGuideLater() {
+        guideJob?.cancel()
+        guideJob = lifecycleScope.launch { delay(20_000); closeGuide() }
+    }
+
+    private fun tuneFromGuide(i: Int) {
+        val change = i != index
+        index = i
+        closeGuide()
+        if (change) playChannel()
+    }
+
+    /** Now/next for the whole category, reused by the banner and the mini guide for a few minutes. */
+    private fun refreshProgrammes() {
+        val now = System.currentTimeMillis()
+        if (now - programmesAt < 5 * 60_000) return
+        programmesAt = now
+        val ids = channels.mapNotNull { it.epgId }.distinct()
+        lifecycleScope.launch {
+            runCatching { ids.chunked(500).flatMap { app.db.catalog().programmes(it, now, now + 3 * 3_600_000L) }.groupBy { it.epgId } }
+                .onSuccess { programmes = it }
+                .onFailure { programmesAt = 0 }
+        }
     }
 
     private fun zap(delta: Int) {
@@ -210,5 +335,13 @@ class PlayerActivity : ComponentActivity() {
         const val EXTRA_SOURCE = "source"
         const val EXTRA_CATEGORY = "category"
         const val EXTRA_INDEX = "index"
+        /** Optional: the channel to start on, when the caller doesn't know its index in the category. */
+        const val EXTRA_STREAM = "stream"
+
+        private val OK_KEYS = setOf(KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER)
+        private val LIVE_KEYS = OK_KEYS + setOf(
+            KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT,
+            KeyEvent.KEYCODE_CHANNEL_UP, KeyEvent.KEYCODE_CHANNEL_DOWN,
+        )
     }
 }
