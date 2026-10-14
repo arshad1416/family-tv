@@ -1,0 +1,29 @@
+name = "family-tv-portal"
+main = "src/index.ts"
+compatibility_date = "2024-10-22"
+
+# Short address for the portal and the app download (familytv.arshadkazi.ca/tv).
+# Wrangler creates the DNS record; workers.dev keeps working for TVs already installed.
+routes = [{ pattern = "familytv.arshadkazi.ca", custom_domain = true }]
+workers_dev = true
+
+# Create with: npx wrangler d1 create family_tv  (then paste the id below)
+[[d1_databases]]
+binding = "DB"
+database_name = "family_tv"
+database_id = "12893bd7-f93d-49b9-8cc0-2472e4f8370a"
+
+# Hosts the TV app at /tv. Upload with:
+#   npx wrangler r2 object put family-tv-apps/family-tv.apk --file <apk>
+[[r2_buckets]]
+binding = "APPS"
+bucket_name = "family-tv-apps"
+
+[vars]
+# Latest TV app build offered to devices (0 = no update offered).
+LATEST_APP_VERSION_CODE = "0"
+LATEST_APP_URL = ""
+
+# Secrets (wrangler secret put):
+#   ADMIN_TOKEN  long random string; the admin page asks for it once per browser
+#   CONFIG_KEY   base64 of 32 random bytes; encrypts provider logins at rest
