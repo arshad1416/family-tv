@@ -88,10 +88,18 @@ Installing:
 - **Google TV / Android TV:** the same idea with *Downloader* or *Send Files to TV*, after allowing
   unknown sources for that app.
 
-### 3. Remote updates
-Upload a new APK with a higher `versionCode` (same `r2 object put` command), then set
-`LATEST_APP_VERSION_CODE` and `LATEST_APP_URL` (`<portal>/tv`) in `wrangler.toml` and redeploy. Press **Update app** on a TV and the installer opens there; someone
-presses Install once.
+### 3. Updates
+Merging to `main` runs `.github/workflows/release.yml`: it builds a signed APK, uploads it with
+`latest.json` to the `family-tv-apps` bucket, and every TV picks it up within 30 minutes.
+- **Google TV / Android TV (Android 12+):** after the first self-update, updates install in the
+  background while the app is closed.
+- **Fire TV and older Android:** the app opens the installer when it's next on the home screen;
+  someone presses Install once.
+- Nothing installs while something is playing. **Update app** in the portal forces it now.
+
+Secrets stay in Bitwarden Secrets Manager (EU), in a project of their own:
+`FAMILYTV_KEYSTORE_B64`, `FAMILYTV_KEYSTORE_PASSWORD` and `CLOUDFLARE_API_TOKEN` (R2 edit on this
+account). GitHub holds only `BWS_ACCESS_TOKEN`, for a machine account that can read that project.
 
 ## Develop
 | Where | Command |

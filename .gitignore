@@ -11,3 +11,4 @@ android/.idea/
 *.apk
 *.keystore
 *.jks
+.claude/

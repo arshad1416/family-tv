@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { handle, type Env } from "../src/index";
+import { handle, latestApp, type Env } from "../src/index";
 
 const apk = new Uint8Array([0x50, 0x4b, 3, 4]);
 const bucket = (has: boolean) =>
@@ -17,5 +17,22 @@ describe("app download", () => {
   it("404s before an APK is uploaded or without the bucket", async () => {
     expect((await handle(new Request("https://portal.test/app.apk"), env(bucket(false)))).status).toBe(404);
     expect((await handle(new Request("https://portal.test/tv"), env())).status).toBe(404);
+  });
+});
+
+describe("latestApp", () => {
+  const withLatest = (body: string | null) =>
+    ({ get: async (key: string) => (key === "latest.json" && body ? { json: async () => JSON.parse(body) } : null) }) as unknown as R2Bucket;
+
+  it("offers the CI-published build at the portal's /tv", async () => {
+    const r = await latestApp({ APPS: withLatest('{"versionCode":105,"versionName":"0.2.5"}') } as unknown as Env, new Request("https://familytv.example/api/device/config"));
+    expect(r).toEqual({ versionCode: 105, versionName: "0.2.5", url: "https://familytv.example/tv" });
+  });
+
+  it("falls back to wrangler vars, or nothing", async () => {
+    const req = new Request("https://p.test/");
+    expect(await latestApp({ APPS: withLatest(null) } as unknown as Env, req)).toBeNull();
+    const vars = { APPS: withLatest(null), LATEST_APP_VERSION_CODE: "3", LATEST_APP_URL: "https://x/a.apk" } as unknown as Env;
+    expect(await latestApp(vars, req)).toEqual({ versionCode: 3, versionName: null, url: "https://x/a.apk" });
   });
 });

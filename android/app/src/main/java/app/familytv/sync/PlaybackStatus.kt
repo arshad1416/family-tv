@@ -11,6 +11,7 @@ object PlaybackStatus {
     @Volatile var lastErrorAt: Long = 0
     @Volatile var lastRefresh: Long = 0
     @Volatile var lastRefreshError: String? = null
+    @Volatile var update: String? = null
 
     fun started(t: String) {
         title = t; startedAt = System.currentTimeMillis(); bufferingEvents = 0; bitrateKbps = null; droppedFrames = 0
@@ -25,5 +26,6 @@ object PlaybackStatus {
         "lastError" to lastError?.takeIf { System.currentTimeMillis() - lastErrorAt < 6 * 3600_000 },
         "lastRefresh" to lastRefresh,
         "lastRefreshError" to lastRefreshError,
+        "update" to update,
     )
 }

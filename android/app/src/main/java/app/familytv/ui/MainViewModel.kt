@@ -6,8 +6,10 @@ import androidx.lifecycle.viewModelScope
 import app.familytv.app
 import app.familytv.diag.DiagnosisReport
 import app.familytv.portal.DeviceConfig
+import app.familytv.portal.LatestApp
 import app.familytv.portal.Profile
 import app.familytv.sync.PlaybackStatus
+import app.familytv.update.Updater
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -79,6 +81,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         _screen.value = Screen.Ready(config)
         app.commands.runAll(config.commands, profile)
+        offerUpdate(config.latestApp)
     }
 
     private suspend fun checkIn() {
@@ -89,9 +92,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 // Unpaired in the portal: show the pairing code again (same device, no re-register).
                 if (!hb.paired) { boot(); return }
                 app.commands.runAll(hb.commands, s.config.profile)
+                offerUpdate(hb.latestApp)
             }
             else -> Unit
         }
+    }
+
+    private suspend fun offerUpdate(latest: LatestApp?) {
+        runCatching { Updater.check(app, latest, visible = true) }
+            .onSuccess { it?.let { s -> PlaybackStatus.update = s } }
+            .onFailure { PlaybackStatus.update = "failed: ${it.message}" }
     }
 
     fun reload() = viewModelScope.launch {

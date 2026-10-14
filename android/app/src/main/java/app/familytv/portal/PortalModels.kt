@@ -21,7 +21,7 @@ data class Profile(
 )
 
 data class Command(val id: String, val type: String, val payload: Map<String, Any?>?)
-data class LatestApp(val versionCode: Int, val url: String)
+data class LatestApp(val versionCode: Int, val url: String, val versionName: String? = null)
 
 data class DeviceConfig(
     val paired: Boolean,
@@ -33,7 +33,7 @@ data class DeviceConfig(
     val latestApp: LatestApp? = null,
 )
 
-data class HeartbeatResponse(val paired: Boolean, val commands: List<Command>?)
+data class HeartbeatResponse(val paired: Boolean, val commands: List<Command>?, val latestApp: LatestApp? = null)
 
 data class ReachResult(val url: String, val ok: Boolean, val status: Int?, val ms: Long?, val error: String?)
 data class ReachResponse(val results: List<ReachResult>)

@@ -13,6 +13,7 @@ export interface Env {
 }
 
 const APK_KEY = "family-tv.apk";
+const LATEST_KEY = "latest.json";
 
 const PAIR_TTL_MS = 30 * 60 * 1000;
 const COMMAND_TYPES = new Set(["refresh", "diagnose", "clear_cache", "restart", "message", "update"]);
@@ -92,9 +93,23 @@ async function takeCommands(env: Env, deviceId: string, now: number) {
   return results.map((c) => ({ id: c.id, type: c.type, payload: c.payload ? JSON.parse(c.payload) : null }));
 }
 
-function latestApp(env: Env) {
+// CI uploads latest.json next to the APK; cache it briefly so every check-in isn't an R2 read.
+let latestCache: { at: number; bucket?: R2Bucket; value: { versionCode: number; versionName?: string } | null } | null = null;
+
+export async function latestApp(env: Env, req: Request) {
+  const now = Date.now();
+  if (!latestCache || latestCache.bucket !== env.APPS || now - latestCache.at > 60_000) {
+    const obj = env.APPS ? await env.APPS.get(LATEST_KEY) : null;
+    const value = obj ? ((await obj.json().catch(() => null)) as { versionCode: number; versionName?: string } | null) : null;
+    latestCache = { at: now, bucket: env.APPS, value };
+  }
+  const published = latestCache.value;
+  if (published && Number(published.versionCode) > 0) {
+    return { versionCode: Number(published.versionCode), versionName: published.versionName ?? null, url: new URL("/tv", req.url).toString() };
+  }
+  // Manual fallback: wrangler.toml vars.
   const code = Number(env.LATEST_APP_VERSION_CODE ?? "0");
-  return code > 0 && env.LATEST_APP_URL ? { versionCode: code, url: env.LATEST_APP_URL } : null;
+  return code > 0 && env.LATEST_APP_URL ? { versionCode: code, versionName: null, url: env.LATEST_APP_URL } : null;
 }
 
 async function freshPairCode(env: Env): Promise<string> {
@@ -145,7 +160,7 @@ async function deviceConfig(req: Request, env: Env) {
     nickname: d.nickname,
     profile,
     commands: await takeCommands(env, d.id, now),
-    latestApp: latestApp(env),
+    latestApp: await latestApp(env, req),
   });
 }
 
@@ -156,7 +171,11 @@ async function deviceHeartbeat(req: Request, env: Env) {
   await env.DB.prepare("UPDATE devices SET last_seen = ?, app_version = COALESCE(?, app_version), status_json = ?, country = ? WHERE id = ?")
     .bind(now, clip(b.appVersion), JSON.stringify(b.status ?? null).slice(0, 8000), country(req), d.id)
     .run();
-  return json({ paired: !!d.profile_id, commands: d.profile_id ? await takeCommands(env, d.id, now) : [] });
+  return json({
+    paired: !!d.profile_id,
+    commands: d.profile_id ? await takeCommands(env, d.id, now) : [],
+    latestApp: d.profile_id ? await latestApp(env, req) : null,
+  });
 }
 
 async function deviceAck(req: Request, env: Env, commandId: string) {

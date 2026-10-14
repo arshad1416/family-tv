@@ -16,8 +16,9 @@ android {
         applicationId = "app.familytv"
         minSdk = 23 // Fire TV Stick 2nd gen (Fire OS 6) and every Google TV / Android TV box since 2016
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        // CI passes -PversionCode/-PversionName for each published build.
+        versionCode = (project.findProperty("versionCode") as String?)?.toInt() ?: 1
+        versionName = (project.findProperty("versionName") as String?) ?: "0.1.0"
         buildConfigField("String", "PORTAL_URL", "\"$portalUrl\"")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

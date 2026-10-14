@@ -1,6 +1,8 @@
 package app.familytv
 
+import android.app.Activity
 import android.app.Application
+import android.os.Bundle
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
@@ -19,8 +21,21 @@ class FamilyTvApp : Application() {
     val diagnoser by lazy { Diagnoser(this, db, portal) }
     val commands by lazy { CommandRunner(this) }
 
+    /** True while one of our screens is showing; background updates wait for the app to close. */
+    val visible: Boolean get() = started > 0
+    @Volatile private var started = 0
+
     override fun onCreate() {
         super.onCreate()
+        registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
+            override fun onActivityStarted(a: Activity) { started++ }
+            override fun onActivityStopped(a: Activity) { started-- }
+            override fun onActivityCreated(a: Activity, b: Bundle?) = Unit
+            override fun onActivityResumed(a: Activity) = Unit
+            override fun onActivityPaused(a: Activity) = Unit
+            override fun onActivitySaveInstanceState(a: Activity, b: Bundle) = Unit
+            override fun onActivityDestroyed(a: Activity) = Unit
+        })
         // Background check-in while the app is closed: picks up portal changes and keeps lists fresh.
         WorkManager.getInstance(this).enqueueUniquePeriodicWork(
             "sync",

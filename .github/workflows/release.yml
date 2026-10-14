@@ -1,0 +1,66 @@
+name: Release TV app
+
+# Every merge to main that touches the app builds a signed APK and publishes it to the portal's
+# R2 bucket; TVs pick it up within 30 minutes. All secrets live in Bitwarden Secrets Manager
+# (EU, project "family-tv"); GitHub only holds BWS_ACCESS_TOKEN for a read-only machine account.
+on:
+  push:
+    branches: [main]
+    paths: ["android/**", ".github/workflows/release.yml"]
+  workflow_dispatch:
+
+concurrency: release
+
+permissions:
+  contents: read
+
+env:
+  PORTAL_URL: https://familytv.arshadkazi.ca
+  BWS_VERSION: 2.0.0
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: portal/package-lock.json
+      - run: npm ci
+        working-directory: portal
+      - name: Install bws
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/bws.zip" "https://github.com/bitwarden/sdk-sm/releases/download/bws-v${BWS_VERSION}/bws-x86_64-unknown-linux-gnu-${BWS_VERSION}.zip"
+          unzip -q "$RUNNER_TEMP/bws.zip" -d "$RUNNER_TEMP/bws"
+          echo "$RUNNER_TEMP/bws" >> "$GITHUB_PATH"
+      - name: Build, sign and publish
+        env:
+          BWS_ACCESS_TOKEN: ${{ secrets.BWS_ACCESS_TOKEN }}
+          VERSION_CODE: ${{ github.run_number }}
+        run: |
+          export CODE=$((100 + VERSION_CODE)) NAME="0.2.$VERSION_CODE"
+          bws run --server-url https://vault.bitwarden.eu -- bash -euo pipefail -c '
+            echo "::add-mask::$FAMILYTV_KEYSTORE_PASSWORD"
+            echo "$FAMILYTV_KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            export FAMILYTV_KEYSTORE="$RUNNER_TEMP/release.jks"
+            export FAMILYTV_KEY_PASSWORD="$FAMILYTV_KEYSTORE_PASSWORD" FAMILYTV_KEY_ALIAS=familytv
+            (cd android && ./gradlew --no-daemon testDebugUnitTest assembleRelease \
+              -PportalUrl="$PORTAL_URL" -PversionCode="$CODE" -PversionName="$NAME")
+            apk=android/app/build/outputs/apk/release/app-release.apk
+            # Refuse to publish anything not signed with the release key, or TVs would reject it.
+            apksigner="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)/apksigner"
+            "$apksigner" verify --print-certs "$apk" | grep "CN=Family TV" > /dev/null
+            cd portal
+            npx wrangler r2 object put family-tv-apps/family-tv.apk --file "../$apk" --ct application/vnd.android.package-archive
+            printf "{\"versionCode\":%s,\"versionName\":\"%s\"}" "$CODE" "$NAME" > "$RUNNER_TEMP/latest.json"
+            npx wrangler r2 object put family-tv-apps/latest.json --file "$RUNNER_TEMP/latest.json" --ct application/json
+            rm -f "$RUNNER_TEMP/release.jks"
+          '
+          echo "Published $NAME (versionCode $CODE)" >> "$GITHUB_STEP_SUMMARY"
