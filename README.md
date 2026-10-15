@@ -117,9 +117,9 @@ passwords on a remote, and when a TV goes black the portal tells you why.
   hide, the Live TV, Movies and TV Shows categories the profile's TVs report. TVs list them in that
   order, the rest after. Each device can also arrange its own lists in Settings (Arrange categories);
   that order comes first on that device, and "Use the portal's order" undoes it.
-- **Package sorter link** (per source, optional): the provider's page where that subscriber picks and
-  orders their channels. The app shows it in Settings as a QR code and link (with an Open button on
-  phones).
+- **Package sorter link** (per line, optional, set on the Lines page): the provider's page where that
+  line's subscriber picks and orders their channels. Every profile using the line gets it, and the app
+  shows it in Settings as a QR code and link (with an Open button on phones).
 - **Suggestions** (in each TV's details): what the last check means for that TV and what to do: Ethernet
   or 5 GHz for weak or slow Wi-Fi, the host to allowlist on a home DNS filter, a one-click "use this
   server first" when a line's main server is down for everyone or much slower than its backup, and

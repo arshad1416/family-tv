@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { openJson, sealJson } from "../src/crypto";
+import { openJson, sealJson, sha256Hex } from "../src/crypto";
 import worker, { type Env } from "../src/index";
 import { MASK, type ProfileData } from "../src/model";
 import { daysLeft, loginFromLineUrl, Panel, PanelError, type LineInfo } from "../src/panel";
@@ -199,6 +199,24 @@ describe("Lines API", () => {
     const r2 = await call(env, "/api/admin/profiles", { method: "POST", body: JSON.stringify({ name: "Y", data: { sources: [{ ...picked, username: "gm1", copyOf: "gm1" }] } }) });
     const row2 = await env.DB.prepare("SELECT data_enc FROM profiles WHERE id = ?").bind(r2.data.id).first<{ data_enc: string }>();
     expect((await openJson<ProfileData>(KEY, row2!.data_enc)).sources[0].password).toBe("pw9");
+  });
+
+  it("keeps a sorter link per line and hands it to the TVs of every profile using the line", async () => {
+    const env = await setup();
+    await env.DB.prepare("INSERT INTO devices (id, token_hash, profile_id, created_at) VALUES ('d1', ?, 'p1', 0)").bind(await sha256Hex("tv-token")).run();
+    await call(env, "/api/admin/lines");
+    const link = "https://sorter.example.com/qr_edit?token=abc";
+    expect((await call(env, "/api/admin/lines/sorter", { method: "POST", body: JSON.stringify({ username: "aiyaz", sorterUrl: " " + link + " " }) })).status).toBe(200);
+    expect((await call(env, "/api/admin/lines/sorter", { method: "POST", body: JSON.stringify({ username: "aiyaz", sorterUrl: "javascript:alert(1)" }) })).status).toBe(400);
+    expect((await call(env, "/api/admin/lines")).data.lines.find((l: any) => l.username === "aiyaz").sorterUrl).toBe(link);
+    const tv = await worker.fetch(new Request("https://portal.test/api/device/config", { headers: { authorization: "Bearer tv-token" } }), env).then((r) => r.json() as any);
+    expect(tv.profile.sources.map((s: any) => s.sorterUrl)).toEqual([link, undefined, undefined]);
+    // A renewal or profile save rewrites the login but keeps the link; a blank one clears it.
+    await call(env, "/api/admin/lines/renew", { method: "POST", body: JSON.stringify({ username: "aiyaz", months: 1 }) });
+    await call(env, "/api/admin/lines/add", { method: "POST", body: JSON.stringify({ lines: [{ link: "http://line.example/get.php?username=aiyaz&password=changed" }] }) });
+    expect((await call(env, "/api/admin/lines")).data.lines.find((l: any) => l.username === "aiyaz").sorterUrl).toBe(link);
+    await call(env, "/api/admin/lines/sorter", { method: "POST", body: JSON.stringify({ username: "aiyaz", sorterUrl: "" }) });
+    expect((await call(env, "/api/admin/lines")).data.lines.find((l: any) => l.username === "aiyaz").sorterUrl).toBeNull();
   });
 
   it("says the panel isn't set up without a key", async () => {
