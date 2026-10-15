@@ -124,11 +124,13 @@ describe("Lines API", () => {
 
   it("renews with the stored login and shows the new expiry", async () => {
     const env = await setup();
-    const r = await call(env, "/api/admin/lines/renew", { method: "POST", body: JSON.stringify({ profileId: "p1", sourceId: "s1", months: 1 }) });
+    await call(env, "/api/admin/lines");
+    const r = await call(env, "/api/admin/lines/renew", { method: "POST", body: JSON.stringify({ username: "aiyaz", months: 1 }) });
     expect(r.status).toBe(200);
     expect(env.PANEL.renewed).toEqual(["aiyaz:1"]);
-    expect((await call(env, "/api/admin/lines")).data.lines.find((l: any) => l.sourceId === "s1").expire).toBe("2026-11-20");
-    expect((await call(env, "/api/admin/lines/renew", { method: "POST", body: JSON.stringify({ profileId: "p1", sourceId: "s3", months: 1 }) })).status).toBe(400);
+    expect((await call(env, "/api/admin/lines")).data.lines.find((l: any) => l.username === "aiyaz").expire).toBe("2026-11-20");
+    expect((await call(env, "/api/admin/lines/renew", { method: "POST", body: JSON.stringify({ username: "nope", months: 1 }) })).status).toBe(404);
+    expect((await call(env, "/api/admin/lines/renew", { method: "POST", body: JSON.stringify({ months: 1 }) })).status).toBe(400);
   });
 
   it("creates a line and adds it to the profile", async () => {
@@ -141,24 +143,67 @@ describe("Lines API", () => {
     expect(src.password).not.toBe("pw1"); // masked for the page
     // The profile page adds the returned source to its unsaved copy; saving that keeps the line.
     expect(r.data.source).toMatchObject({ id: r.data.sourceId, username: "new1", password: MASK });
+    expect((await call(env, "/api/admin/lines")).data.lines.find((l: any) => l.username === "new1").profiles).toEqual([{ id: "p1", name: "Aiyaz" }]);
+  });
+
+  it("creates a line without a profile; it is listed but no profile changes", async () => {
+    const env = await setup();
+    const r = await call(env, "/api/admin/lines/new", { method: "POST", body: JSON.stringify({ packageId: "3", months: 1, name: "Spare" }) });
+    expect(r.data).toEqual({ ok: true, username: "new1" });
+    const line = (await call(env, "/api/admin/lines")).data.lines.find((l: any) => l.username === "new1");
+    expect(line).toMatchObject({ name: "Spare", profiles: [], serverUrls: ["http://line.example"], expire: "2026-11-15" });
+    expect((await call(env, "/api/admin/profiles")).data.profiles[0].data.sources).toHaveLength(3);
+  });
+
+  it("adds lines that are already on the panel from their links, checking each first", async () => {
+    const env = await setup();
+    await call(env, "/api/admin/lines");
+    const r = await call(env, "/api/admin/lines/add", { method: "POST", body: JSON.stringify({ lines: [
+      { name: "Grandma", link: "http://other.example:8080/get.php?username=gm1&password=pw&type=m3u_plus" },
+      { link: "not a link" },
+      { username: "gone", password: "x" },
+      { username: "bare", password: "pw" },
+    ] }) });
+    expect(r.data.results.map((x: any) => [x.username, x.ok, x.error ?? null])).toEqual([
+      ["gm1", true, null], [null, false, "not a playlist link with a username and password"], ["gone", false, "Line not found"], ["bare", true, null],
+    ]);
+    const lines = (await call(env, "/api/admin/lines")).data.lines;
+    expect(lines.find((l: any) => l.username === "gm1")).toMatchObject({ name: "Grandma", serverUrls: ["http://other.example:8080"], profiles: [], expire: "2026-10-20" });
+    // Without a link or server, a line takes the server most lines use.
+    expect(lines.find((l: any) => l.username === "bare")).toMatchObject({ name: "bare", serverUrls: ["http://line.example"] });
+    expect(lines.map((l: any) => l.password)).toEqual([undefined, undefined, undefined, undefined]);
+  });
+
+  it("removes a line from the list only when no profile uses it", async () => {
+    const env = await setup();
+    await call(env, "/api/admin/lines");
+    await call(env, "/api/admin/lines/add", { method: "POST", body: JSON.stringify({ lines: [{ link: "http://line.example/get.php?username=gm1&password=pw" }] }) });
+    expect((await call(env, "/api/admin/lines/forget", { method: "POST", body: JSON.stringify({ username: "aiyaz" }) })).status).toBe(409);
+    expect((await call(env, "/api/admin/lines/forget", { method: "POST", body: JSON.stringify({ username: "gm1" }) })).status).toBe(200);
+    expect((await call(env, "/api/admin/lines")).data.lines.map((l: any) => l.username)).toEqual(["aiyaz", "gone"]);
   });
 
   it("copies a line picked on the profile page, password included, only when the profile is saved", async () => {
     const env = await setup();
-    const picked = { id: "n1", type: "xtream", name: "Main", serverUrls: ["http://line.example"], username: "aiyaz", password: MASK, copyOf: "p1/s1" };
+    const picked = { id: "n1", type: "xtream", name: "Main", serverUrls: ["http://line.example"], username: "aiyaz", password: MASK, copyOf: "aiyaz" };
     const r = await call(env, "/api/admin/profiles", { method: "POST", body: JSON.stringify({ name: "Grandma", data: { sources: [picked] } }) });
     expect(r.status).toBe(200);
     const row = await env.DB.prepare("SELECT data_enc FROM profiles WHERE id = ?").bind(r.data.id).first<{ data_enc: string }>();
     const stored = await openJson<ProfileData>(KEY, row!.data_enc);
     expect(stored.sources[0]).toEqual({ id: "n1", type: "xtream", name: "Main", serverUrls: ["http://line.example"], username: "aiyaz", password: "secret" });
-    // A line removed from its profile in the meantime can't be copied.
-    const gone = await call(env, "/api/admin/profiles", { method: "POST", body: JSON.stringify({ name: "X", data: { sources: [{ ...picked, copyOf: "p1/nope" }] } }) });
+    // A line that isn't on the Lines page can't be copied.
+    const gone = await call(env, "/api/admin/profiles", { method: "POST", body: JSON.stringify({ name: "X", data: { sources: [{ ...picked, copyOf: "nope" }] } }) });
     expect(gone.status).toBe(409);
+    // A line added on the Lines page (in no profile) can be.
+    await call(env, "/api/admin/lines/add", { method: "POST", body: JSON.stringify({ lines: [{ link: "http://line.example/get.php?username=gm1&password=pw9" }] }) });
+    const r2 = await call(env, "/api/admin/profiles", { method: "POST", body: JSON.stringify({ name: "Y", data: { sources: [{ ...picked, username: "gm1", copyOf: "gm1" }] } }) });
+    const row2 = await env.DB.prepare("SELECT data_enc FROM profiles WHERE id = ?").bind(r2.data.id).first<{ data_enc: string }>();
+    expect((await openJson<ProfileData>(KEY, row2!.data_enc)).sources[0].password).toBe("pw9");
   });
 
   it("says the panel isn't set up without a key", async () => {
     const env = { ...(await setup()), PANEL: undefined } as unknown as Env;
     expect((await call(env, "/api/admin/panel")).data).toEqual({ configured: false });
-    expect((await call(env, "/api/admin/lines/renew", { method: "POST", body: JSON.stringify({ profileId: "p1", sourceId: "s1", months: 1 }) })).status).toBe(404);
+    expect((await call(env, "/api/admin/lines/renew", { method: "POST", body: JSON.stringify({ username: "aiyaz", months: 1 }) })).status).toBe(404);
   });
 });

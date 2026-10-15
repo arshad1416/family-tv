@@ -10,7 +10,7 @@ export interface Source {
   m3uUrl?: string;
   epgUrl?: string;
   /**
-   * Only on the way in from the admin page: "profileId/sourceId" of the line this source was
+   * Only on the way in from the admin page: the username of the portal's line this source was
    * copied from, so its password (never sent to the page) is taken from there on save.
    */
   copyOf?: string;
@@ -97,17 +97,17 @@ export function maskSecrets(p: ProfileData): ProfileData {
 }
 
 /**
- * Puts stored secrets back where the page sent MASK. A source copied from another profile's line
- * ([Source.copyOf]) gets that line's password from [lineAt]; copyOf itself is never stored.
+ * Puts stored secrets back where the page sent MASK. A source copied from one of the portal's lines
+ * ([Source.copyOf]) gets that line's password from [passwordOf]; copyOf itself is never stored.
  */
-export function mergeSecrets(incoming: ProfileData, existing: ProfileData | null, lineAt?: (key: string) => Source | undefined): ProfileData {
+export function mergeSecrets(incoming: ProfileData, existing: ProfileData | null, passwordOf?: (username: string) => string | undefined): ProfileData {
   const old = new Map((existing?.sources ?? []).map((s) => [s.id, s]));
   return {
     ...incoming,
     parentalPin: incoming.parentalPin === MASK ? existing?.parentalPin : incoming.parentalPin,
     sources: incoming.sources.map(({ copyOf, ...s }) => ({
       ...s,
-      password: s.password === MASK ? (old.get(s.id)?.password ?? (copyOf ? lineAt?.(copyOf)?.password : undefined)) : s.password,
+      password: s.password === MASK ? (old.get(s.id)?.password ?? (copyOf ? passwordOf?.(copyOf) : undefined)) : s.password,
     })),
   };
 }

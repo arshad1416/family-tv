@@ -524,18 +524,21 @@ async function adminSaveProfile(req: Request, env: Env, id: string | null) {
     throw new HttpError(400, (e as Error).message);
   }
   const now = Date.now();
-  // Lines picked from other profiles on the page: their passwords come from where they are stored.
-  const copies = data.sources.filter((s) => s.copyOf);
-  let lineAt: ((key: string) => Source | undefined) | undefined;
-  if (copies.length) {
-    const lines = new Map((await allProfiles(env)).flatMap((pr) => pr.data.sources.map((s) => [pr.id + "/" + s.id, s] as const)));
-    for (const s of copies) if (!lines.has(s.copyOf!)) throw new HttpError(409, `${s.name}: the line it was copied from is gone; pick it again`);
-    lineAt = (key) => lines.get(key);
+  // Lines picked from the portal's list on the page: their passwords come from that list.
+  const passwords = new Map<string, string>();
+  const copies = data.sources.filter((x) => x.copyOf);
+  // A line that so far only lives in another profile joins the list first.
+  if (copies.length) await rememberLines(env, (await allProfiles(env)).flatMap((pr) => pr.data.sources), false);
+  for (const s of copies) {
+    const line = await lineByUsername(env, s.copyOf!);
+    if (!line) throw new HttpError(409, `${s.name}: that line is no longer on the Lines page; pick it again`);
+    passwords.set(line.username, line.password);
   }
+  const passwordOf = (username: string) => passwords.get(username);
   if (id) {
     const existing = await loadProfile(env, id);
     if (!existing) throw new HttpError(404, "profile not found");
-    data = mergeSecrets(data, existing, lineAt);
+    data = mergeSecrets(data, existing, passwordOf);
     await env.DB.prepare("UPDATE profiles SET name = ?, data_enc = ?, updated_at = ? WHERE id = ?")
       .bind(b.name.trim(), await sealJson(env.CONFIG_KEY, data), now, id)
       .run();
@@ -544,11 +547,12 @@ async function adminSaveProfile(req: Request, env: Env, id: string | null) {
     for (const d of results) await queueCommand(env, d.id, "refresh", null);
   } else {
     id = randomId(8);
-    data = mergeSecrets(data, null, lineAt);
+    data = mergeSecrets(data, null, passwordOf);
     await env.DB.prepare("INSERT INTO profiles (id, name, data_enc, created_at, updated_at) VALUES (?,?,?,?,?)")
       .bind(id, b.name.trim(), await sealJson(env.CONFIG_KEY, data), now, now)
       .run();
   }
+  await rememberLines(env, data.sources, true);
   return json({ id });
 }
 
@@ -588,140 +592,242 @@ async function adminPanel(env: Env) {
   }
 }
 
+/** One of the portal's lines, as stored: the login is encrypted, the panel's answers are not. */
 interface LineRow {
-  profile_id: string;
-  source_id: string;
   username: string;
+  data_enc: string;
   expire: string | null;
   enabled: number | null;
   max_connections: number | null;
   note: string | null;
   error: string | null;
-  checked_at: number;
+  checked_at: number | null;
 }
+
+/** The encrypted part of a line: what a profile needs to use it. */
+interface LineLogin {
+  name: string;
+  serverUrls: string[];
+  password: string;
+}
+
+type Line = Omit<LineRow, "data_enc"> & LineLogin;
+
+const MAX_ADD_LINES = 50;
 
 async function allProfiles(env: Env) {
   const { results } = await env.DB.prepare("SELECT id, name, data_enc FROM profiles ORDER BY name").all<{ id: string; name: string; data_enc: string }>();
   return Promise.all(results.map(async (r) => ({ id: r.id, name: r.name, data: await openJson<ProfileData>(env.CONFIG_KEY, r.data_enc) })));
 }
 
-async function checkLine(env: Env, p: Panel, profileId: string, sourceId: string, username: string, password: string) {
+async function allLines(env: Env): Promise<Line[]> {
+  const { results } = await env.DB.prepare("SELECT * FROM lines").all<LineRow>();
+  return Promise.all(results.map(async ({ data_enc, ...r }) => ({ ...r, ...(await openJson<LineLogin>(env.CONFIG_KEY, data_enc)) })));
+}
+
+async function lineByUsername(env: Env, username: string): Promise<Line | null> {
+  const r = await env.DB.prepare("SELECT * FROM lines WHERE username = ?").bind(username).first<LineRow>();
+  if (!r) return null;
+  const { data_enc, ...rest } = r;
+  return { ...rest, ...(await openJson<LineLogin>(env.CONFIG_KEY, data_enc)) };
+}
+
+/** Adds a line, or updates its login (a changed login is checked again). The name only fills a blank. */
+async function saveLine(env: Env, username: string, login: LineLogin) {
+  const old = await lineByUsername(env, username);
+  if (!old) {
+    await env.DB.prepare("INSERT INTO lines (username, data_enc, created_at) VALUES (?,?,?)").bind(username, await sealJson(env.CONFIG_KEY, login), Date.now()).run();
+    return;
+  }
+  const next: LineLogin = { name: old.name || login.name, serverUrls: login.serverUrls.length ? login.serverUrls : old.serverUrls, password: login.password };
+  if (next.password === old.password && next.serverUrls.join() === old.serverUrls.join() && next.name === old.name) return;
+  const recheck = next.password !== old.password;
+  await env.DB.prepare(`UPDATE lines SET data_enc = ?${recheck ? ", checked_at = NULL" : ""} WHERE username = ?`)
+    .bind(await sealJson(env.CONFIG_KEY, next), username)
+    .run();
+}
+
+const xtreamLogins = (sources: Source[]) => sources.filter((s) => s.type === "xtream" && s.username && s.password && s.serverUrls?.length);
+
+/**
+ * Makes sure the portal's line list has every Xtream login in [sources]. With [update], a login
+ * that changed in a profile updates the line too (a profile save); otherwise only new ones are added.
+ */
+async function rememberLines(env: Env, sources: Source[], update: boolean) {
+  const known = update ? new Set<string>() : new Set((await env.DB.prepare("SELECT username FROM lines").all<{ username: string }>()).results.map((r) => r.username));
+  for (const s of xtreamLogins(sources)) {
+    if (known.has(s.username!)) continue;
+    known.add(s.username!);
+    await saveLine(env, s.username!, { name: s.name, serverUrls: s.serverUrls!, password: s.password! });
+  }
+}
+
+async function checkLine(env: Env, p: Panel, username: string, password: string) {
   const now = Date.now();
   try {
     const l = await p.line(username, password);
-    await env.DB.prepare(
-      `INSERT INTO line_status (profile_id, source_id, username, expire, enabled, max_connections, note, error, checked_at) VALUES (?,?,?,?,?,?,?,NULL,?)
-       ON CONFLICT (profile_id, source_id) DO UPDATE SET username = excluded.username, expire = excluded.expire, enabled = excluded.enabled,
-         max_connections = excluded.max_connections, note = excluded.note, error = NULL, checked_at = excluded.checked_at`,
-    )
-      .bind(profileId, sourceId, username, l.expire, l.enabled ? 1 : 0, l.maxConnections, l.note, now)
+    await env.DB.prepare("UPDATE lines SET expire = ?, enabled = ?, max_connections = ?, note = ?, error = NULL, checked_at = ? WHERE username = ?")
+      .bind(l.expire, l.enabled ? 1 : 0, l.maxConnections, l.note, now, username)
       .run();
+    return null;
   } catch (e) {
     if (!(e instanceof PanelError)) throw e;
     // Keep the last good expiry on screen; just note why this check failed.
-    await env.DB.prepare(
-      `INSERT INTO line_status (profile_id, source_id, username, error, checked_at) VALUES (?,?,?,?,?)
-       ON CONFLICT (profile_id, source_id) DO UPDATE SET username = excluded.username, error = excluded.error, checked_at = excluded.checked_at`,
-    )
-      .bind(profileId, sourceId, username, e.message, now)
-      .run();
+    await env.DB.prepare("UPDATE lines SET error = ?, checked_at = ? WHERE username = ?").bind(e.message, now, username).run();
+    return e.message;
   }
 }
 
 /**
- * Every Xtream login across the profiles, with what the panel last said about it. Lines not
- * checked for [LINE_STALE_MS] (or all, with [force]) are re-checked one at a time, gently.
+ * Every line the portal knows (each profile's Xtream logins, plus lines added on the Lines page),
+ * with what the panel last said about it and the profiles that use it. Lines not checked for
+ * [LINE_STALE_MS] (or all, with [force]) are re-checked one at a time, gently.
  */
 async function adminLines(env: Env, force: boolean) {
   const profiles = await allProfiles(env);
-  const { results } = await env.DB.prepare("SELECT * FROM line_status").all<LineRow>();
-  const known = new Map(results.map((r) => [r.profile_id + "/" + r.source_id, r]));
-  const logins = profiles.flatMap((pr) =>
-    pr.data.sources.filter((s) => s.type === "xtream" && s.username && s.password).map((s) => ({ profile: pr, source: s })),
-  );
+  await rememberLines(env, profiles.flatMap((pr) => pr.data.sources), false);
+  let lines = await allLines(env);
   if (panelConfigured(env)) {
     const p = panel(env);
     const now = Date.now();
-    for (const { profile, source } of logins) {
-      const row = known.get(profile.id + "/" + source.id);
-      if (force || !row || row.username !== source.username || now - row.checked_at > LINE_STALE_MS) {
-        await checkLine(env, p, profile.id, source.id, source.username!, source.password!);
-      }
+    const stale = lines.filter((l) => force || l.checked_at == null || now - l.checked_at > LINE_STALE_MS);
+    for (const l of stale) await checkLine(env, p, l.username, l.password);
+    if (stale.length) lines = await allLines(env);
+  }
+  const usedBy = new Map<string, { id: string; name: string }[]>();
+  for (const pr of profiles) {
+    for (const s of xtreamLogins(pr.data.sources)) {
+      const list = usedBy.get(s.username!) ?? [];
+      if (!list.some((x) => x.id === pr.id)) list.push({ id: pr.id, name: pr.name });
+      usedBy.set(s.username!, list);
     }
   }
-  // Forget lines whose source was removed from its profile.
-  const live = new Set(logins.map((l) => l.profile.id + "/" + l.source.id));
-  const gone = results.filter((r) => !live.has(r.profile_id + "/" + r.source_id));
-  if (gone.length) await env.DB.batch(gone.map((r) => env.DB.prepare("DELETE FROM line_status WHERE profile_id = ? AND source_id = ?").bind(r.profile_id, r.source_id)));
-  const fresh = new Map((await env.DB.prepare("SELECT * FROM line_status").all<LineRow>()).results.map((r) => [r.profile_id + "/" + r.source_id, r]));
-  const lines = logins.map(({ profile, source }) => {
-    const r = fresh.get(profile.id + "/" + source.id);
-    return {
-      profileId: profile.id,
-      profileName: profile.name,
-      sourceId: source.id,
-      sourceName: source.name,
-      username: source.username,
-      expire: r?.expire ?? null,
-      daysLeft: r?.expire ? daysLeft(r.expire) : null,
-      enabled: r?.enabled == null ? null : r.enabled === 1,
-      maxConnections: r?.max_connections ?? null,
-      note: r?.note ?? null,
-      error: r?.error ?? null,
-      checkedAt: r?.checked_at ?? null,
-    };
-  });
-  lines.sort((a, b) => (a.daysLeft ?? 1e9) - (b.daysLeft ?? 1e9));
-  return json({ configured: panelConfigured(env), lines });
+  const out = lines.map((l) => ({
+    username: l.username,
+    name: l.name,
+    serverUrls: l.serverUrls,
+    profiles: usedBy.get(l.username) ?? [],
+    expire: l.expire,
+    daysLeft: l.expire ? daysLeft(l.expire) : null,
+    enabled: l.enabled == null ? null : l.enabled === 1,
+    maxConnections: l.max_connections,
+    note: l.note,
+    error: l.error,
+    checkedAt: l.checked_at,
+  }));
+  out.sort((a, b) => (a.daysLeft ?? 1e9) - (b.daysLeft ?? 1e9) || a.name.localeCompare(b.name));
+  return json({ configured: panelConfigured(env), lines: out });
 }
 
-async function findLogin(env: Env, profileId: unknown, sourceId: unknown) {
-  if (typeof profileId !== "string" || typeof sourceId !== "string") throw new HttpError(400, "profileId and sourceId are required");
-  const profile = await loadProfile(env, profileId);
-  const source = profile?.sources.find((s) => s.id === sourceId);
-  if (!source) throw new HttpError(404, "line not found");
-  if (source.type !== "xtream" || !source.username || !source.password) throw new HttpError(400, "only Xtream logins can be renewed");
-  return { username: source.username, password: source.password };
+async function findLine(env: Env, username: unknown) {
+  if (typeof username !== "string" || !username) throw new HttpError(400, "username is required");
+  const line = await lineByUsername(env, username);
+  if (!line) throw new HttpError(404, "line not found");
+  return line;
 }
 
 /** Spends credits: the admin page confirms first. */
 async function adminRenewLine(req: Request, env: Env) {
-  const b = await body<{ profileId?: unknown; sourceId?: unknown; months?: unknown }>(req);
+  const b = await body<{ username?: unknown; months?: unknown }>(req);
   const months = Number(b.months);
   if (!RENEW_MONTHS.includes(months)) throw new HttpError(400, `months must be one of ${RENEW_MONTHS.join(", ")}`);
-  const login = await findLogin(env, b.profileId, b.sourceId);
+  const line = await findLine(env, b.username);
   const p = panel(env);
-  await viaPanel(() => p.renew(login.username, login.password, months));
-  await checkLine(env, p, b.profileId as string, b.sourceId as string, login.username, login.password);
+  await viaPanel(() => p.renew(line.username, line.password, months));
+  await checkLine(env, p, line.username, line.password);
+  return json({ ok: true });
+}
+
+/** The server most of the portal's lines use, for a line added without one. */
+function usualServer(lines: Line[]): string[] {
+  const count = new Map<string, number>();
+  for (const l of lines) if (l.serverUrls[0]) count.set(l.serverUrls[0], (count.get(l.serverUrls[0]) ?? 0) + 1);
+  const best = [...count].sort((a, b) => b[1] - a[1])[0];
+  return best ? [best[0]] : [];
+}
+
+/**
+ * Adds lines that already exist on the panel to the portal's list, from their playlist links or
+ * logins. Each is looked up on the panel first (read-only), so a typo isn't saved as a line.
+ */
+async function adminAddLines(req: Request, env: Env) {
+  const b = await body<{ lines?: unknown }>(req);
+  if (!Array.isArray(b.lines) || !b.lines.length) throw new HttpError(400, "lines is required");
+  if (b.lines.length > MAX_ADD_LINES) throw new HttpError(400, `at most ${MAX_ADD_LINES} lines at a time`);
+  const p = panel(env);
+  const fallback = usualServer(await allLines(env));
+  const results: { username: string | null; ok: boolean; error?: string; expire?: string }[] = [];
+  for (const raw of b.lines as Record<string, unknown>[]) {
+    const text = (k: string) => (typeof raw?.[k] === "string" ? (raw[k] as string).trim() : "");
+    const fromLink = text("link") ? loginFromLineUrl(text("link")) : null;
+    if (text("link") && !fromLink) {
+      results.push({ username: null, ok: false, error: "not a playlist link with a username and password" });
+      continue;
+    }
+    const username = fromLink?.username ?? text("username");
+    const password = fromLink?.password ?? text("password");
+    const serverUrls = fromLink ? [fromLink.serverUrl] : text("serverUrl") ? [text("serverUrl").replace(/\/+$/, "")] : fallback;
+    if (!username || !password) {
+      results.push({ username: username || null, ok: false, error: "username and password are required" });
+      continue;
+    }
+    if (!serverUrls.length || !/^https?:\/\//.test(serverUrls[0])) {
+      results.push({ username, ok: false, error: "needs the line's server address" });
+      continue;
+    }
+    let expire: string;
+    try {
+      expire = (await p.line(username, password)).expire;
+    } catch (e) {
+      if (!(e instanceof PanelError)) throw e;
+      results.push({ username, ok: false, error: e.message });
+      continue;
+    }
+    await saveLine(env, username, { name: text("name").slice(0, 60) || username, serverUrls, password });
+    await checkLine(env, p, username, password);
+    results.push({ username, ok: true, expire });
+  }
+  return json({ results });
+}
+
+/** Takes a line off the portal's list. The line itself stays on the panel. */
+async function adminForgetLine(req: Request, env: Env) {
+  const b = await body<{ username?: unknown }>(req);
+  const line = await findLine(env, b.username);
+  const users = (await allProfiles(env)).filter((pr) => xtreamLogins(pr.data.sources).some((s) => s.username === line.username));
+  if (users.length) throw new HttpError(409, `${users.map((u) => u.name).join(", ")} still use this line; remove it from the profile first`);
+  await env.DB.prepare("DELETE FROM lines WHERE username = ?").bind(line.username).run();
   return json({ ok: true });
 }
 
 /**
- * Creates a line on the panel (spends credits) and adds it to the profile as an Xtream source,
- * so the profile's TVs pick it up on their next check-in.
+ * Creates a line on the panel (spends credits) and adds it to the portal's lines. With a profile,
+ * it also goes into that profile as an Xtream source, so its TVs pick it up on their next check-in.
  */
 async function adminNewLine(req: Request, env: Env) {
   const b = await body<{ profileId?: unknown; packageId?: unknown; months?: unknown; name?: unknown }>(req);
   const months = Number(b.months);
   if (!RENEW_MONTHS.includes(months)) throw new HttpError(400, `months must be one of ${RENEW_MONTHS.join(", ")}`);
-  if (typeof b.profileId !== "string" || typeof b.packageId !== "string" || !b.packageId) throw new HttpError(400, "profileId and packageId are required");
-  const profileId = b.profileId;
-  const row = await env.DB.prepare("SELECT name FROM profiles WHERE id = ?").bind(profileId).first<{ name: string }>();
-  const profile = await loadProfile(env, profileId);
-  if (!row || !profile) throw new HttpError(404, "profile not found");
+  if (typeof b.packageId !== "string" || !b.packageId) throw new HttpError(400, "packageId is required");
+  const profileId = typeof b.profileId === "string" && b.profileId ? b.profileId : null;
+  const row = profileId ? await env.DB.prepare("SELECT name FROM profiles WHERE id = ?").bind(profileId).first<{ name: string }>() : null;
+  const profile = profileId ? await loadProfile(env, profileId) : null;
+  if (profileId && (!row || !profile)) throw new HttpError(404, "profile not found");
+  const name = typeof b.name === "string" && b.name.trim() ? b.name.trim().slice(0, 60) : "8K line";
   const p = panel(env);
-  const created = await viaPanel(() => p.newLine(months, b.packageId as string, `Family TV: ${row.name}`.slice(0, 100)));
+  const created = await viaPanel(() => p.newLine(months, b.packageId as string, `Family TV: ${row?.name ?? name}`.slice(0, 100)));
   const login = loginFromLineUrl(created.url);
   // The credits are spent either way; hand back the link so the line can be added by hand.
-  if (!login) return json({ ok: false, url: created.url, error: "Line created, but its link wasn't a normal Xtream link. Add it to the profile by hand." });
+  if (!login) return json({ ok: false, url: created.url, error: "Line created, but its link wasn't a normal Xtream link. Add it by hand." });
+  await saveLine(env, login.username, { name, serverUrls: [login.serverUrl], password: login.password });
+  await checkLine(env, p, login.username, login.password);
+  if (!profile) return json({ ok: true, username: login.username });
   const sourceId = crypto.randomUUID();
-  const name = typeof b.name === "string" && b.name.trim() ? b.name.trim().slice(0, 60) : "8K line";
   const source: Source = { id: sourceId, type: "xtream", name, serverUrls: [login.serverUrl], username: login.username, password: login.password };
   profile.sources.push(source);
   await env.DB.prepare("UPDATE profiles SET data_enc = ?, updated_at = ? WHERE id = ?").bind(await sealJson(env.CONFIG_KEY, profile), Date.now(), profileId).run();
   const { results } = await env.DB.prepare("SELECT id FROM devices WHERE profile_id = ?").bind(profileId).all<{ id: string }>();
   for (const d of results) await queueCommand(env, d.id, "refresh", null);
-  await checkLine(env, p, profileId, sourceId, login.username, login.password);
   // The profile page adds this to its unsaved copy, so a later Save there keeps the line.
   return json({ ok: true, sourceId, username: login.username, source: { ...source, password: MASK } });
 }
@@ -793,6 +899,8 @@ export async function handle(req: Request, env: Env): Promise<Response> {
     if (m === "GET" && p === "/api/admin/lines") return adminLines(env, url.searchParams.get("refresh") === "1");
     if (m === "POST" && p === "/api/admin/lines/renew") return adminRenewLine(req, env);
     if (m === "POST" && p === "/api/admin/lines/new") return adminNewLine(req, env);
+    if (m === "POST" && p === "/api/admin/lines/add") return adminAddLines(req, env);
+    if (m === "POST" && p === "/api/admin/lines/forget") return adminForgetLine(req, env);
     if (m === "GET" && (mm = p.match(/^\/api\/admin\/profiles\/([a-f0-9]+)\/categories$/))) return adminProfileCategories(env, mm[1]);
     if (m === "POST" && (mm = p.match(/^\/api\/admin\/profiles\/([a-f0-9]+)\/primary-server$/))) return adminPreferServer(req, env, mm[1]);
     if ((mm = p.match(/^\/api\/admin\/profiles\/([a-f0-9]+)$/))) {
