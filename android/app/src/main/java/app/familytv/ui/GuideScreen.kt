@@ -33,6 +33,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -55,15 +56,20 @@ import app.familytv.data.NowNext
 import app.familytv.portal.Profile
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.launch
 
 private const val SLOT = 30 * 60_000L
 private const val HOURS = 6
-private val SLOT_W = 190.dp
-private val CHAN_W = 230.dp
-private val ROW_H = 60.dp
-private val GRID_W = SLOT_W * (HOURS * 2)
 
-private fun span(ms: Long): Dp = SLOT_W * (ms.toFloat() / SLOT)
+/** Grid geometry per form factor. TV keeps its original sizes; a phone pins only logo and number. */
+private class GuideDims(val slotW: Dp, val chanW: Dp, val rowH: Dp) {
+    val gridW = slotW * (HOURS * 2)
+    fun span(ms: Long): Dp = slotW * (ms.toFloat() / SLOT)
+}
+
+private val TV_DIMS = GuideDims(slotW = 190.dp, chanW = 230.dp, rowH = 60.dp)
+private val PHONE_DIMS = GuideDims(slotW = 132.dp, chanW = 64.dp, rowH = 64.dp)
+private val TABLET_DIMS = GuideDims(slotW = 170.dp, chanW = 200.dp, rowH = 64.dp)
 
 // Android TV's default keeps the focused item pinned 30% in, which would jerk every row sideways
 // on each Up/Down; the interface default only scrolls as far as needed to show the cell.
@@ -91,17 +97,27 @@ fun GuideScreen(vm: MainViewModel, profile: Profile) {
     val progs = rememberProgrammes(channels, from = start, hours = HOURS)
     val focus = remember { mutableStateOf<GuideFocus?>(null) }
     val scroll = rememberScrollState()
+    val form = LocalFormFactor.current
+    val d = when (form) { FormFactor.Tv -> TV_DIMS; FormFactor.Phone -> PHONE_DIMS; FormFactor.Tablet -> TABLET_DIMS }
+    val scope = rememberCoroutineScope()
     if (cats.isEmpty()) return EmptyState("No guide yet.")
     Column {
-        GuideHeader(focus, now)
-        CategoryChips(cats, cat) { cat = it }
-        Spacer(Modifier.height(12.dp))
-        TimeBar(start, scroll, now)
+        // The TV header follows D-pad focus; touch has no focus to follow, so it gets a jump-to-now bar instead.
+        if (form.touch) {
+            CategoryChips(cats, cat) { cat = it }
+            Spacer(Modifier.height(8.dp))
+            NowBar(now) { scope.launch { scroll.animateScrollTo(0) } }
+        } else {
+            GuideHeader(focus, now)
+            CategoryChips(cats, cat) { cat = it }
+        }
+        Spacer(Modifier.height(if (form.touch) 4.dp else 12.dp))
+        TimeBar(d, start, scroll, now)
         Spacer(Modifier.height(6.dp))
         LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp), contentPadding = PaddingValues(bottom = 32.dp)) {
             itemsIndexed(channels, key = { _, c -> c.streamId }) { i, c ->
                 GuideRow(
-                    c, c.epgId?.let { progs[it] }.orEmpty(), start, scroll, now, entry = i == 0,
+                    d, c, c.epgId?.let { progs[it] }.orEmpty(), start, scroll, now, entry = i == 0, compact = form == FormFactor.Phone,
                     onFocus = { focus.value = GuideFocus(c, it) },
                     onPlay = { playLive(ctx, c.sourceId, c.categoryId, i) },
                 )
@@ -136,17 +152,26 @@ private fun GuideHeader(focus: MutableState<GuideFocus?>, now: State<Long>) {
     }
 }
 
+/** Touch guide: the clock and a button that scrolls the grid back to the current half hour. */
 @Composable
-private fun TimeBar(start: Long, scroll: ScrollState, now: State<Long>) {
+private fun NowBar(now: State<Long>, onNow: () -> Unit) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text("Now ${time(now.value)}", fontSize = 15.sp, color = Tv.Muted, modifier = Modifier.weight(1f))
+        TvButton("Jump to now", onNow)
+    }
+}
+
+@Composable
+private fun TimeBar(d: GuideDims, start: Long, scroll: ScrollState, now: State<Long>) {
     Row(Modifier.fillMaxWidth().height(30.dp)) {
-        Box(Modifier.width(CHAN_W).fillMaxHeight(), contentAlignment = Alignment.CenterStart) {
-            Text("Today", fontSize = 14.sp, color = Tv.Muted, modifier = Modifier.padding(start = 10.dp))
+        Box(Modifier.width(d.chanW).fillMaxHeight(), contentAlignment = Alignment.CenterStart) {
+            Text("Today", fontSize = 14.sp, color = Tv.Muted, maxLines = 1, modifier = Modifier.padding(start = 10.dp))
         }
         Spacer(Modifier.width(4.dp))
         Box(Modifier.weight(1f).fillMaxHeight().horizontalScroll(scroll, enabled = false)) {
-            Box(Modifier.width(GRID_W).fillMaxHeight().nowLine(start, now, Tv.Accent)) {
+            Box(Modifier.width(d.gridW).fillMaxHeight().nowLine(d, start, now, Tv.Accent)) {
                 repeat(HOURS * 2) { k ->
-                    Box(Modifier.offset(x = SLOT_W * k).width(SLOT_W).fillMaxHeight().padding(start = 1.dp).background(Tv.Panel), contentAlignment = Alignment.CenterStart) {
+                    Box(Modifier.offset(x = d.slotW * k).width(d.slotW).fillMaxHeight().padding(start = 1.dp).background(Tv.Panel), contentAlignment = Alignment.CenterStart) {
                         Text(time(start + k * SLOT), fontSize = 13.sp, color = Tv.Muted, modifier = Modifier.padding(start = 10.dp))
                     }
                 }
@@ -158,35 +183,47 @@ private fun TimeBar(start: Long, scroll: ScrollState, now: State<Long>) {
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun GuideRow(
+    d: GuideDims,
     c: ChannelEntity,
     list: List<NowNext>,
     start: Long,
     scroll: ScrollState,
     now: State<Long>,
     entry: Boolean,
+    compact: Boolean,
     onFocus: (NowNext?) -> Unit,
     onPlay: () -> Unit,
 ) {
     val end = start + HOURS * 3_600_000L
     CompositionLocalProvider(LocalBringIntoViewSpec provides MinimalScroll) {
-        Row(Modifier.fillMaxWidth().height(ROW_H)) {
-            Row(Modifier.width(CHAN_W).fillMaxHeight().background(Tv.Panel, RoundedCornerShape(8.dp)).padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("${c.num}", Modifier.width(42.dp), fontSize = 14.sp, color = Tv.Muted)
-                Logo(c.logo, 40)
-                Spacer(Modifier.width(10.dp))
-                Text(c.name, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        Row(Modifier.fillMaxWidth().height(d.rowH)) {
+            if (compact) {
+                // Phone: logo over number, pinned left, and the whole tile tunes like the cells do.
+                FocusBox(onClick = onPlay, modifier = Modifier.width(d.chanW).fillMaxHeight(), shape = RoundedCornerShape(8.dp), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Logo(c.logo, 34)
+                        Text("${c.num}", fontSize = 12.sp, color = Tv.Muted, maxLines = 1)
+                    }
+                }
+            } else {
+                Row(Modifier.width(d.chanW).fillMaxHeight().background(Tv.Panel, RoundedCornerShape(8.dp)).padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("${c.num}", Modifier.width(42.dp), fontSize = 14.sp, color = Tv.Muted)
+                    Logo(c.logo, 40)
+                    Spacer(Modifier.width(10.dp))
+                    Text(c.name, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
             }
             Spacer(Modifier.width(4.dp))
             Box(Modifier.weight(1f).fillMaxHeight().horizontalScroll(scroll)) {
-                Box(Modifier.width(GRID_W).fillMaxHeight().nowLine(start, now, Tv.Accent)) {
+                Box(Modifier.width(d.gridW).fillMaxHeight().nowLine(d, start, now, Tv.Accent)) {
                     val cells = list.filter { minOf(it.stop, end) > maxOf(it.start, start) }
                     if (cells.isEmpty()) {
-                        GuideCell("No guide information", null, 0.dp, SLOT_W * 4, onAir = false, entryPoint(entry), { onFocus(null) }, onPlay)
+                        GuideCell(if (compact) c.name else "No guide information", if (compact) "No guide information" else null, 0.dp, d.slotW * 4, onAir = false, entryPoint(entry), { onFocus(null) }, onPlay)
                     }
                     cells.forEachIndexed { i, p ->
                         val s = maxOf(p.start, start)
                         GuideCell(
-                            p.title, "${time(p.start)} – ${time(p.stop)}", span(s - start), span(minOf(p.stop, end) - s),
+                            p.title, "${time(p.start)} – ${time(p.stop)}", d.span(s - start), d.span(minOf(p.stop, end) - s),
                             onAir = p.start <= now.value && now.value < p.stop, entryPoint(entry && i == 0), { onFocus(p) }, onPlay,
                         )
                     }
@@ -210,8 +247,8 @@ private fun GuideCell(title: String, times: String?, x: Dp, w: Dp, onAir: Boolea
 }
 
 /** Vertical "now" marker; reads the clock at draw time so ticking doesn't recompose rows. */
-private fun Modifier.nowLine(start: Long, now: State<Long>, color: Color) = drawWithContent {
+private fun Modifier.nowLine(d: GuideDims, start: Long, now: State<Long>, color: Color) = drawWithContent {
     drawContent()
-    val x = (now.value - start).toFloat() / SLOT * SLOT_W.toPx()
+    val x = (now.value - start).toFloat() / SLOT * d.slotW.toPx()
     drawRect(color, topLeft = Offset(x - 1.dp.toPx(), 0f), size = Size(2.dp.toPx(), size.height))
 }

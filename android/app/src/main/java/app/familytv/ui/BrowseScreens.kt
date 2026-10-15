@@ -11,8 +11,10 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -101,16 +103,21 @@ fun EpisodeList(profile: Profile, s: SeriesEntity, onBack: () -> Unit) {
         val src = profile.sources.firstOrNull { it.id == s.sourceId }
         episodes = if (src == null) emptyList() else runCatching { ctx.app.catalog.episodes(s.sourceId, s.seriesId, src) }.getOrDefault(emptyList())
     }
-    LaunchedEffect(episodes) { if (episodes != null) { delay(50); runCatching { first.requestFocus() } } }
+    val form = LocalFormFactor.current
+    // Touch: focus would paint the first episode blue, so only TV moves focus into the list.
+    LaunchedEffect(episodes) { if (episodes != null && !form.touch) { delay(50); runCatching { first.requestFocus() } } }
     Row(horizontalArrangement = Arrangement.spacedBy(32.dp)) {
-        Column(Modifier.width(220.dp)) {
+        // A phone has no room beside the list for the poster; its plot goes above the episodes instead.
+        if (form != FormFactor.Phone) Column(Modifier.width(220.dp)) {
             Box(Modifier.fillMaxWidth().height(330.dp).padding(bottom = 12.dp)) {
                 if (s.poster != null) AsyncImage(s.poster, contentDescription = null, modifier = Modifier.fillMaxSize())
             }
             s.plot?.let { Text(it, fontSize = 13.sp, color = Tv.Muted, maxLines = 8, overflow = TextOverflow.Ellipsis) }
         }
         Column(Modifier.weight(1f)) {
-            Text(s.name, fontSize = 28.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (form.touch) TvButton("‹  Back", onBack, Modifier.padding(bottom = 8.dp))
+            Text(s.name, fontSize = if (form == FormFactor.Phone) 22.sp else 28.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            if (form == FormFactor.Phone) s.plot?.let { Text(it, fontSize = 13.sp, color = Tv.Muted, maxLines = 3, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp)) }
             Spacer(Modifier.height(12.dp))
             val eps = episodes
             when {
@@ -124,7 +131,7 @@ fun EpisodeList(profile: Profile, s: SeriesEntity, onBack: () -> Unit) {
                     itemsIndexed(eps, key = { _, e -> e.id }) { i, e ->
                         FocusBox(
                             onClick = { scope.launch { Streams(ctx.app.db, profile).episode(s.sourceId, e)?.let { play(ctx, it, "S${e.season} E${e.episode} ${e.title}") } } },
-                            modifier = Modifier.fillMaxWidth().then(if (i == 0) Modifier.focusRequester(first) else Modifier),
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).then(if (i == 0) Modifier.focusRequester(first) else Modifier),
                         ) { focused ->
                             Column(Modifier.padding(horizontal = 18.dp, vertical = 12.dp)) {
                                 Text("S${e.season} E${e.episode}  ${e.title}", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -149,7 +156,7 @@ private fun selectedCategory(cats: List<CategoryEntity>): Pair<CategoryEntity?, 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 private fun CategoryColumn(cats: List<CategoryEntity>, selected: CategoryEntity?, onSelect: (CategoryEntity) -> Unit) {
-    LazyColumn(Modifier.width(270.dp).fillMaxHeight().focusRestorer(), verticalArrangement = Arrangement.spacedBy(4.dp), contentPadding = PaddingValues(bottom = 32.dp)) {
+    LazyColumn(Modifier.width(if (LocalFormFactor.current.touch) 220.dp else 270.dp).fillMaxHeight().focusRestorer(), verticalArrangement = Arrangement.spacedBy(4.dp), contentPadding = PaddingValues(bottom = 32.dp)) {
         items(cats, key = { "${it.sourceId}/${it.categoryId}" }) { c ->
             FocusBox(onClick = { onSelect(c) }, selected = c == selected, color = Color.Transparent, modifier = Modifier.fillMaxWidth()) { focused ->
                 Text(
@@ -168,7 +175,8 @@ private fun CategoryColumn(cats: List<CategoryEntity>, selected: CategoryEntity?
 fun CategoryChips(cats: List<CategoryEntity>, selected: CategoryEntity?, onSelect: (CategoryEntity) -> Unit) {
     LazyRow(Modifier.fillMaxWidth().focusRestorer(), horizontalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(end = 40.dp)) {
         items(cats, key = { "${it.sourceId}/${it.categoryId}" }) { c ->
-            FocusBox(onClick = { onSelect(c) }, selected = c == selected, color = Tv.Panel, shape = RoundedCornerShape(20.dp)) { focused ->
+            val minH = if (LocalFormFactor.current.touch) 48.dp else 0.dp
+            FocusBox(onClick = { onSelect(c) }, selected = c == selected, color = Tv.Panel, shape = RoundedCornerShape(20.dp), modifier = Modifier.heightIn(min = minH), contentAlignment = Alignment.CenterStart) { focused ->
                 Text(
                     c.name, Modifier.padding(horizontal = 18.dp, vertical = 9.dp), fontSize = 15.sp, maxLines = 1,
                     color = if (c == selected && !focused) Tv.Accent else Tv.Text,
@@ -188,30 +196,43 @@ fun LiveScreen(vm: MainViewModel, profile: Profile) {
     }.collectAsState(initial = emptyList())
     val progs = rememberProgrammes(channels)
     if (cats.isEmpty()) return EmptyState(PlaybackStatus.lastRefreshError?.let { "Couldn't load channels: $it. Open Settings and run a check." } ?: "No channels yet.")
-    Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-        CategoryColumn(cats, cat, select)
+    // Phone: category chips over one column of channels. TV and tablet: categories beside channels.
+    val phone = LocalFormFactor.current == FormFactor.Phone
+    val list: @Composable () -> Unit = {
         LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(6.dp), contentPadding = PaddingValues(bottom = 32.dp)) {
             itemsIndexed(channels, key = { _, c -> c.streamId }) { i, c ->
                 val p = c.epgId?.let { progs[it] }.orEmpty()
                 val now = p.firstOrNull()
                 val next = p.getOrNull(1)
-                FocusBox(onClick = { playLive(ctx, c.sourceId, c.categoryId, i) }, modifier = Modifier.fillMaxWidth().height(80.dp).then(entryPoint(i == 0))) { focused ->
-                    Row(Modifier.fillMaxSize().padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text("${c.num}", Modifier.width(52.dp), fontSize = 17.sp, color = if (focused) Tv.Text else Tv.Muted)
-                        Logo(c.logo, 54)
+                FocusBox(onClick = { playLive(ctx, c.sourceId, c.categoryId, i) }, modifier = Modifier.fillMaxWidth().height(if (phone) 72.dp else 80.dp).then(entryPoint(i == 0))) { focused ->
+                    Row(Modifier.fillMaxSize().padding(horizontal = if (phone) 10.dp else 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("${c.num}", Modifier.width(if (phone) 40.dp else 52.dp), fontSize = if (phone) 15.sp else 17.sp, color = if (focused) Tv.Text else Tv.Muted)
+                        Logo(c.logo, if (phone) 44 else 54)
                         Spacer(Modifier.width(16.dp))
                         Column(Modifier.weight(1f)) {
                             Text(c.name, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Text(now?.title ?: "No guide information", fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, color = if (focused) Tv.Text else Tv.Muted)
-                            if (now != null) ProgressLine(progress(now.start, now.stop), Modifier.padding(top = 6.dp).width(220.dp), fill = if (focused) Tv.Text else Tv.Accent)
+                            if (now != null) ProgressLine(progress(now.start, now.stop), Modifier.padding(top = 6.dp).widthIn(max = 220.dp), fill = if (focused) Tv.Text else Tv.Accent)
                         }
-                        if (next != null) Column(Modifier.width(240.dp).padding(start = 16.dp)) {
+                        if (next != null && !phone) Column(Modifier.width(240.dp).padding(start = 16.dp)) {
                             Text("Next · ${time(next.start)}", fontSize = 12.sp, color = if (focused) Tv.Text else Tv.Muted)
                             Text(next.title, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
                 }
             }
+        }
+    }
+    if (phone) {
+        Column {
+            CategoryChips(cats, cat, select)
+            Spacer(Modifier.height(12.dp))
+            list()
+        }
+    } else {
+        Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+            CategoryColumn(cats, cat, select)
+            list()
         }
     }
 }
@@ -227,7 +248,7 @@ fun MoviesScreen(vm: MainViewModel, profile: Profile) {
     }.collectAsState(initial = emptyList())
     if (cats.isEmpty()) return EmptyState("No movies on this line.")
     Column {
-        Text("Movies", fontSize = 28.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 14.dp))
+        PageTitle("Movies")
         CategoryChips(cats, cat, select)
         Spacer(Modifier.height(18.dp))
         PosterGrid(movies.map { Triple(it.streamId, it.name, it.poster) }, back = null) { idx ->
@@ -249,7 +270,7 @@ fun SeriesScreen(vm: MainViewModel, profile: Profile) {
     if (cats.isEmpty()) return EmptyState("No series on this line.")
     nav.Host(profile) {
         Column {
-            Text("Series", fontSize = 28.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 14.dp))
+            PageTitle("Series")
             CategoryChips(cats, cat, select)
             Spacer(Modifier.height(18.dp))
             PosterGrid(series.map { Triple(it.key, it.name, it.poster) }, back = nav.back, state = grid) { idx -> nav.open = series[idx] }
@@ -265,12 +286,15 @@ private fun PosterGrid(
     onClick: (Int) -> Unit,
 ) {
     val hasBack = back != null && items.any { it.first == back }
+    // Three posters across a phone, more on wider screens.
+    val cell = when (LocalFormFactor.current) { FormFactor.Phone -> 100.dp; FormFactor.Tablet -> 130.dp; FormFactor.Tv -> 150.dp }
+    val gap = if (LocalFormFactor.current == FormFactor.Phone) 12.dp else 18.dp
     LazyVerticalGrid(
-        columns = GridCells.Adaptive(150.dp),
+        columns = GridCells.Adaptive(cell),
         state = state,
         contentPadding = PaddingValues(top = 6.dp, bottom = 32.dp, end = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(18.dp),
-        verticalArrangement = Arrangement.spacedBy(18.dp),
+        horizontalArrangement = Arrangement.spacedBy(gap),
+        verticalArrangement = Arrangement.spacedBy(gap),
     ) {
         itemsIndexed(items, key = { _, it -> it.first }) { i, (key, name, poster) ->
             PosterCard(name, poster, entryPoint(if (hasBack) key == back else i == 0), width = null) { onClick(i) }

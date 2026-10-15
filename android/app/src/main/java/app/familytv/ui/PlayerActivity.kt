@@ -74,6 +74,11 @@ class PlayerActivity : ComponentActivity() {
     private var bannerJob: Job? = null
     private var guideJob: Job? = null
     private var okPending = false
+
+    // Phones and tablets: tap the video for on-screen controls, since there's no remote.
+    private var touch = false
+    private var controls by mutableStateOf(false)
+    private var controlsJob: Job? = null
     private val closeGuideOnBack = object : OnBackPressedCallback(false) {
         override fun handleOnBackPressed() = closeGuide()
     }
@@ -82,6 +87,7 @@ class PlayerActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         profile = app.portal.cachedConfig?.profile
+        touch = formFactor().touch
 
         // Bigger buffer than the default for live IPTV: survives short Wi-Fi dips on sticks.
         val loadControl = DefaultLoadControl.Builder().setBufferDurationsMs(15_000, 50_000, 2_000, 4_000).build()
@@ -138,7 +144,14 @@ class PlayerActivity : ComponentActivity() {
                 descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
                 setContent {
                     FamilyTvTheme {
-                        LiveOverlay(channels, playing, banner, guideOpen, programmes, onTune = ::tuneFromGuide, onFocusChannel = { if (guideOpen) banner = it })
+                        val touchUi = if (!touch) null else TouchControls(
+                            visible = controls,
+                            onTap = ::onTap,
+                            onZap = { zap(it); showControls() },
+                            onGuide = { hideControls(); openGuide() },
+                            onClose = ::finish,
+                        )
+                        LiveOverlay(channels, playing, banner, guideOpen, programmes, onTune = ::tuneFromGuide, onFocusChannel = { if (guideOpen) banner = it }, touch = touchUi)
                     }
                 }
             }
@@ -215,7 +228,7 @@ class PlayerActivity : ComponentActivity() {
         if (p == null) return
         lifecycleScope.launch {
             val r = app.diagnoser.runAndReport(p, playingHere = false)
-            show(r.verdict.tvMessage + "\n(Press OK to retry)", 0, isError = true)
+            show(r.verdict.tvMessage + if (touch) "\n(Tap to retry)" else "\n(Press OK to retry)", 0, isError = true)
         }
     }
 
@@ -256,6 +269,26 @@ class PlayerActivity : ComponentActivity() {
     override fun onUserInteraction() {
         super.onUserInteraction()
         if (guideOpen) closeGuideLater()
+    }
+
+    private fun onTap() {
+        when {
+            guideOpen -> closeGuide()
+            overlay.tag == "error" -> playChannel()
+            controls -> { hideControls(); banner = null }
+            else -> { showControls(); showBanner(index) }
+        }
+    }
+
+    private fun showControls() {
+        controls = true
+        controlsJob?.cancel()
+        controlsJob = lifecycleScope.launch { delay(4_000); controls = false }
+    }
+
+    private fun hideControls() {
+        controlsJob?.cancel()
+        controls = false
     }
 
     private fun showBanner(i: Int) {

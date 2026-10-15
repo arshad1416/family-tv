@@ -1,6 +1,14 @@
 package app.familytv.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -13,6 +21,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -27,10 +36,12 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.tv.material3.Icon
 import androidx.tv.material3.Text
 import app.familytv.data.ChannelEntity
 import app.familytv.data.NowNext
@@ -55,12 +66,40 @@ fun LiveOverlay(
     programmes: Map<String, List<NowNext>>,
     onTune: (Int) -> Unit,
     onFocusChannel: (Int) -> Unit,
+    touch: TouchControls? = null,
 ) {
     Box(Modifier.fillMaxSize().safeDrawingPadding()) {
-        if (guideOpen) MiniGuide(channels, playing, programmes, onTune, onFocusChannel)
-        banner?.let { channels.getOrNull(it) }?.let { ch ->
+        // Touch: a tap on the video shows the controls (or closes the guide); it sits under everything else.
+        if (touch != null) Box(Modifier.fillMaxSize().clickable(remember { MutableInteractionSource() }, indication = null, onClick = touch.onTap))
+        if (guideOpen) MiniGuide(channels, playing, programmes, onTune, onFocusChannel, focusPlaying = touch == null)
+        // A phone has no room for the banner beside the guide; the guide already shows what's on.
+        if (!(guideOpen && touch != null)) banner?.let { channels.getOrNull(it) }?.let { ch ->
             InfoBanner(ch, programmes[ch.epgId], Modifier.align(Alignment.BottomStart).padding(start = if (guideOpen) GUIDE_W else 0.dp))
         }
+        if (touch != null && touch.visible && !guideOpen) {
+            RoundIcon(Icons.AutoMirrored.Filled.ArrowBack, "Close player", Modifier.align(Alignment.TopStart).padding(16.dp), touch.onClose)
+            Column(Modifier.align(Alignment.CenterEnd).padding(end = 16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                RoundIcon(Icons.Filled.KeyboardArrowUp, "Previous channel", onClick = { touch.onZap(-1) })
+                RoundIcon(Icons.AutoMirrored.Filled.List, "Channel guide", onClick = touch.onGuide)
+                RoundIcon(Icons.Filled.KeyboardArrowDown, "Next channel", onClick = { touch.onZap(1) })
+            }
+        }
+    }
+}
+
+/** Touch controls for live TV on phones and tablets; null on TV, where the remote drives everything. */
+class TouchControls(
+    val visible: Boolean,
+    val onTap: () -> Unit,
+    val onZap: (Int) -> Unit,
+    val onGuide: () -> Unit,
+    val onClose: () -> Unit,
+)
+
+@Composable
+private fun RoundIcon(icon: ImageVector, label: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    FocusBox(onClick = onClick, color = Color(0x99000000), shape = CircleShape, modifier = modifier.size(56.dp), contentAlignment = Alignment.Center) {
+        Icon(icon, contentDescription = label, tint = Tv.Text, modifier = Modifier.size(28.dp))
     }
 }
 
@@ -91,17 +130,17 @@ private fun InfoBanner(ch: ChannelEntity, progs: List<NowNext>?, modifier: Modif
 }
 
 @Composable
-private fun MiniGuide(channels: List<ChannelEntity>, playing: Int, programmes: Map<String, List<NowNext>>, onTune: (Int) -> Unit, onFocusChannel: (Int) -> Unit) {
+private fun MiniGuide(channels: List<ChannelEntity>, playing: Int, programmes: Map<String, List<NowNext>>, onTune: (Int) -> Unit, onFocusChannel: (Int) -> Unit, focusPlaying: Boolean) {
     val current = remember { FocusRequester() }
     val list = rememberLazyListState(initialFirstVisibleItemIndex = (playing - 3).coerceAtLeast(0))
-    LaunchedEffect(Unit) {
+    if (focusPlaying) LaunchedEffect(Unit) {
         // The playing row is composed on the first layout pass; try for a few frames.
         repeat(5) { withFrameNanos { }; if (runCatching { current.requestFocus() }.isSuccess) return@LaunchedEffect }
     }
     val now = System.currentTimeMillis()
     Column(Modifier.width(GUIDE_W).fillMaxHeight().background(Color(0xF2060A14)).padding(top = 32.dp, start = 20.dp, end = 16.dp)) {
         Text("Channels", fontSize = 22.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 8.dp, bottom = 4.dp))
-        Text("OK to watch · Back to close", fontSize = 13.sp, color = Tv.Muted, modifier = Modifier.padding(start = 8.dp, bottom = 14.dp))
+        Text(if (focusPlaying) "OK to watch · Back to close" else "Tap to watch · Back to close", fontSize = 13.sp, color = Tv.Muted, modifier = Modifier.padding(start = 8.dp, bottom = 14.dp))
         LazyColumn(state = list, verticalArrangement = Arrangement.spacedBy(4.dp), contentPadding = PaddingValues(bottom = 32.dp)) {
             itemsIndexed(channels, key = { _, c -> c.streamId }) { i, c ->
                 val cur = programmes[c.epgId].nowAndNext(now).first
