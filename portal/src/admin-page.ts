@@ -42,15 +42,25 @@ let tab = "devices", verdicts = {}, profiles = [];
 
 async function api(path, opts = {}) {
   const res = await fetch(path, { ...opts, headers: { "content-type": "application/json", authorization: "Bearer " + token, ...(opts.headers || {}) } });
-  if (res.status === 401) { askToken(); throw new Error("Sign in again"); }
+  // Forget the rejected token so render()'s error handler leaves the sign-in form on screen.
+  if (res.status === 401) {
+    token = null;
+    try { localStorage.removeItem("ftv_admin"); } catch {}
+    askToken("That token didn't work. Check it and try again.");
+    throw new Error("Sign in again");
+  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || res.statusText);
   return data;
 }
 
-function askToken() {
-  $("#app").innerHTML = '<div class="card"><h3>Sign in</h3><label>Admin token</label><input id="tok" type="password" autocomplete="current-password"><p><button class="b p" id="go">Continue</button></p></div>';
-  $("#go").onclick = () => { token = $("#tok").value.trim(); try { localStorage.setItem("ftv_admin", token); } catch {} render(); };
+function askToken(message) {
+  $("#app").innerHTML = '<div class="card"><h3>Sign in</h3>' + (message ? '<p class="err">' + esc(message) + "</p>" : "") +
+    '<label>Admin token</label><input id="tok" type="password" autocomplete="current-password"><p><button class="b p" id="go">Continue</button></p></div>';
+  const go = () => { token = $("#tok").value.trim(); if (!token) return; try { localStorage.setItem("ftv_admin", token); } catch {} render(); };
+  $("#go").onclick = go;
+  $("#tok").onkeydown = (e) => { if (e.key === "Enter") go(); };
+  $("#tok").focus();
 }
 
 const ago = (t) => { if (!t) return "never"; const s = (Date.now() - t) / 1000; if (s < 90) return "just now"; if (s < 3600) return Math.round(s / 60) + " min ago"; if (s < 86400) return Math.round(s / 3600) + " h ago"; return Math.round(s / 86400) + " d ago"; };
