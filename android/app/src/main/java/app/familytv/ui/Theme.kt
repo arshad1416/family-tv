@@ -4,11 +4,13 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
@@ -24,6 +26,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -78,7 +81,11 @@ fun FocusBox(
     contentAlignment: Alignment = Alignment.TopStart,
     content: @Composable BoxScope.(focused: Boolean) -> Unit,
 ) {
-    var focused by remember { mutableStateOf(false) }
+    var hasFocus by remember { mutableStateOf(false) }
+    // A finger held on a card lights it like D-pad focus does, so touch gets feedback too.
+    val source = remember { MutableInteractionSource() }
+    val pressed by source.collectIsPressedAsState()
+    val focused = hasFocus || pressed
     val bg = when {
         focused && !outline -> Tv.Accent
         selected -> Tv.Raised
@@ -87,20 +94,28 @@ fun FocusBox(
     Box(
         modifier
             .then(if (scale != 1f) Modifier.graphicsLayer { if (focused) { scaleX = scale; scaleY = scale } } else Modifier)
-            .onFocusChanged { focused = it.isFocused; if (it.isFocused) onFocus() }
+            .onFocusChanged { hasFocus = it.isFocused; if (it.isFocused) onFocus() }
             .clip(shape)
             .background(bg)
             .then(if (focused && outline) Modifier.border(3.dp, Tv.Accent, shape) else Modifier)
-            .clickable(remember { MutableInteractionSource() }, indication = null, onClick = onClick),
+            .clickable(source, indication = null, onClick = onClick),
         contentAlignment = contentAlignment,
     ) { content(focused) }
 }
 
 @Composable
 fun TvButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true) {
-    FocusBox(onClick = { if (enabled) onClick() }, modifier = modifier, color = Tv.Raised, shape = RoundedCornerShape(24.dp), contentAlignment = Alignment.Center) {
+    // Touch screens get the 48dp minimum target; TV keeps its compact pill.
+    val minH = if (LocalFormFactor.current.touch) 48.dp else 0.dp
+    FocusBox(onClick = { if (enabled) onClick() }, modifier = modifier.heightIn(min = minH), color = Tv.Raised, shape = RoundedCornerShape(24.dp), contentAlignment = Alignment.Center) {
         Text(text, Modifier.padding(horizontal = 22.dp, vertical = 10.dp), fontSize = 16.sp, color = if (enabled) Tv.Text else Tv.Muted)
     }
+}
+
+/** A page's own title. On phones and tablets the touch header already shows it, so only TV draws it. */
+@Composable
+fun PageTitle(text: String, bottom: Dp = 14.dp) {
+    if (!LocalFormFactor.current.touch) Text(text, fontSize = 28.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = bottom))
 }
 
 /** Thin programme progress bar. */

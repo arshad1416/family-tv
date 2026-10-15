@@ -17,7 +17,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
@@ -62,6 +65,7 @@ class MainActivity : ComponentActivity() {
         }
         setContent {
             FamilyTvTheme {
+              CompositionLocalProvider(LocalFormFactor provides rememberFormFactor()) {
                 Surface(modifier = Modifier.fillMaxSize(), colors = SurfaceDefaults.colors(containerColor = Tv.Bg, contentColor = Tv.Text)) {
                     // Android 15 draws edge to edge; keep clear of a phone's status and navigation bars.
                     Box(Modifier.fillMaxSize().safeDrawingPadding()) {
@@ -85,7 +89,7 @@ class MainActivity : ComponentActivity() {
                     message?.let { text ->
                         Dialog(onDismissRequest = { message = null }) {
                             Column(
-                                Modifier.background(Tv.Raised, Tv.Shape).padding(32.dp).width(560.dp),
+                                Modifier.widthIn(max = 560.dp).background(Tv.Raised, Tv.Shape).padding(32.dp),
                                 verticalArrangement = Arrangement.spacedBy(20.dp),
                             ) {
                                 Text("Message from your TV admin", fontWeight = FontWeight.Bold, fontSize = 20.sp)
@@ -97,6 +101,7 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 }
+              }
             }
         }
     }
@@ -119,7 +124,7 @@ fun Centered(content: @Composable () -> Unit) {
 
 @Composable
 private fun SyncingScreen(s: Screen.Syncing) = Centered {
-    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(520.dp)) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.widthIn(max = 520.dp).padding(horizontal = 16.dp)) {
         Text("${s.step}…", fontSize = 22.sp)
         Spacer(Modifier.height(20.dp))
         // Plain boxes rather than a Material progress bar: tv-material has none, and this stays light.
@@ -147,15 +152,26 @@ private fun PairingScreen(code: String) {
     }
     var dots by remember { mutableStateOf(0) }
     LaunchedEffect(Unit) { while (true) { kotlinx.coroutines.delay(800); dots = (dots + 1) % 4 } }
+    val words: @Composable () -> Unit = {
+        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Text("Set up this TV", fontSize = 34.sp, fontWeight = FontWeight.Bold)
+            Text("Give this code to whoever manages your TV,\nor scan the QR code.", fontSize = 20.sp)
+            Text(code.chunked(3).joinToString(" "), fontSize = 72.sp, fontWeight = FontWeight.Bold, letterSpacing = 6.sp)
+            Text("Waiting" + ".".repeat(dots), fontSize = 18.sp, color = Color.Gray)
+        }
+    }
     Centered {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(64.dp)) {
-            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                Text("Set up this TV", fontSize = 34.sp, fontWeight = FontWeight.Bold)
-                Text("Give this code to whoever manages your TV,\nor scan the QR code.", fontSize = 20.sp)
-                Text(code.chunked(3).joinToString(" "), fontSize = 72.sp, fontWeight = FontWeight.Bold, letterSpacing = 6.sp)
-                Text("Waiting" + ".".repeat(dots), fontSize = 18.sp, color = Color.Gray)
+        if (LocalFormFactor.current == FormFactor.Phone) {
+            // Portrait phone: stack the code over the QR so neither runs off the screen.
+            Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                words()
+                Image(qr, contentDescription = "Pairing QR code", modifier = Modifier.size(220.dp))
             }
-            Image(qr, contentDescription = "Pairing QR code", modifier = Modifier.size(260.dp))
+        } else {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(64.dp)) {
+                words()
+                Image(qr, contentDescription = "Pairing QR code", modifier = Modifier.size(260.dp))
+            }
         }
     }
 }

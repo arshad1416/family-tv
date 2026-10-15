@@ -9,7 +9,9 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -83,9 +85,10 @@ fun SearchScreen(vm: MainViewModel, profile: Profile) {
     }
     val progs = rememberProgrammes(results.channels)
 
+    val touch = LocalFormFactor.current.touch
     nav.Host(profile) {
         Column {
-            Text("Search", fontSize = 28.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 14.dp))
+            PageTitle("Search")
             BasicTextField(
                 value = query,
                 onValueChange = { query = it },
@@ -94,7 +97,7 @@ fun SearchScreen(vm: MainViewModel, profile: Profile) {
                 cursorBrush = SolidColor(Tv.Accent),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                 keyboardActions = KeyboardActions(onSearch = { keyboard?.hide(); focusManager.moveFocus(FocusDirection.Down) }),
-                modifier = Modifier.width(620.dp).then(entryPoint(nav.back == null)).onFocusChanged { fieldFocused = it.isFocused },
+                modifier = (if (touch) Modifier.fillMaxWidth().widthIn(max = 620.dp) else Modifier.width(620.dp)).then(entryPoint(nav.back == null)).onFocusChanged { fieldFocused = it.isFocused },
                 decorationBox = { inner ->
                     val shape = RoundedCornerShape(28.dp)
                     Box(
@@ -108,7 +111,7 @@ fun SearchScreen(vm: MainViewModel, profile: Profile) {
                 },
             )
             Text(
-                if (fieldFocused) "Press OK to type, then Search or Down for results" else "",
+                if (fieldFocused && !touch) "Press OK to type, then Search or Down for results" else "",
                 fontSize = 13.sp, color = Tv.Muted, modifier = Modifier.padding(start = 24.dp, top = 6.dp),
             )
             Spacer(Modifier.height(12.dp))

@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -24,6 +25,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
@@ -50,6 +53,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
@@ -121,9 +125,25 @@ fun PageEntry.focus() { if (attached > 0) runCatching { requester.requestFocus()
 @Composable
 fun pageEntry(): PageEntry = LocalPageEntry.current
 
+@Composable
+private fun PageBody(page: Page, vm: MainViewModel, config: DeviceConfig, profile: Profile, onNavigate: (Page) -> Unit) {
+    when (page) {
+        Page.Home -> HomePage(vm, profile, onNavigate)
+        Page.Guide -> GuideScreen(vm, profile)
+        Page.Live -> LiveScreen(vm, profile)
+        Page.Movies -> MoviesScreen(vm, profile)
+        Page.Series -> SeriesScreen(vm, profile)
+        Page.Search -> SearchScreen(vm, profile)
+        Page.Settings -> SettingsScreen(vm, config)
+    }
+}
+
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun HomeScreen(vm: MainViewModel, config: DeviceConfig) {
+    // Phones and tablets get the touch layout; TV keeps the D-pad rail below.
+    val form = LocalFormFactor.current
+    if (form.touch) return TouchHome(vm, config, form)
     val profile = config.profile ?: Profile()
     var page by rememberSaveable { mutableStateOf(Page.Home) }
     val rail = remember { Page.entries.associateWith { FocusRequester() } }
@@ -145,15 +165,7 @@ fun HomeScreen(vm: MainViewModel, config: DeviceConfig) {
         ) {
             CompositionLocalProvider(LocalPageEntry provides entry) {
                 Box(Modifier.fillMaxSize().padding(start = 28.dp, end = 36.dp, top = 24.dp)) {
-                    when (page) {
-                        Page.Home -> HomePage(vm, profile)
-                        Page.Guide -> GuideScreen(vm, profile)
-                        Page.Live -> LiveScreen(vm, profile)
-                        Page.Movies -> MoviesScreen(vm, profile)
-                        Page.Series -> SeriesScreen(vm, profile)
-                        Page.Search -> SearchScreen(vm, profile)
-                        Page.Settings -> SettingsScreen(vm, config)
-                    }
+                    PageBody(page, vm, config, profile) { page = it }
                 }
             }
         }
@@ -210,13 +222,141 @@ private fun Rail(page: Page, requesters: Map<Page, FocusRequester>, nickname: St
     }
 }
 
+// ---- Phone and tablet ----
+
+/** The bottom tabs on a phone and the side rail on a tablet; Search and Settings live in the header. */
+private val TOUCH_TABS = listOf(Page.Home, Page.Live, Page.Guide, Page.Movies, Page.Series)
+private val TOUCH_RAIL = 88.dp
+
+/**
+ * Touch layout: a header (context line, big title, Search and Settings icons) over the page,
+ * with bottom tabs on a phone or a side rail on a tablet. Back from any page returns Home.
+ */
+@Composable
+private fun TouchHome(vm: MainViewModel, config: DeviceConfig, form: FormFactor) {
+    val profile = config.profile ?: Profile()
+    var page by rememberSaveable { mutableStateOf(Page.Home) }
+    val entry = remember { PageEntry() }
+    BackHandler(enabled = page != Page.Home) { page = Page.Home }
+    val phone = form == FormFactor.Phone
+    val body: @Composable (Modifier) -> Unit = { modifier ->
+        Column(modifier.fillMaxHeight()) {
+            TouchHeader(page, config.nickname, Modifier.padding(horizontal = if (phone) 16.dp else 24.dp)) { page = it }
+            CompositionLocalProvider(LocalPageEntry provides entry) {
+                Box(Modifier.weight(1f).fillMaxWidth().padding(horizontal = if (phone) 16.dp else 24.dp)) {
+                    PageBody(page, vm, config, profile) { page = it }
+                }
+            }
+        }
+    }
+    if (phone) {
+        Column(Modifier.fillMaxSize().background(Tv.Bg)) {
+            body(Modifier.weight(1f))
+            BottomTabs(page) { page = it }
+        }
+    } else {
+        Row(Modifier.fillMaxSize().background(Tv.Bg)) {
+            TouchRail(page) { page = it }
+            body(Modifier.weight(1f))
+        }
+    }
+}
+
+@Composable
+private fun TouchHeader(page: Page, nickname: String?, modifier: Modifier, onSelect: (Page) -> Unit) {
+    val context = if (page == Page.Guide) {
+        DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date())
+    } else {
+        nickname ?: "Family TV"
+    }
+    Row(modifier.fillMaxWidth().padding(top = 10.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(context, fontSize = 13.sp, color = Tv.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(page.label, fontSize = 28.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+        }
+        HeaderIcon(Page.Search, page == Page.Search) { onSelect(Page.Search) }
+        HeaderIcon(Page.Settings, page == Page.Settings) { onSelect(Page.Settings) }
+    }
+}
+
+@Composable
+private fun HeaderIcon(p: Page, selected: Boolean, onClick: () -> Unit) {
+    FocusBox(onClick = onClick, color = Color.Transparent, selected = selected, shape = RoundedCornerShape(24.dp), modifier = Modifier.size(48.dp), contentAlignment = Alignment.Center) { focused ->
+        Icon(p.icon, contentDescription = p.label, tint = if (selected && !focused) Tv.Accent else Tv.Text, modifier = Modifier.size(24.dp))
+    }
+}
+
+@Composable
+private fun BottomTabs(page: Page, onSelect: (Page) -> Unit) {
+    Row(Modifier.fillMaxWidth().height(64.dp).background(Tv.Panel)) {
+        TOUCH_TABS.forEach { p -> TabItem(p, p == page, Modifier.weight(1f).fillMaxHeight()) { onSelect(p) } }
+    }
+}
+
+@Composable
+private fun TouchRail(page: Page, onSelect: (Page) -> Unit) {
+    Column(
+        Modifier.width(TOUCH_RAIL).fillMaxHeight().background(Tv.Panel).padding(horizontal = 8.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text("TV", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Tv.Accent, modifier = Modifier.padding(bottom = 12.dp))
+        TOUCH_TABS.forEach { p -> TabItem(p, p == page, Modifier.fillMaxWidth().height(64.dp)) { onSelect(p) } }
+    }
+}
+
+@Composable
+private fun TabItem(p: Page, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
+    FocusBox(onClick = onClick, color = Color.Transparent, modifier = modifier, contentAlignment = Alignment.Center) { focused ->
+        val tint = if (selected && !focused) Tv.Accent else if (selected || focused) Tv.Text else Tv.Muted
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(p.icon, contentDescription = null, tint = tint, modifier = Modifier.size(24.dp))
+            Spacer(Modifier.height(4.dp))
+            Text(p.label, fontSize = 12.sp, color = tint, maxLines = 1, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
+        }
+    }
+}
+
+private class HeroItem(val title: String, val blurb: String, val art: String?, val poster: Boolean, val play: () -> Unit)
+
+/** Full-width swipeable hero: artwork, title, one line, Watch now, page dots. */
+@Composable
+private fun HeroCarousel(items: List<HeroItem>) {
+    val pager = rememberPagerState { items.size }
+    val tall = if (LocalFormFactor.current == FormFactor.Phone) 220.dp else 280.dp
+    Column {
+        HorizontalPager(pager, Modifier.fillMaxWidth().height(tall), pageSpacing = 12.dp) { i ->
+            val h = items[i]
+            Box(Modifier.fillMaxSize().clip(Tv.Shape).background(Tv.Panel)) {
+                if (h.art != null) {
+                    if (h.poster) AsyncImage(h.art, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                    else AsyncImage(h.art, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.align(Alignment.TopEnd).padding(20.dp).size(96.dp))
+                }
+                Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0f to Color.Transparent, 0.35f to Color(0x33060A14), 1f to Color(0xF2060A14))))
+                Column(Modifier.align(Alignment.BottomStart).padding(16.dp)) {
+                    Text(h.title, fontSize = 24.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(h.blurb, fontSize = 14.sp, color = Tv.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Spacer(Modifier.height(10.dp))
+                    TvButton("Watch now", h.play)
+                }
+            }
+        }
+        if (items.size > 1) Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.Center) {
+            repeat(items.size) { i ->
+                Box(Modifier.padding(horizontal = 3.dp).size(if (i == pager.currentPage) 8.dp else 6.dp).clip(RoundedCornerShape(4.dp)).background(if (i == pager.currentPage) Tv.Accent else Tv.Line))
+            }
+        }
+    }
+}
+
 // ---- Home ----
 
 private data class Hero(val title: String, val subtitle: String, val detail: String? = null)
 
 @Composable
-private fun HomePage(vm: MainViewModel, profile: Profile) {
+private fun HomePage(vm: MainViewModel, profile: Profile, onNavigate: (Page) -> Unit) {
     val ctx = LocalContext.current
+    val touch = LocalFormFactor.current.touch
     val dao = ctx.app.db.catalog()
     val scope = rememberCoroutineScope()
     val hero = remember { mutableStateOf<Hero?>(null) }
@@ -238,12 +378,26 @@ private fun HomePage(vm: MainViewModel, profile: Profile) {
         return EmptyState(PlaybackStatus.lastRefreshError?.let { "Couldn't load channels: $it. Open Settings and run a check." } ?: "Nothing here yet.")
     }
     val firstRow = when { nav.back != null -> -1; onNow.isNotEmpty() -> 0; recent.isNotEmpty() -> 1; else -> 2 }
+    // Touch: a swipeable hero of what's on and what's new, since there's no focus to follow.
+    val heroes = remember(touch, onNow, progs, recent) {
+        if (!touch) emptyList() else buildList {
+            onNow.take(3).forEachIndexed { i, c ->
+                val p = c.epgId?.let { progs[it] }?.firstOrNull()
+                add(HeroItem(p?.title ?: c.name, "Live now  ·  ${c.num}  ${c.name}", c.logo, poster = false) { playLive(ctx, c.sourceId, c.categoryId, i) })
+            }
+            recent.take(3).forEach { m ->
+                add(HeroItem(m.name, "New movie", m.poster, poster = true) { scope.launch { playMovieNow(ctx, profile, m) } })
+            }
+        }
+    }
+    fun viewAll(p: Page): (() -> Unit)? = if (touch) ({ onNavigate(p) }) else null
     nav.Host(profile) {
         Column {
-            HeroHeader(hero)
+            if (!touch) HeroHeader(hero)
             LazyColumn(verticalArrangement = Arrangement.spacedBy(22.dp), contentPadding = PaddingValues(bottom = 40.dp)) {
+                if (heroes.isNotEmpty()) item("hero") { HeroCarousel(heroes) }
                 if (onNow.isNotEmpty()) item("now") {
-                    Shelf("On now") {
+                    Shelf("On now", viewAll(Page.Live)) {
                         itemsIndexed(onNow, key = { _, c -> c.streamId }) { i, c ->
                             val p = c.epgId?.let { progs[it] }.orEmpty()
                             ChannelCard(c, p.firstOrNull(), entryPoint(firstRow == 0 && i == 0),
@@ -253,7 +407,7 @@ private fun HomePage(vm: MainViewModel, profile: Profile) {
                     }
                 }
                 if (recent.isNotEmpty()) item("movies") {
-                    Shelf("Recently added movies") {
+                    Shelf("Recently added movies", viewAll(Page.Movies)) {
                         itemsIndexed(recent, key = { _, m -> "${m.sourceId}/${m.streamId}" }) { i, m ->
                             PosterCard(m.name, m.poster, entryPoint(firstRow == 1 && i == 0), onFocus = { hero.value = Hero(m.name, "Movie", m.rating?.takeIf { it.isNotBlank() && it != "0" }?.let { "Rating $it" }) }) {
                                 scope.launch { playMovieNow(ctx, profile, m) }
@@ -262,7 +416,7 @@ private fun HomePage(vm: MainViewModel, profile: Profile) {
                     }
                 }
                 if (series.isNotEmpty()) item("series") {
-                    Shelf("Series") {
+                    Shelf("Series", viewAll(Page.Series)) {
                         itemsIndexed(series.take(30), key = { _, s -> "${s.sourceId}/${s.seriesId}" }) { i, s ->
                             PosterCard(s.name, s.poster, entryPoint(if (firstRow < 0) nav.back == s.key else firstRow == 2 && i == 0), onFocus = { hero.value = Hero(s.name, "Series", s.plot) }) { nav.open = s }
                         }
@@ -286,9 +440,18 @@ private fun HeroHeader(hero: MutableState<Hero?>) {
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
-fun Shelf(title: String, content: LazyListScope.() -> Unit) {
+fun Shelf(title: String, onViewAll: (() -> Unit)? = null, content: LazyListScope.() -> Unit) {
     Column {
-        Text(title, fontSize = 19.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 10.dp))
+        if (onViewAll == null) {
+            Text(title, fontSize = 19.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 10.dp))
+        } else {
+            Row(Modifier.fillMaxWidth().padding(bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(title, fontSize = 19.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                FocusBox(onClick = onViewAll, color = Color.Transparent, modifier = Modifier.heightIn(min = 48.dp), contentAlignment = Alignment.Center) { focused ->
+                    Text("View all", fontSize = 15.sp, color = if (focused) Tv.Text else Tv.Accent, modifier = Modifier.padding(horizontal = 12.dp))
+                }
+            }
+        }
         // focusRestorer: coming back up/down into a shelf returns to the card you left.
         LazyRow(Modifier.focusRestorer(), horizontalArrangement = Arrangement.spacedBy(14.dp), contentPadding = PaddingValues(end = 40.dp), content = content)
     }

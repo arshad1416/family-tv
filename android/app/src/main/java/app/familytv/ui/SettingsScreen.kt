@@ -7,7 +7,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
@@ -39,9 +41,15 @@ fun SettingsScreen(vm: MainViewModel, config: DeviceConfig) {
     var pin by remember { mutableStateOf("") }
     var pinError by remember { mutableStateOf(false) }
     Column(Modifier.verticalScroll(rememberScrollState())) {
-        Text("Settings", fontSize = 28.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 18.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(28.dp)) {
-            Panel(Modifier.width(560.dp)) {
+        PageTitle("Settings", bottom = 18.dp)
+        // TV: the two panels side by side. Phones and tablets: stacked, so nothing runs off a narrow screen.
+        val touch = LocalFormFactor.current.touch
+        val panes: @Composable (@Composable () -> Unit) -> Unit = { content ->
+            if (touch) Column(Modifier.widthIn(max = 640.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) { content() }
+            else Row(horizontalArrangement = Arrangement.spacedBy(28.dp)) { content() }
+        }
+        panes {
+            Panel(if (touch) Modifier.fillMaxWidth() else Modifier.width(560.dp)) {
                 Text("Not working?", fontSize = 22.sp, fontWeight = FontWeight.Bold)
                 Text("Run a check. It tests this TV's internet, the home network and the TV service, and sends the result to your TV admin.", fontSize = 15.sp, color = Tv.Muted)
                 TvButton(if (running) "Checking…" else "Run a check", { vm.runDiagnosis() }, entryPoint(), enabled = !running)
@@ -80,7 +88,8 @@ fun SettingsScreen(vm: MainViewModel, config: DeviceConfig) {
 
 @Composable
 private fun Panel(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
-    Column(modifier.background(Tv.Panel, Tv.Shape).padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) { content() }
+    val fill = if (LocalFormFactor.current.touch) Modifier.fillMaxWidth() else Modifier
+    Column(modifier.then(fill).background(Tv.Panel, Tv.Shape).padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) { content() }
 }
 
 @Composable
