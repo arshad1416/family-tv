@@ -23,6 +23,16 @@ describe("app download", () => {
     expect((await handle(new Request("https://portal.test/tv"), env(bucket(true, ["family-tv-rust.apk"])))).status).toBe(404);
   });
 
+  it("serves the Rust build's own update feed, 404 until one is published", async () => {
+    const feed = '{"versionCode":14,"versionName":"0.1.14","url":"https://familytv.example/tvrust"}';
+    const apps = { get: async (key: string) => (key === "family-tv-rust-latest.json" ? { body: new Blob([feed]).stream() } : null) } as unknown as R2Bucket;
+    const res = await handle(new Request("https://portal.test/tvrust/latest.json"), env(apps));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("application/json");
+    expect(await res.text()).toBe(feed);
+    expect((await handle(new Request("https://portal.test/tvrust/latest.json"), env(bucket(true)))).status).toBe(404);
+  });
+
   it("404s before an APK is uploaded or without the bucket", async () => {
     expect((await handle(new Request("https://portal.test/app.apk"), env(bucket(false)))).status).toBe(404);
     expect((await handle(new Request("https://portal.test/tv"), env())).status).toBe(404);
