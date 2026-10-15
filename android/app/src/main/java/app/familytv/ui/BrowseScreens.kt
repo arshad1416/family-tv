@@ -249,7 +249,7 @@ private class GridItem(
     val watched: Boolean = false,
     val progress: Float = 0f,
     val onFavourite: (() -> Unit)? = null,
-    /** Set for movies: the card gets a Trailer button when one is found. */
+    /** Set for movies: the card gets a Trailer button (looked up when pressed). */
     val movie: MovieEntity? = null,
 )
 
@@ -276,8 +276,7 @@ private fun PosterGrid(
             PosterCard(
                 it.name, it.poster, entryPoint(if (hasBack) it.key == back else i == 0), width = null,
                 favourite = it.favourite, onFavourite = it.onFavourite, watched = it.watched, progress = it.progress,
-                trailer = if (it.movie != null && profile != null) rememberMovieTrailer(profile, it.movie) else null,
-                trailerSlot = it.movie != null,
+                onTrailer = if (it.movie != null && profile != null) movieTrailerAction(profile, it.movie) else null,
             ) { onClick(i) }
         }
     }

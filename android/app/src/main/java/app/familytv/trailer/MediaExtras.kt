@@ -48,15 +48,19 @@ class MediaExtras(private val app: FamilyTvApp) {
         return v
     }
 
-    /** A movie's YouTube trailer id: the provider's, else TMDB's best trailer. */
+    /**
+     * A movie's YouTube trailer id: the provider's (get_vod_info), else TMDB's best, else TheTVDB's.
+     * Called only when the Trailer button is pressed, never while browsing.
+     */
     suspend fun movieTrailer(profile: Profile, m: MovieEntity): String? = cached("movie/${m.sourceId}/${m.streamId}") {
         val src = profile.sources.firstOrNull { it.id == m.sourceId && it.type == "xtream" }
         val info = src?.let { runCatching { app.catalog.vodInfo(m.sourceId, m.streamId, it) }.getOrNull() }
-        info?.trailer ?: tmdb()?.let { t ->
-            val langs = languages(null)
-            val id = m.tmdb ?: info?.tmdb ?: SeriesTitles.parse(m.name).let { p -> t.searchMovie(p.title, m.year) }
-            id?.let { Trailers.pick(t.movieVideos(it, langs), langs) }
-        }
+        val langs = languages(null)
+        val title = SeriesTitles.parse(m.name).title
+        val tmdbId = m.tmdb ?: info?.tmdb
+        info?.trailer
+            ?: runCatching { tmdb()?.let { t -> (tmdbId ?: t.searchMovie(title, m.year))?.let { Trailers.pick(t.movieVideos(it, langs), langs) } } }.getOrNull()
+            ?: tvdb()?.let { t -> t.movieId(tmdbId, null, title, m.year)?.let { t.movieTrailer(it, langs) } }
     }
 
     /** The show's trailer from TMDB, else TheTVDB (the caller tries the provider's first). */

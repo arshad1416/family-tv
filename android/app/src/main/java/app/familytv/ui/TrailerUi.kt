@@ -1,5 +1,6 @@
 package app.familytv.ui
 
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
@@ -10,11 +11,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -27,21 +24,23 @@ import app.familytv.app
 import app.familytv.data.MovieEntity
 import app.familytv.portal.Profile
 import app.familytv.trailer.openTrailer
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /**
- * A movie's trailer, looked up once the card has been on screen for a moment (scrolling past
- * doesn't trigger lookups); null while unknown or when there is none.
+ * What a movie card's Trailer button does: look the trailer up only now (never while browsing,
+ * since providers throttle bursts of API calls), then open it or say there is none.
  */
 @Composable
-fun rememberMovieTrailer(profile: Profile, m: MovieEntity): String? {
-    val app = LocalContext.current.app
-    var id by remember(m.sourceId, m.streamId) { mutableStateOf<String?>(null) }
-    LaunchedEffect(m.sourceId, m.streamId) {
-        delay(600)
-        id = app.extras.movieTrailer(profile, m)
+fun movieTrailerAction(profile: Profile, m: MovieEntity): () -> Unit {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    return {
+        scope.launch {
+            val id = ctx.app.extras.movieTrailer(profile, m)
+            if (id != null) openTrailer(ctx, id)
+            else Toast.makeText(ctx.applicationContext, "No trailer found for this movie", Toast.LENGTH_SHORT).show()
+        }
     }
-    return id
 }
 
 /**
@@ -51,9 +50,14 @@ fun rememberMovieTrailer(profile: Profile, m: MovieEntity): String? {
 @Composable
 fun TrailerButton(youtubeId: String, modifier: Modifier = Modifier, label: String = "Trailer", compact: Boolean = false) {
     val ctx = LocalContext.current
+    TrailerButton({ openTrailer(ctx, youtubeId) }, modifier, label, compact)
+}
+
+@Composable
+fun TrailerButton(onClick: () -> Unit, modifier: Modifier = Modifier, label: String = "Trailer", compact: Boolean = false) {
     val touch = LocalFormFactor.current.touch
     FocusBox(
-        onClick = { openTrailer(ctx, youtubeId) },
+        onClick = onClick,
         color = if (compact) Color.Transparent else Tv.Raised,
         shape = RoundedCornerShape(24.dp),
         modifier = modifier.heightIn(min = if (touch) 48.dp else 0.dp),

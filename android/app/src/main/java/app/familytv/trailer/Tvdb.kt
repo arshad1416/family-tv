@@ -14,8 +14,8 @@ import java.io.IOException
 import java.util.Locale
 
 /**
- * TheTVDB v4, the last fallback for series (after the provider and TMDB): episode stills and
- * overviews, and the show's trailer. Logs in with the portal's key; the bearer token lasts about a
+ * TheTVDB v4, the last fallback (after the provider and TMDB): episode stills and overviews, and
+ * show and movie trailers. Logs in with the portal's key; the bearer token lasts about a
  * month, so it is kept in [prefs] and renewed on a 401.
  */
 class Tvdb(
@@ -27,9 +27,14 @@ class Tvdb(
     @Volatile private var token: String? = null
 
     /** TVDB series id: by IMDb or TMDB id where TVDB knows it, else by title and year. */
-    suspend fun seriesId(tmdb: String?, imdb: String?, title: String, year: Int?): String? {
-        for (remote in listOfNotNull(imdb, tmdb)) get("search/remoteid/$remote")?.let(TvdbParse::remoteSeriesId)?.let { return it }
-        return get("search", listOfNotNull("query" to title, "type" to "series", year?.let { "year" to it.toString() }))?.let(TvdbParse::searchId)
+    suspend fun seriesId(tmdb: String?, imdb: String?, title: String, year: Int?): String? = id("series", tmdb, imdb, title, year)
+
+    /** TVDB movie id, found the same way. */
+    suspend fun movieId(tmdb: String?, imdb: String?, title: String, year: Int?): String? = id("movie", tmdb, imdb, title, year)
+
+    private suspend fun id(type: String, tmdb: String?, imdb: String?, title: String, year: Int?): String? {
+        for (remote in listOfNotNull(imdb, tmdb)) get("search/remoteid/$remote")?.let { TvdbParse.remoteId(it, type) }?.let { return it }
+        return get("search", listOfNotNull("query" to title, "type" to type, year?.let { "year" to it.toString() }))?.let(TvdbParse::searchId)
     }
 
     /** Episode stills and overviews by (season, episode), from the default order. */
@@ -45,6 +50,9 @@ class Tvdb(
 
     suspend fun trailer(seriesId: String, langs: List<String>): String? =
         get("series/$seriesId/extended", listOf("short" to "true"))?.let { TvdbParse.trailer(it, langs) }
+
+    suspend fun movieTrailer(movieId: String, langs: List<String>): String? =
+        get("movies/$movieId/extended", listOf("short" to "true"))?.let { TvdbParse.trailer(it, langs) }
 
     private suspend fun get(path: String, params: List<Pair<String, String>> = emptyList()): JsonObject? = withContext(Dispatchers.IO) {
         val url = "${base.trimEnd('/')}/$path".toHttpUrl().newBuilder().apply { params.forEach { (k, v) -> addQueryParameter(k, v) } }.build()
@@ -104,7 +112,8 @@ class Tvdb(
 object TvdbParse {
     fun token(o: JsonObject): String? = o.get("data")?.obj()?.str("token")
 
-    fun remoteSeriesId(o: JsonObject): String? = o.array("data").firstNotNullOfOrNull { it.obj()?.get("series")?.obj()?.str("id") }
+    /** The id of the first [type] ("series" or "movie") match in a /search/remoteid answer. */
+    fun remoteId(o: JsonObject, type: String): String? = o.array("data").firstNotNullOfOrNull { it.obj()?.get(type)?.obj()?.str("id") }
 
     fun searchId(o: JsonObject): String? = o.array("data").firstNotNullOfOrNull { it.obj()?.let { r -> r.str("tvdb_id") ?: r.str("id")?.removePrefix("series-") } }
 

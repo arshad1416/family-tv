@@ -81,8 +81,10 @@ class TrailersTest {
     @Test
     fun tvdbResponses() {
         assertEquals("tok", TvdbParse.token(json("""{"status":"success","data":{"token":"tok"}}""")))
-        assertEquals("81189", TvdbParse.remoteSeriesId(json("""{"data":[{"movie":{"id":5}},{"series":{"id":81189,"name":"Breaking Bad"}}]}""")))
-        assertNull(TvdbParse.remoteSeriesId(json("""{"data":[]}""")))
+        val remote = json("""{"data":[{"movie":{"id":5}},{"series":{"id":81189,"name":"Breaking Bad"}}]}""")
+        assertEquals("81189", TvdbParse.remoteId(remote, "series"))
+        assertEquals("5", TvdbParse.remoteId(remote, "movie"))
+        assertNull(TvdbParse.remoteId(json("""{"data":[]}"""), "series"))
         assertEquals("81189", TvdbParse.searchId(json("""{"data":[{"tvdb_id":"81189","name":"Breaking Bad"}]}""")))
         val eps = json(
             """{"data":{"episodes":[{"seasonNumber":1,"number":1,"overview":"Pilot.","image":"/banners/episodes/81189/349232.jpg"},

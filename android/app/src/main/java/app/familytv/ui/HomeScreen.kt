@@ -433,7 +433,7 @@ private fun HomePage(vm: MainViewModel, profile: Profile, onNavigate: (Page) -> 
                                     val p = progress[ProgressKey.movie(x.sourceId, x.streamId)]
                                     PosterCard(
                                         x.name, x.poster, entryPoint(entry), favourite = true, watched = p?.watched == true, progress = ProgressRules.bar(p),
-                                        trailer = rememberMovieTrailer(profile, x), trailerSlot = true,
+                                        onTrailer = movieTrailerAction(profile, x),
                                         onFavourite = { toggleFavourite(ctx, Kind.MOVIE, x.sourceId, x.streamId, x.name) },
                                         onFocus = { hero.value = Hero(x.name, "Favourite movie", null) },
                                     ) { scope.launch { playMovieNow(ctx, profile, x) } }
@@ -468,7 +468,7 @@ private fun HomePage(vm: MainViewModel, profile: Profile, onNavigate: (Page) -> 
                                 favourite = Favourites.key(Kind.MOVIE, m.sourceId, m.streamId) in favKeys,
                                 onFavourite = { toggleFavourite(ctx, Kind.MOVIE, m.sourceId, m.streamId, m.name) },
                                 watched = p?.watched == true, progress = ProgressRules.bar(p),
-                                trailer = rememberMovieTrailer(profile, m), trailerSlot = true,
+                                onTrailer = movieTrailerAction(profile, m),
                                 onFocus = { hero.value = Hero(m.name, "Movie", m.rating?.takeIf { it.isNotBlank() && it != "0" }?.let { "Rating $it" }) },
                             ) {
                                 scope.launch { playMovieNow(ctx, profile, m) }
@@ -556,8 +556,8 @@ fun ChannelCard(
 /**
  * Artwork tile. [onFavourite] adds hold-OK or Menu (TV) or a heart button (touch) to toggle the
  * favourite; [watched] and [progress] draw the tick and the resume line. [logo] fits a channel
- * logo instead of cropping a poster. [trailer] adds a Trailer button (over the poster on touch,
- * beside the name on TV, where [trailerSlot] keeps room for it so the row doesn't jump).
+ * logo instead of cropping a poster. [onTrailer] adds a Trailer button (over the poster on touch,
+ * beside the name on TV).
  */
 @Composable
 fun PosterCard(
@@ -570,8 +570,7 @@ fun PosterCard(
     onFavourite: (() -> Unit)? = null,
     watched: Boolean = false,
     progress: Float = 0f,
-    trailer: String? = null,
-    trailerSlot: Boolean = false,
+    onTrailer: (() -> Unit)? = null,
     onFocus: () -> Unit = {},
     onClick: () -> Unit,
 ) {
@@ -588,12 +587,12 @@ fun PosterCard(
             if (heart) FavouriteButton(favourite, onFavourite!!, Modifier.align(Alignment.TopEnd))
             else MarkBadge(Modifier.align(Alignment.TopEnd), favourite = favourite)
             if (progress > 0f) ProgressLine(progress, Modifier.align(Alignment.BottomCenter).padding(8.dp), height = 4.dp)
-            if (touch && trailer != null) TrailerButton(trailer, Modifier.align(Alignment.BottomStart), compact = true)
+            if (touch && onTrailer != null) TrailerButton(onTrailer, Modifier.align(Alignment.BottomStart), compact = true)
         }
-        if (!touch && trailerSlot) {
+        if (!touch && onTrailer != null) {
             Row(Modifier.padding(top = 4.dp).height(30.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 13.sp, color = Tv.Muted, modifier = Modifier.weight(1f))
-                if (trailer != null) TrailerButton(trailer, compact = true)
+                TrailerButton(onTrailer, compact = true)
             }
         } else {
             Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 13.sp, color = Tv.Muted, modifier = Modifier.padding(top = 6.dp))

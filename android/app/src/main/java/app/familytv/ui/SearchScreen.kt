@@ -146,7 +146,7 @@ fun SearchScreen(vm: MainViewModel, profile: Profile) {
                                 favourite = Favourites.key(Kind.MOVIE, m.sourceId, m.streamId) in favKeys,
                                 onFavourite = { toggleFavourite(ctx, Kind.MOVIE, m.sourceId, m.streamId, m.name) },
                                 watched = p?.watched == true, progress = ProgressRules.bar(p),
-                                trailer = rememberMovieTrailer(profile, m), trailerSlot = true,
+                                onTrailer = movieTrailerAction(profile, m),
                             ) { scope.launch { playMovieNow(ctx, profile, m) } }
                         }
                     }
