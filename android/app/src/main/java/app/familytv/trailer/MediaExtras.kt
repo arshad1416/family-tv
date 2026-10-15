@@ -36,7 +36,7 @@ data class SeasonExtras(val overview: String?, val trailer: String?, val episode
  */
 class MediaExtras(private val app: FamilyTvApp) {
     private val cache = ConcurrentHashMap<String, Pair<Long, Any?>>()
-    private val gate = Semaphore(2)
+    private val gate = LookupGate(2)
     private val tvdbPrefs by lazy { app.getSharedPreferences("metadata", Context.MODE_PRIVATE) }
 
     private fun tmdb(): Tmdb? = app.portal.cachedConfig?.tmdbApiKey?.trim()?.takeIf { it.isNotEmpty() }?.let { Tmdb(it, Http.client) }
@@ -52,10 +52,7 @@ class MediaExtras(private val app: FamilyTvApp) {
     @Suppress("UNCHECKED_CAST")
     private suspend fun <T> cached(key: String, load: suspend () -> T?): T? {
         cache[key]?.let { (at, v) -> if (System.currentTimeMillis() - at < TTL_MS) return v as T? }
-        // A lookup nested in another (a season needing the show's TMDB id) reuses the outer permit;
-        // taking a second one could deadlock two lookups that each hold one.
-        val v = if (currentCoroutineContext()[Gated] != null) runCatching { load() }.getOrNull()
-        else gate.withPermit { withContext(Gated) { runCatching { load() }.getOrNull() } }
+        val v = gate.run { runCatching { load() }.getOrNull() }
         cache[key] = System.currentTimeMillis() to v
         return v
     }
@@ -157,9 +154,6 @@ class MediaExtras(private val app: FamilyTvApp) {
     private fun languages(lang: String?): List<String> =
         listOfNotNull(lang?.takeIf { it != SeriesTitles.ORIGINAL }, Locale.getDefault().language, "en").map { it.substringBefore('-') }.distinct()
 
-    /** Marks a coroutine that already holds a [gate] permit. */
-    private object Gated : AbstractCoroutineContextElement(Gated), CoroutineContext.Key<Gated>
-
     companion object {
         private val MOVIE = Regex("(?i)\\b(movie|film)s?\\b")
         const val TTL_MS = 12 * 3_600_000L
@@ -180,4 +174,25 @@ fun openTrailer(ctx: Context, youtubeId: String) {
         }
     }
     Toast.makeText(ctx.applicationContext, "No app on this device can play YouTube trailers.", Toast.LENGTH_LONG).show()
+}
+
+/**
+ * At most [permits] lookups at once. A lookup nested in another (a season needing the show's TMDB
+ * id) reuses the outer permit; taking a second one could deadlock two lookups that each hold one.
+ */
+internal class LookupGate(permits: Int) {
+    private val permits = Semaphore(permits)
+
+    suspend fun <T> run(block: suspend () -> T): T =
+        if (currentCoroutineContext()[Held] != null) block()
+        else permits.withPermit { withContext(Held()) { block() } }
+
+    /**
+     * Marks a coroutine that already holds a permit. The key is a separate companion object: an
+     * object passing itself as its own key is still null while it initialises, which crashed every
+     * series page (ExceptionInInitializerError in 0.2.19 to 0.2.24).
+     */
+    private class Held : AbstractCoroutineContextElement(Held) {
+        companion object Key : CoroutineContext.Key<Held>
+    }
 }
