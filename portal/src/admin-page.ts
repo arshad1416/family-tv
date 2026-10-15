@@ -162,9 +162,19 @@ async function openDevice(id, dev) {
   box.querySelector("[data-del]").onclick = async () => { if (confirm("Remove this TV? It will show a new pairing code.")) { await api("/api/admin/devices/" + id, { method: "DELETE" }); render(); } };
 }
 
-function sourceForm(s, i) {
+// What the panel last said about a line, shown on its source card.
+function lineFacts(l) {
+  if (!l) return "";
+  const bits = [l.expire ? "expires " + esc(l.expire) + " (" + leftText(l) + ")" : leftText(l)];
+  if (l.enabled === false) bits.push('<span class="err">disabled on the panel</span>');
+  if (l.maxConnections) bits.push(plural(l.maxConnections, "screen"));
+  if (l.note) bits.push(esc(l.note));
+  return '<p class="small" style="margin:0 0 8px">8K line: ' + bits.join(" · ") + "</p>";
+}
+
+function sourceForm(s, i, line) {
   const urls = (s.serverUrls || []).join("\\n");
-  return '<div class="card" data-src="' + i + '"><div class="grid">' +
+  return '<div class="card" data-src="' + i + '">' + lineFacts(line) + '<div class="grid">' +
     '<div><label>Name</label><input name="name" value="' + esc(s.name) + '"></div>' +
     '<div><label>Type</label><select name="type"><option value="xtream"' + (s.type === "xtream" ? " selected" : "") + '>Xtream login</option><option value="m3u"' + (s.type === "m3u" ? " selected" : "") + ">M3U link</option></select></div>" +
     '<div><label>Username</label><input name="username" value="' + esc(s.username) + '"></div>' +
@@ -172,7 +182,40 @@ function sourceForm(s, i) {
     '<label>Server URLs (Xtream, one per line, backups after the main one)</label><textarea name="serverUrls" rows="2">' + esc(urls) + "</textarea>" +
     '<label>M3U playlist URL</label><input name="m3uUrl" value="' + esc(s.m3uUrl) + '">' +
     '<label>Guide (XMLTV) URL, optional</label><input name="epgUrl" value="' + esc(s.epgUrl) + '">' +
-    '<input type="hidden" name="id" value="' + esc(s.id) + '"><p><button class="b" data-rm>Remove source</button></p></div>';
+    '<input type="hidden" name="id" value="' + esc(s.id) + '"><input type="hidden" name="copyOf" value="' + esc(s.copyOf) + '">' +
+    '<p><button class="b" data-rm>Remove source</button>' + (s.copyOf ? ' <span class="muted small">Copied from another profile; saved when you click Save.</span>' : "") + "</p></div>";
+}
+
+// Add a line to the profile: one the portal already knows (the panel's API can't list lines), or a new one.
+function addLineCard(draft, lines, panel) {
+  if (!lines) return '<div class="card muted small">Loading your lines…</div>';
+  const mine = new Set(draft.data.sources.map((s) => (s.username || "").toLowerCase()));
+  const seen = new Set(), active = [], other = [];
+  for (const l of lines.lines || []) {
+    const k = (l.username || "").toLowerCase();
+    if (!k || mine.has(k) || seen.has(k)) continue;
+    seen.add(k);
+    const users = lines.lines.filter((x) => (x.username || "").toLowerCase() === k).map((x) => x.profileName);
+    const opt = '<option value="' + esc(l.profileId + "/" + l.sourceId) + '">' + esc(l.sourceName + " · " + l.username + " · " + (l.daysLeft == null ? "status unknown" : l.daysLeft < 0 ? "expired" : plural(l.daysLeft, "day") + " left") + " · in " + users.join(", ")) + "</option>";
+    (l.enabled === false || (l.daysLeft != null && l.daysLeft < 0) ? other : active).push(opt);
+  }
+  let html = '<div class="card"><h3 style="margin-top:0">Add a line</h3>';
+  if (active.length || other.length) {
+    html += '<div class="row"><select id="pickline" style="flex:1">' + active.join("") + (other.length ? '<optgroup label="Expired or disabled">' + other.join("") + "</optgroup>" : "") + "</select>" +
+      '<button class="b" id="useline">Add to this profile</button></div>' +
+      '<p class="muted small">Copies that line here with its login and details; nothing changes until you click Save. A line used by two profiles shares its screens.</p>';
+  } else html += '<p class="muted small">No other lines yet. Lines show up here once a profile has their Xtream login.</p>';
+  if (lines.configured && panel && !panel.error) {
+    const months = (panel.months || [1, 3, 6, 12]).map((m) => '<option value="' + m + '">' + plural(m, "month") + "</option>").join("");
+    const pkgs = (panel.packages || []).map((x) => '<option value="' + esc(x.id) + '">' + esc(x.name) + "</option>").join("");
+    html += '<h4 style="margin:14px 0 4px">Or create a new line</h4>' + (draft.id ?
+      '<div class="grid"><div><label>Package</label><select id="pnpkg">' + (pkgs || '<option value="">No packages from the panel</option>') + "</select></div>" +
+      '<div><label>Length</label><select id="pnmon">' + months + "</select></div>" +
+      '<div><label>Name in the profile</label><input id="pnname" value="8K line"></div></div>' +
+      '<p><button class="b" id="pncreate">Create line</button> <span class="muted small">' + esc(panel.reseller.credits) + " credits left. Uses credits; the line is added to this profile right away.</span></p>"
+      : '<p class="muted small">Save the profile first, then you can create a new line for it here.</p>');
+  } else if (panel && panel.error) html += '<p class="small err">Panel: ' + esc(panel.error) + "</p>";
+  return html + '<div id="plmsg" class="small"></div></div>';
 }
 
 async function renderProfiles(editId) {
@@ -225,8 +268,13 @@ function categoriesCard(draft, reported) {
 
 function editProfile(p) {
   const draft = JSON.parse(JSON.stringify(p));
-  let reported = {};
+  let reported = {}, lines = null, panel = null;
   if (draft.id) api("/api/admin/profiles/" + draft.id + "/categories").then((r) => { reported = r.reported; collect(); paint(); }).catch(() => {});
+  api("/api/admin/lines").then(async (l) => {
+    if (l.configured) panel = await api("/api/admin/panel").catch((e) => ({ error: e.message }));
+    lines = l; collect(); paint();
+  }).catch(() => { lines = { lines: [] }; collect(); paint(); });
+  const lineOf = (s) => lines && (lines.lines || []).find((l) => s.username && (l.username || "").toLowerCase() === s.username.toLowerCase());
   const moveCat = (i, to) => {
     collect();
     const rows = categoryRows(draft, reported);
@@ -238,12 +286,36 @@ function editProfile(p) {
   const paint = () => {
     $("#app").innerHTML = '<div class="card"><label>Profile name</label><input id="pname" value="' + esc(draft.name) + '">' +
       '<label>Parental PIN (optional, locks adult categories)</label><input id="ppin" type="password" value="' + esc(draft.data.parentalPin) + '"></div>' +
-      draft.data.sources.map(sourceForm).join("") + guidesCard(draft.data) + categoriesCard(draft, reported) +
+      draft.data.sources.map((s, i) => sourceForm(s, i, lineOf(s))).join("") + addLineCard(draft, lines, panel) + guidesCard(draft.data) + categoriesCard(draft, reported) +
       '<div class="row"><button class="b" id="adds">Add source</button><button class="b p" id="save">Save</button>' +
       (draft.id ? '<button class="b" id="delp">Delete profile</button>' : "") + '<button class="b" id="back">Back</button><span id="perr" class="err"></span></div>';
     $("#adds").onclick = () => { collect(); draft.data.sources.push({ id: crypto.randomUUID(), type: "xtream", name: "Line " + (draft.data.sources.length + 1) }); paint(); };
     document.querySelectorAll("[data-rm]").forEach((b) => (b.onclick = () => { collect(); draft.data.sources.splice(+b.closest("[data-src]").dataset.src, 1); paint(); }));
     $("#back").onclick = () => renderProfiles();
+    if ($("#useline")) $("#useline").onclick = () => {
+      collect();
+      const [pid, sid] = $("#pickline").value.split("/");
+      const from = (profiles.find((x) => x.id === pid) || { data: { sources: [] } }).data.sources.find((x) => x.id === sid);
+      if (!from) return;
+      draft.data.sources.push({ ...from, id: crypto.randomUUID(), password: from.password, copyOf: pid + "/" + sid });
+      paint();
+    };
+    if ($("#pncreate")) $("#pncreate").onclick = async () => {
+      const packageId = $("#pnpkg").value, m = +$("#pnmon").value;
+      if (!packageId) return;
+      if (!confirm("Create a new " + plural(m, "month") + " line (" + $("#pnpkg").selectedOptions[0].textContent + ") for " + draft.name + "? This uses panel credits.")) return;
+      collect();
+      $("#pncreate").disabled = true; $("#plmsg").textContent = "Creating the line…";
+      try {
+        const r = await api("/api/admin/lines/new", { method: "POST", body: JSON.stringify({ profileId: draft.id, packageId, months: m, name: $("#pnname").value }) });
+        if (!r.ok) { $("#pncreate").disabled = false; $("#plmsg").innerHTML = '<span class="err">' + esc(r.error) + "</span> Link: " + esc(r.url); return; }
+        draft.data.sources.push(r.source);
+        lines = await api("/api/admin/lines");
+        panel = await api("/api/admin/panel").catch((e) => ({ error: e.message }));
+        paint();
+        $("#plmsg").innerHTML = '<span class="ok">Line ' + esc(r.username) + " created and saved to this profile.</span>";
+      } catch (e) { $("#pncreate").disabled = false; $("#plmsg").innerHTML = '<span class="err">' + esc(e.message) + "</span>"; }
+    };
     document.querySelectorAll("[data-kind]").forEach((b) => (b.onclick = () => { collect(); catKind = b.dataset.kind; paint(); }));
     document.querySelectorAll("[data-top]").forEach((b) => (b.onclick = () => moveCat(+b.dataset.top, 0)));
     document.querySelectorAll("[data-up]").forEach((b) => (b.onclick = () => moveCat(+b.dataset.up, +b.dataset.up - 1)));
@@ -279,7 +351,7 @@ function editProfile(p) {
       const g = (n) => el.querySelector('[name="' + n + '"]').value.trim();
       const s = draft.data.sources[+el.dataset.src];
       Object.assign(s, { id: g("id"), name: g("name"), type: g("type"), username: g("username") || undefined, password: g("password") || undefined,
-        serverUrls: g("serverUrls").split(/\\s+/).filter(Boolean), m3uUrl: g("m3uUrl") || undefined, epgUrl: g("epgUrl") || undefined });
+        serverUrls: g("serverUrls").split(/\\s+/).filter(Boolean), m3uUrl: g("m3uUrl") || undefined, epgUrl: g("epgUrl") || undefined, copyOf: g("copyOf") || undefined });
     });
   };
   paint();
