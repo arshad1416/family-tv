@@ -100,8 +100,8 @@ passwords on a remote, and when a TV goes black the portal tells you why.
 - **Add a TV:** the TV shows a 6-character code and a QR. Scanning the QR opens the portal with the
   code filled in. Pick a name and a profile.
 - **Profiles:** one per household, holding its lines (Xtream or M3U, with backup URLs and a guide URL),
-  an optional parental PIN for adult categories, and hidden categories. Saving a profile reloads every
-  TV on it.
+  an optional parental PIN for adult live categories, and hidden categories. Adult movie and series
+  categories are always hidden. Saving a profile reloads every TV on it.
 - **Lines** (with the 8K reseller panel connected): every line the portal knows, whether a profile
   uses it or not, with its expiry date and days left (red within a week) and which profiles use it;
   renew one for 1, 3, 6 or 12 months; your credit balance; **Add lines you already have** (paste

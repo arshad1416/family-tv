@@ -93,7 +93,8 @@ import kotlinx.coroutines.launch
 import java.text.DateFormat
 import java.util.Date
 
-private val ADULT = Regex("(?i)\\b(xxx|adult|18\\+|for adults)\\b")
+/** Adult category names. "Adult Swim" is a cartoon channel, not adult content. */
+private val ADULT = Regex("(?i)\\b(xxx|adults?|18\\+|for adults)\\b(?![\\s_()-]*swim)")
 private val RAIL = 76.dp
 
 /** One focus style for artwork: a 1.1x zoom plus the outline (Android TV's guideline). */
@@ -649,7 +650,7 @@ fun PosterCard(
 
 // ---- shared helpers ----
 
-/** Categories for [kind], minus hidden ones and (until unlocked) adult ones. */
+/** Categories for [kind], minus hidden ones and adult ones (live adult ones show once unlocked). */
 @Composable
 fun categories(vm: MainViewModel, profile: Profile, kind: String): List<CategoryEntity> {
     val ctx = LocalContext.current
@@ -659,12 +660,14 @@ fun categories(vm: MainViewModel, profile: Profile, kind: String): List<Category
 }
 
 /**
- * [all] (one kind) minus the profile's hidden categories and, unless [unlocked], adult ones; with no
- * profile, adult ones stay hidden. Categories named in the profile's order come first, in that order.
+ * [all] (one kind) minus the profile's hidden categories and adult ones. Adult movie and series
+ * categories never show; adult live ones show once [unlocked], or when the profile has no PIN.
+ * Categories named in the profile's order come first, in that order.
  */
 fun visibleCategories(all: List<CategoryEntity>, profile: Profile?, unlocked: Boolean): List<CategoryEntity> {
     val hidden = profile?.hiddenCategories.orEmpty().map { it.lowercase() }.toSet()
-    val adultOk = unlocked || (profile != null && profile.parentalPin.isNullOrEmpty())
+    val live = all.firstOrNull()?.kind == Kind.LIVE
+    val adultOk = live && (unlocked || (profile != null && profile.parentalPin.isNullOrEmpty()))
     val shown = all.filter { c -> c.name.lowercase() !in hidden && (adultOk || !ADULT.containsMatchIn(c.name)) }
     val order = profile?.categoryOrder?.get(all.firstOrNull()?.kind)?.withIndex()?.associate { (i, n) -> n.lowercase() to i }
     // sortedBy is stable, so unnamed categories keep the provider's order after the named ones.
