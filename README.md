@@ -43,7 +43,7 @@ passwords on a remote, and when a TV goes black the portal tells you why.
 - **Watched marks:** hold OK (or Menu, or a long press on touch) on a movie to mark it watched or
   unwatched. On a show's page, the season button marks the whole season, and holding OK on an
   episode marks it, or every episode up to it. Marking clears the resume point.
-- **New episodes:** every 6 hours (and a minute after the app opens, if due) the app looks at
+- **New episodes:** every 6 hours (and a minute after the app opens, when due or just updated) the app looks at
   favourite shows (up to 60, one at a time). Every episode after the furthest one watched, plus any
   that arrived since the last look, counts as waiting: the show's cover gets a counter ("NEW", or
   "3 NEW") and the show joins a *New episodes* row on Home. It counts down as each one is watched

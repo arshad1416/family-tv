@@ -12,6 +12,7 @@ import android.os.Build
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
+import app.familytv.BuildConfig
 import app.familytv.FamilyTvApp
 import app.familytv.R
 import app.familytv.data.Kind
@@ -44,8 +45,10 @@ class NewEpisodes(private val app: FamilyTvApp) {
         if (!running.tryLock()) return
         try {
             val now = System.currentTimeMillis()
-            if (now - prefs.getLong(LAST_RUN, 0) < INTERVAL_MS) return
-            prefs.edit().putLong(LAST_RUN, now).apply()
+            // An updated app recounts at once, since its counting may have changed.
+            val sameApp = prefs.getInt(LAST_VERSION, 0) == BuildConfig.VERSION_CODE
+            if (sameApp && now - prefs.getLong(LAST_RUN, 0) < INTERVAL_MS) return
+            prefs.edit().putLong(LAST_RUN, now).putInt(LAST_VERSION, BuildConfig.VERSION_CODE).apply()
             check(profile)
         } finally {
             running.unlock()
@@ -130,8 +133,8 @@ class NewEpisodes(private val app: FamilyTvApp) {
     companion object {
         private const val CHANNEL = "new_episodes"
         private const val NOTIFICATION_ID = 2001
-        // Renamed when the counter started counting every episode waiting, so it updates right away.
         private const val LAST_RUN = "lastRunWaiting"
+        private const val LAST_VERSION = "lastRunVersion"
         private const val ASKED = "asked"
         private const val INTERVAL_MS = 6 * 3_600_000L
         private const val PAUSE_MS = 1_500L
