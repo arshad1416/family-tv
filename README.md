@@ -34,6 +34,10 @@ passwords on a remote, and when a TV goes black the portal tells you why.
 - **Favourites:** hold OK (or press Menu) on any channel, movie or series to add or remove it; on a
   phone or tablet tap the heart. Live TV, Movies and Series each get a *Favourites* category at the
   top, and Home a *Favourites* row. Favourites survive channel reloads.
+- **Categories** (next to Home): choose Live TV, Movies or Series, then one of its categories. Each
+  section ends with *Adult Content*, the only place adult categories appear (Live TV, Movies, Series,
+  search and Home never show them). It asks for the profile's parental PIN every time it opens, and
+  opens straight away when the profile has no PIN.
 - **Movies and Series** open on *Highlights*: shelves of recently added, favourite and top-rated
   movies (and, for series, shows with new episodes). The provider's categories follow, each as a
   poster grid. On a TV a spotlight across the top shows the focused poster's artwork, year, rating
@@ -100,8 +104,8 @@ passwords on a remote, and when a TV goes black the portal tells you why.
 - **Add a TV:** the TV shows a 6-character code and a QR. Scanning the QR opens the portal with the
   code filled in. Pick a name and a profile.
 - **Profiles:** one per household, holding its lines (Xtream or M3U, with backup URLs and a guide URL),
-  an optional parental PIN for adult live categories, and hidden categories. Adult movie and series
-  categories are always hidden. Saving a profile reloads every TV on it.
+  an optional parental PIN for Categories' Adult Content, and hidden categories. Saving a profile
+  reloads every TV on it.
 - **Lines** (with the 8K reseller panel connected): every line the portal knows, whether a profile
   uses it or not, with its expiry date and days left (red within a week) and which profiles use it;
   renew one for 1, 3, 6 or 12 months; your credit balance; **Add lines you already have** (paste

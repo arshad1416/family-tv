@@ -121,7 +121,7 @@ fun rememberSeriesNav() = remember { SeriesNav() }
 @Composable
 fun SeriesNav.Host(vm: MainViewModel, profile: Profile, content: @Composable () -> Unit) {
     val entry = pageEntry()
-    val visible = categories(vm, profile, Kind.SERIES)
+    val visible = categories(profile, Kind.SERIES)
     val o = open
     if (o != null) {
         SeriesPage(profile, o, visible) { back = o.key; refocus = true; open = null }

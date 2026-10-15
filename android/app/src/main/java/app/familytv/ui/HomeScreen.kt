@@ -31,6 +31,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.Settings
@@ -104,6 +105,7 @@ val FOCUS_ROOM = 12.dp
 
 enum class Page(val label: String, val icon: ImageVector) {
     Home("Home", Icons.Filled.Home),
+    Categories("Categories", Icons.Filled.Menu),
     Live("Live TV", Icons.Filled.PlayArrow),
     Movies("Movies", Icons.Filled.Star),
     Series("Series", Icons.AutoMirrored.Filled.List),
@@ -154,6 +156,7 @@ private fun PageBody(page: Page, vm: MainViewModel, config: DeviceConfig, profil
 private fun PageContent(page: Page, vm: MainViewModel, config: DeviceConfig, profile: Profile, onNavigate: (Page) -> Unit) {
     when (page) {
         Page.Home -> HomePage(vm, profile, onNavigate)
+        Page.Categories -> CategoriesScreen(vm, profile)
         // Live TV is the guide grid on every device.
         Page.Live -> GuideScreen(vm, profile)
         Page.Movies -> MoviesScreen(vm, profile)
@@ -251,7 +254,7 @@ private fun Rail(page: Page, requesters: Map<Page, FocusRequester>, nickname: St
 // ---- Phone and tablet ----
 
 /** The bottom tabs on a phone and the side rail on a tablet; Settings lives in the header. */
-private val TOUCH_TABS = listOf(Page.Home, Page.Live, Page.Movies, Page.Series, Page.Search)
+private val TOUCH_TABS = listOf(Page.Home, Page.Categories, Page.Live, Page.Movies, Page.Series, Page.Search)
 private val TOUCH_RAIL = 88.dp
 
 /**
@@ -337,7 +340,7 @@ private fun TabItem(p: Page, selected: Boolean, modifier: Modifier, onClick: () 
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(p.icon, contentDescription = null, tint = tint, modifier = Modifier.size(24.dp))
             Spacer(Modifier.height(4.dp))
-            Text(p.label, fontSize = 12.sp, color = tint, maxLines = 1, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
+            Text(p.label, fontSize = 11.sp, color = tint, maxLines = 1, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
         }
     }
 }
@@ -388,17 +391,17 @@ private fun HomePage(vm: MainViewModel, profile: Profile, onNavigate: (Page) -> 
     val hero = remember { mutableStateOf<Hero?>(null) }
     val nav = rememberSeriesNav()
 
-    val liveCats = categories(vm, profile, Kind.LIVE)
+    val liveCats = categories(profile, Kind.LIVE)
     val liveCat = liveCats.firstOrNull()
     val channels by remember(liveCat) { liveCat?.let { dao.channels(it.sourceId, it.categoryId) } ?: flowOf(emptyList()) }.collectAsState(initial = emptyList())
     val onNow = remember(channels) { channels.take(30) }
     val progs = rememberProgrammes(onNow)
 
-    val movieCats = categories(vm, profile, Kind.MOVIE)
+    val movieCats = categories(profile, Kind.MOVIE)
     val movieKeys = remember(movieCats) { movieCats.map { it.sourceId to it.categoryId }.toSet() }
     var recent by remember { mutableStateOf(emptyList<MovieEntity>()) }
     LaunchedEffect(movieKeys) { recent = dao.recentMovies(300).filter { (it.sourceId to it.categoryId) in movieKeys }.take(30) }
-    val seriesCats = categories(vm, profile, Kind.SERIES)
+    val seriesCats = categories(profile, Kind.SERIES)
     val seriesCat = seriesCats.firstOrNull()
     val seriesRows by remember(seriesCat) { seriesCat?.let { dao.series(it.sourceId, it.categoryId) } ?: flowOf(emptyList()) }.collectAsState(initial = emptyList())
     val series = remember(seriesRows) { groupSeries(seriesRows) }
@@ -650,25 +653,26 @@ fun PosterCard(
 
 // ---- shared helpers ----
 
-/** Categories for [kind], minus hidden ones and adult ones (live adult ones show once unlocked). */
+/** Categories for [kind], minus hidden and adult ones (those live under Categories' Adult Content). */
 @Composable
-fun categories(vm: MainViewModel, profile: Profile, kind: String): List<CategoryEntity> {
+fun categories(profile: Profile, kind: String): List<CategoryEntity> {
     val ctx = LocalContext.current
-    val unlocked by vm.adultUnlocked.collectAsState()
     val all by remember(kind) { ctx.app.db.catalog().categories(kind) }.collectAsState(initial = emptyList())
-    return remember(all, unlocked, profile) { visibleCategories(all, profile, unlocked) }
+    return remember(all, profile) { visibleCategories(all, profile) }
 }
 
 /**
- * [all] (one kind) minus the profile's hidden categories and adult ones. Adult movie and series
- * categories never show; adult live ones show once [unlocked], or when the profile has no PIN.
- * Categories named in the profile's order come first, in that order.
+ * [all] (one kind) minus the profile's hidden categories and adult ones. Categories named in the
+ * profile's order come first, in that order.
  */
-fun visibleCategories(all: List<CategoryEntity>, profile: Profile?, unlocked: Boolean): List<CategoryEntity> {
+fun visibleCategories(all: List<CategoryEntity>, profile: Profile?): List<CategoryEntity> = arranged(all, profile, adult = false)
+
+/** Only the adult categories of [all], arranged like [visibleCategories]. */
+fun adultCategories(all: List<CategoryEntity>, profile: Profile?): List<CategoryEntity> = arranged(all, profile, adult = true)
+
+private fun arranged(all: List<CategoryEntity>, profile: Profile?, adult: Boolean): List<CategoryEntity> {
     val hidden = profile?.hiddenCategories.orEmpty().map { it.lowercase() }.toSet()
-    val live = all.firstOrNull()?.kind == Kind.LIVE
-    val adultOk = live && (unlocked || (profile != null && profile.parentalPin.isNullOrEmpty()))
-    val shown = all.filter { c -> c.name.lowercase() !in hidden && (adultOk || !ADULT.containsMatchIn(c.name)) }
+    val shown = all.filter { c -> c.name.lowercase() !in hidden && ADULT.containsMatchIn(c.name) == adult }
     val order = profile?.categoryOrder?.get(all.firstOrNull()?.kind)?.withIndex()?.associate { (i, n) -> n.lowercase() to i }
     // sortedBy is stable, so unnamed categories keep the provider's order after the named ones.
     return if (order.isNullOrEmpty()) shown else shown.sortedBy { order[it.name.lowercase()] ?: Int.MAX_VALUE }

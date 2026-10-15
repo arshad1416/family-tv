@@ -286,7 +286,7 @@ function editProfile(p) {
   };
   const paint = () => {
     $("#app").innerHTML = '<div class="card"><label>Profile name</label><input id="pname" value="' + esc(draft.name) + '">' +
-      '<label>Parental PIN (optional, locks adult live categories; adult movies and series are always hidden)</label><input id="ppin" type="password" value="' + esc(draft.data.parentalPin) + '"></div>' +
+      '<label>Parental PIN (optional, asked before Adult Content opens on the Categories page)</label><input id="ppin" type="password" value="' + esc(draft.data.parentalPin) + '"></div>' +
       draft.data.sources.map((s, i) => sourceForm(s, i, lineOf(s))).join("") + addLineCard(draft, lines, panel) + guidesCard(draft.data) + categoriesCard(draft, reported) +
       '<div class="row"><button class="b" id="adds">Add source</button><button class="b p" id="save">Save</button>' +
       (draft.id ? '<button class="b" id="delp">Delete profile</button>' : "") + '<button class="b" id="back">Back</button><span id="perr" class="err"></span></div>';
