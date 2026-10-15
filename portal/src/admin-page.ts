@@ -32,6 +32,8 @@ pre{white-space:pre-wrap;word-break:break-word;font-size:12px;background:var(--b
 .err{color:var(--bad)}
 table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:7px 6px;border-top:1px solid var(--line);vertical-align:middle}th{font-size:13px;color:var(--muted);font-weight:500;border-top:0}
 .ok{color:var(--ok)}.warn{color:var(--warn)}
+.grip{cursor:grab;touch-action:none;user-select:none;padding:2px 8px;color:var(--muted);font-size:18px;line-height:1}
+.cat.dragging{opacity:.85;background:var(--bg);position:relative;z-index:1}
 @media (max-width:700px){.wide{display:none}}
 </style>
 </head>
@@ -183,6 +185,7 @@ function sourceForm(s, i, line) {
     '<label>Server URLs (Xtream, one per line, backups after the main one)</label><textarea name="serverUrls" rows="2">' + esc(urls) + "</textarea>" +
     '<label>M3U playlist URL</label><input name="m3uUrl" value="' + esc(s.m3uUrl) + '">' +
     '<label>Guide (XMLTV) URL, optional</label><input name="epgUrl" value="' + esc(s.epgUrl) + '">' +
+    '<label>Package sorter link, optional (the provider page where the subscriber picks and orders channels; the app shows it as a QR code in Settings)</label><input name="sorterUrl" value="' + esc(s.sorterUrl) + '">' +
     '<input type="hidden" name="id" value="' + esc(s.id) + '"><input type="hidden" name="copyOf" value="' + esc(s.copyOf) + '">' +
     '<p><button class="b" data-rm>Remove source</button>' + (s.copyOf ? ' <span class="muted small">Added from your lines; saved when you click Save.</span>' : "") + "</p></div>";
 }
@@ -258,12 +261,13 @@ function categoriesCard(draft, reported) {
   const hidden = new Set((draft.data.hiddenCategories || []).map((n) => n.toLowerCase()));
   let html = '<div class="card"><h3 style="margin-top:0">Categories</h3><div class="row" style="margin-bottom:8px">' +
     KINDS.map(([k, label]) => '<button class="b' + (k === catKind ? " p" : "") + '" data-kind="' + k + '">' + label + "</button>").join("") +
-    '<span class="muted small">Order, show or hide what the TVs on this profile list. Saved with the profile.</span></div>';
+    '<span class="muted small">Drag by the handle (or use the buttons) to order, and tick to show or hide what the TVs on this profile list. Saved with the profile.</span></div>';
   if (!rows.length) html += '<p class="muted small">No categories reported yet. Open Family TV on a TV with this profile and come back in a minute.</p>';
-  html += rows.map((n, i) => '<div class="row" style="gap:6px;padding:4px 0;border-top:1px solid var(--line)">' +
+  html += '<div id="catlist">' + rows.map((n, i) => '<div class="row cat" data-cat="' + i + '" style="gap:6px;padding:4px 0;border-top:1px solid var(--line)">' +
+    '<span class="grip" data-drag title="Drag to move">⠿</span>' +
     '<input type="checkbox" style="width:auto" data-show="' + i + '"' + (hidden.has(n.toLowerCase()) ? "" : " checked") + ">" +
     '<span style="flex:1">' + esc(n) + "</span>" +
-    '<button class="b" data-top="' + i + '" title="Move to top">Top</button><button class="b" data-up="' + i + '" title="Move up">▲</button><button class="b" data-down="' + i + '" title="Move down">▼</button></div>').join("");
+    '<button class="b" data-top="' + i + '" title="Move to top">Top</button><button class="b" data-up="' + i + '" title="Move up">▲</button><button class="b" data-down="' + i + '" title="Move down">▼</button></div>').join("") + "</div>";
   return html + "</div>";
 }
 
@@ -283,6 +287,31 @@ function editProfile(p) {
     rows.splice(Math.max(0, Math.min(rows.length, to)), 0, n);
     draft.data.categoryOrder = { ...(draft.data.categoryOrder || {}), [catKind]: rows };
     paint();
+  };
+  // Drag a category row by its handle (mouse or touch); the row follows the pointer and drops between rows.
+  const dragCat = (e, handle) => {
+    e.preventDefault();
+    const row = handle.closest("[data-cat]"), from = +row.dataset.cat;
+    const els = [...document.querySelectorAll("#catlist [data-cat]")];
+    const startY = e.clientY;
+    let to = from;
+    handle.setPointerCapture(e.pointerId);
+    row.classList.add("dragging");
+    handle.onpointermove = (ev) => {
+      row.style.transform = "translateY(" + (ev.clientY - startY) + "px)";
+      // The row whose middle the pointer is above is where it drops; past the last one, it goes last.
+      const i = els.findIndex((r) => r !== row && ev.clientY < r.getBoundingClientRect().top + r.offsetHeight / 2);
+      to = i < 0 ? els.length - 1 : i > from ? i - 1 : i;
+      els.forEach((r, k) => (r.style.boxShadow = r === row ? "" : k === (to >= from ? to + 1 : to) ? "inset 0 2px 0 var(--accent)" : ""));
+      if (to === els.length - 1 && to !== from) els[els.length - 1].style.boxShadow = "inset 0 -2px 0 var(--accent)";
+      if (ev.clientY < 60) window.scrollBy(0, -12); else if (ev.clientY > innerHeight - 60) window.scrollBy(0, 12);
+    };
+    const end = (drop) => {
+      handle.onpointermove = handle.onpointerup = handle.onpointercancel = null;
+      if (drop && to !== from) moveCat(from, to); else paint();
+    };
+    handle.onpointerup = () => end(true);
+    handle.onpointercancel = () => end(false);
   };
   const paint = () => {
     $("#app").innerHTML = '<div class="card"><label>Profile name</label><input id="pname" value="' + esc(draft.name) + '">' +
@@ -317,6 +346,7 @@ function editProfile(p) {
       } catch (e) { $("#pncreate").disabled = false; $("#plmsg").innerHTML = '<span class="err">' + esc(e.message) + "</span>"; }
     };
     document.querySelectorAll("[data-kind]").forEach((b) => (b.onclick = () => { collect(); catKind = b.dataset.kind; paint(); }));
+    document.querySelectorAll("[data-drag]").forEach((h) => (h.onpointerdown = (e) => dragCat(e, h)));
     document.querySelectorAll("[data-top]").forEach((b) => (b.onclick = () => moveCat(+b.dataset.top, 0)));
     document.querySelectorAll("[data-up]").forEach((b) => (b.onclick = () => moveCat(+b.dataset.up, +b.dataset.up - 1)));
     document.querySelectorAll("[data-down]").forEach((b) => (b.onclick = () => moveCat(+b.dataset.down, +b.dataset.down + 1)));
@@ -351,7 +381,7 @@ function editProfile(p) {
       const g = (n) => el.querySelector('[name="' + n + '"]').value.trim();
       const s = draft.data.sources[+el.dataset.src];
       Object.assign(s, { id: g("id"), name: g("name"), type: g("type"), username: g("username") || undefined, password: g("password") || undefined,
-        serverUrls: g("serverUrls").split(/\\s+/).filter(Boolean), m3uUrl: g("m3uUrl") || undefined, epgUrl: g("epgUrl") || undefined, copyOf: g("copyOf") || undefined });
+        serverUrls: g("serverUrls").split(/\\s+/).filter(Boolean), m3uUrl: g("m3uUrl") || undefined, epgUrl: g("epgUrl") || undefined, sorterUrl: g("sorterUrl") || undefined, copyOf: g("copyOf") || undefined });
     });
   };
   paint();

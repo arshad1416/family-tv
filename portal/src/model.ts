@@ -9,6 +9,8 @@ export interface Source {
   /** M3U: playlist URL; epgUrl optional for both types. */
   m3uUrl?: string;
   epgUrl?: string;
+  /** The provider's page where the subscriber picks and orders this line's channels; the app shows it as a QR. */
+  sorterUrl?: string;
   /**
    * Only on the way in from the admin page: the username of the portal's line this source was
    * copied from, so its password (never sent to the page) is taken from there on save.
@@ -128,6 +130,7 @@ export function validateProfile(p: unknown): ProfileData {
       throw new Error(`${s.name}: type must be xtream or m3u`);
     }
     if (s.epgUrl) assertHttpUrl(s.epgUrl);
+    if (s.sorterUrl) assertHttpUrl(s.sorterUrl);
   }
   if (d.hiddenCategories !== undefined) d.hiddenCategories = cleanNames(d.hiddenCategories);
   if (d.categoryOrder !== undefined) {

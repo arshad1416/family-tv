@@ -113,8 +113,13 @@ passwords on a remote, and when a TV goes black the portal tells you why.
   panel first); and **New line**, which creates a line in a chosen package, for a profile or for
   later. Renew and New ask before spending credits. Lines are re-checked when the page opens if
   older than 6 hours. A profile's "Add a line" picker offers all of these lines.
-- **Categories** (in each profile): arrange and show or hide the Live TV, Movies and TV Shows
-  categories the profile's TVs report. TVs list them in that order, the rest after.
+- **Categories** (in each profile): drag (or use the arrow buttons) to arrange, and tick to show or
+  hide, the Live TV, Movies and TV Shows categories the profile's TVs report. TVs list them in that
+  order, the rest after. Each device can also arrange its own lists in Settings (Arrange categories);
+  that order comes first on that device, and "Use the portal's order" undoes it.
+- **Package sorter link** (per source, optional): the provider's page where that subscriber picks and
+  orders their channels. The app shows it in Settings as a QR code and link (with an Open button on
+  phones).
 - **Suggestions** (in each TV's details): what the last check means for that TV and what to do: Ethernet
   or 5 GHz for weak or slow Wi-Fi, the host to allowlist on a home DNS filter, a one-click "use this
   server first" when a line's main server is down for everyone or much slower than its backup, and

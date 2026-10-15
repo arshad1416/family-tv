@@ -50,4 +50,21 @@ class CategoryOrderTest {
         assertFalse(pinMatches(Profile(parentalPin = "1234"), "1111"))
         assertFalse(pinMatches(Profile(parentalPin = "1234"), ""))
     }
+
+    @Test
+    fun thisDevicesOrderComesBeforeTheProfiles() {
+        val p = Profile(categoryOrder = mapOf(Kind.LIVE to listOf("Kids", "Sports")))
+        assertEquals(listOf("Movies", "Kids", "Sports", "News"), visibleCategories(all, p, mine = listOf("movies")).map { it.name })
+    }
+
+    @Test
+    fun rowsMoveByArrowOrDrag() {
+        val names = listOf("A", "B", "C", "D")
+        assertEquals(listOf("B", "A", "C", "D"), moved(names, 1, 0))
+        assertEquals(listOf("B", "C", "D", "A"), moved(names, 0, 3))
+        // Dragged 1.6 rows down from B lands on D's slot; far past either end, it stops at the end.
+        assertEquals(3, dropIndex(1, 160f, 100f, 4))
+        assertEquals(0, dropIndex(2, -900f, 100f, 4))
+        assertEquals(-1, dropIndex(-1, 0f, 100f, 4))
+    }
 }

@@ -658,24 +658,31 @@ fun PosterCard(
 fun categories(profile: Profile, kind: String): List<CategoryEntity> {
     val ctx = LocalContext.current
     val all by remember(kind) { ctx.app.db.catalog().categories(kind) }.collectAsState(initial = emptyList())
-    return remember(all, profile) { visibleCategories(all, profile) }
+    val mine by ctx.app.myCategoryOrder.order.collectAsState()
+    return remember(all, profile, mine) { visibleCategories(all, profile, mine[kind].orEmpty()) }
 }
 
 /**
- * [all] (one kind) minus the profile's hidden categories and adult ones. Categories named in the
- * profile's order come first, in that order.
+ * [all] (one kind) minus the profile's hidden categories and adult ones. Categories named in [mine]
+ * (this device's order, from Settings) come first, then those in the profile's order, then the rest
+ * in the provider's order.
  */
-fun visibleCategories(all: List<CategoryEntity>, profile: Profile?): List<CategoryEntity> = arranged(all, profile, adult = false)
+fun visibleCategories(all: List<CategoryEntity>, profile: Profile?, mine: List<String> = emptyList()): List<CategoryEntity> =
+    arranged(all, profile, adult = false, mine)
 
 /** Only the adult categories of [all], arranged like [visibleCategories]. */
-fun adultCategories(all: List<CategoryEntity>, profile: Profile?): List<CategoryEntity> = arranged(all, profile, adult = true)
+fun adultCategories(all: List<CategoryEntity>, profile: Profile?, mine: List<String> = emptyList()): List<CategoryEntity> =
+    arranged(all, profile, adult = true, mine)
 
-private fun arranged(all: List<CategoryEntity>, profile: Profile?, adult: Boolean): List<CategoryEntity> {
+private fun arranged(all: List<CategoryEntity>, profile: Profile?, adult: Boolean, mine: List<String>): List<CategoryEntity> {
     val hidden = profile?.hiddenCategories.orEmpty().map { it.lowercase() }.toSet()
     val shown = all.filter { c -> c.name.lowercase() !in hidden && ADULT.containsMatchIn(c.name) == adult }
-    val order = profile?.categoryOrder?.get(all.firstOrNull()?.kind)?.withIndex()?.associate { (i, n) -> n.lowercase() to i }
-    // sortedBy is stable, so unnamed categories keep the provider's order after the named ones.
-    return if (order.isNullOrEmpty()) shown else shown.sortedBy { order[it.name.lowercase()] ?: Int.MAX_VALUE }
+    fun rank(names: List<String>?) = names.orEmpty().withIndex().associate { (i, n) -> n.lowercase() to i }
+    val own = rank(mine)
+    val order = rank(profile?.categoryOrder?.get(all.firstOrNull()?.kind))
+    if (own.isEmpty() && order.isEmpty()) return shown
+    // sortedWith is stable, so unnamed categories keep the provider's order after the named ones.
+    return shown.sortedWith(compareBy({ own[it.name.lowercase()] ?: Int.MAX_VALUE }, { order[it.name.lowercase()] ?: Int.MAX_VALUE }))
 }
 
 /** Programmes overlapping [from, from + hours) for these channels, grouped by EPG id. */
