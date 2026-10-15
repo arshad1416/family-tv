@@ -184,10 +184,17 @@ fun rememberFavouriteShowRows(favs: List<FavouriteEntity> = rememberFavourites()
 fun rememberNewEpisodeKeys(progress: Map<String, ProgressEntity> = rememberProgress()): Map<String, Int> {
     val ctx = LocalContext.current
     val rows by remember { ctx.app.userDb.user().newEpisodes() }.collectAsState(initial = emptyList())
-    return remember(rows, progress) {
+    // An episode watched on any copy of the show (another language or quality) counts as watched.
+    var copies by remember { mutableStateOf(emptyMap<String, List<Pair<String, String>>>()) }
+    LaunchedEffect(rows) {
+        copies = rows.associate { w -> "${w.sourceId}/${w.seriesId}" to ctx.app.db.copyIds(w.sourceId, w.seriesId) }
+    }
+    return remember(rows, progress, copies) {
         rows.mapNotNull { w ->
-            val n = NewEpisodeList.unwatched(w) { s, e -> progress[ProgressKey.episode(w.sourceId, w.seriesId, s, e)]?.watched == true }
-            if (n > 0) "${w.sourceId}/${w.seriesId}" to n else null
+            val key = "${w.sourceId}/${w.seriesId}"
+            val ids = copies[key] ?: listOf(w.sourceId to w.seriesId)
+            val n = NewEpisodeList.unwatched(w) { s, e -> ids.any { (src, id) -> progress[ProgressKey.episode(src, id, s, e)]?.watched == true } }
+            if (n > 0) key to n else null
         }.toMap(LinkedHashMap())
     }
 }
