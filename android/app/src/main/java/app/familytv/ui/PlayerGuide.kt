@@ -101,7 +101,8 @@ fun LiveGuide(
 ) {
     val ctx = LocalContext.current
     val all by remember { ctx.app.db.catalog().categories(Kind.LIVE) }.collectAsState(initial = emptyList())
-    val visible = remember(all, profile) { visibleCategories(all, profile) }
+    val mine by ctx.app.myCategoryOrder.order.collectAsState()
+    val visible = remember(all, profile, mine) { visibleCategories(all, profile, mine[Kind.LIVE].orEmpty()) }
     val cats = remember(visible) { listOf(favouritesCategory(Kind.LIVE)) + visible }
     val favs = rememberFavourites()
     val favKeys = rememberFavouriteKeys(favs)

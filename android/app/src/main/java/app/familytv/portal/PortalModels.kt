@@ -12,6 +12,8 @@ data class Source(
     val password: String? = null,
     val m3uUrl: String? = null,
     val epgUrl: String? = null,
+    /** The provider's page where the subscriber arranges this line's channels; shown in Settings as a QR. */
+    val sorterUrl: String? = null,
 )
 
 data class Profile(

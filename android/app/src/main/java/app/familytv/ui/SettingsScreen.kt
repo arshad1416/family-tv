@@ -24,6 +24,7 @@ import androidx.tv.material3.Text
 import app.familytv.BuildConfig
 import app.familytv.app
 import app.familytv.portal.DeviceConfig
+import app.familytv.portal.Profile
 import app.familytv.sync.PlaybackStatus
 import java.text.DateFormat
 import java.util.Date
@@ -69,8 +70,11 @@ fun SettingsScreen(vm: MainViewModel, config: DeviceConfig) {
                 }
                 // Only shown when the portal has Trakt set up.
                 if (config.trakt?.clientId != null) TraktPanel()
+                PackageSorterPanel(config.profile)
             }
         })
+        Spacer(Modifier.height(20.dp))
+        Column(if (touch) Modifier.widthIn(max = 640.dp) else Modifier) { ArrangeCategoriesPanel(config.profile ?: Profile()) }
         Spacer(Modifier.height(32.dp))
     }
 }

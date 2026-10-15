@@ -100,3 +100,16 @@ describe("probe", () => {
     expect(r).toMatchObject({ ok: false, error: "TimeoutError" });
   });
 });
+
+describe("package sorter link", () => {
+  const withSorter = (sorterUrl: string) => ({ sources: [{ ...profile.sources[0], sorterUrl }] });
+
+  it("keeps an http(s) sorter link on the source, so TVs get it", () => {
+    const p = validateProfile(withSorter("https://sorter.example.com/qr_edit?token=abc"));
+    expect(forDevice(p).sources[0].sorterUrl).toBe("https://sorter.example.com/qr_edit?token=abc");
+  });
+
+  it("refuses a sorter link that isn't http(s)", () => {
+    expect(() => validateProfile(withSorter("javascript:alert(1)"))).toThrow();
+  });
+});

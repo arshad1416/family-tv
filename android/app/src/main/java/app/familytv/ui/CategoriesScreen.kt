@@ -60,8 +60,9 @@ fun CategoriesScreen(vm: MainViewModel, profile: Profile) {
     val ctx = LocalContext.current
     val all by remember(kind) { kind?.let { ctx.app.db.catalog().categories(it) } ?: flowOf(emptyList()) }
         .collectAsState(initial = emptyList())
-    val normal = remember(all, profile) { visibleCategories(all, profile) }
-    val adults = remember(all, profile) { adultCategories(all, profile) }
+    val mine by ctx.app.myCategoryOrder.order.collectAsState()
+    val normal = remember(all, profile, mine) { visibleCategories(all, profile, mine[kind].orEmpty()) }
+    val adults = remember(all, profile, mine) { adultCategories(all, profile, mine[kind].orEmpty()) }
     val cat = (if (adult) adults else normal).firstOrNull { it.chipKey == catKey }
     val section = SECTIONS.firstOrNull { it.first == kind }?.second
     // On TV, each step down or back up moves focus to the new level's first tile, once it's there.
