@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { handle, latestApp, subtitlesApiKey, tmdbApiKey, tvdbApiKey, type Env } from "../src/index";
 
 const apk = new Uint8Array([0x50, 0x4b, 3, 4]);
-const bucket = (has: boolean) =>
-  ({ get: async (key: string) => (has && key === "family-tv.apk" ? { size: apk.length, body: new Blob([apk]).stream() } : null) }) as unknown as R2Bucket;
+const bucket = (has: boolean, keys = ["family-tv.apk"]) =>
+  ({ get: async (key: string) => (has && keys.includes(key) ? { size: apk.length, body: new Blob([apk]).stream() } : null) }) as unknown as R2Bucket;
 const env = (apps?: R2Bucket) => ({ APPS: apps }) as unknown as Env;
 
 describe("app download", () => {
@@ -12,6 +12,15 @@ describe("app download", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toBe("application/vnd.android.package-archive");
     expect(new Uint8Array(await res.arrayBuffer())).toEqual(apk);
+  });
+
+  it("serves the Rust build at /tvrust, and only that file", async () => {
+    const res = await handle(new Request("https://portal.test/tvrust"), env(bucket(true, ["family-tv-rust.apk"])));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-disposition")).toBe('attachment; filename="family-tv-rust.apk"');
+    expect(new Uint8Array(await res.arrayBuffer())).toEqual(apk);
+    expect((await handle(new Request("https://portal.test/tvrust/"), env(bucket(true)))).status).toBe(404);
+    expect((await handle(new Request("https://portal.test/tv"), env(bucket(true, ["family-tv-rust.apk"])))).status).toBe(404);
   });
 
   it("404s before an APK is uploaded or without the bucket", async () => {
