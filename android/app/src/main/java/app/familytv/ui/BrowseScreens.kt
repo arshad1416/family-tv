@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Text
 import app.familytv.app
 import app.familytv.data.CategoryEntity
+import app.familytv.data.ChannelEntity
 import app.familytv.data.Kind
 import app.familytv.data.MovieEntity
 import app.familytv.data.SeriesEntity
@@ -137,6 +138,25 @@ internal fun MovieCard(m: MovieEntity, modifier: Modifier, width: Dp?, profile: 
 }
 
 /**
+ * Live channels as logo cards. OK plays one; Up/Down in the player then zaps through the channel's
+ * own category (a list like Sports > Hockey mixes categories).
+ */
+@Composable
+internal fun ChannelPosters(channels: List<ChannelEntity>, key: String) {
+    val ctx = LocalContext.current
+    val favKeys = rememberFavouriteKeys(rememberFavourites())
+    var lastCard by rememberSaveable(key) { mutableStateOf<String?>(null) }
+    PosterGrid(channels, { "${it.sourceId}/${it.streamId}" }, lastCard) { c, mod, k ->
+        val fav = Favourites.key(Kind.LIVE, c.sourceId, c.streamId) in favKeys
+        PosterCard(
+            c.name, c.logo, mod, width = null, logo = true,
+            favourite = fav, onFavourite = { toggleFavourite(ctx, Kind.LIVE, c.sourceId, c.streamId, c.name) },
+            onFocus = { lastCard = k },
+        ) { playLive(ctx, c.sourceId, c.categoryId, 0, c.streamId) }
+    }
+}
+
+/**
  * One category of [kind] as posters: live channels and movies play on OK, a show opens through
  * [nav] (the Categories page, Adult Content included).
  */
@@ -150,14 +170,7 @@ internal fun CategoryPosters(profile: Profile, cat: CategoryEntity, nav: SeriesN
     when (cat.kind) {
         Kind.LIVE -> {
             val channels by remember(cat) { dao.channels(cat.sourceId, cat.categoryId) }.collectAsState(initial = emptyList())
-            PosterGrid(channels, { it.streamId }, lastCard) { c, mod, k ->
-                val fav = Favourites.key(Kind.LIVE, c.sourceId, c.streamId) in favKeys
-                PosterCard(
-                    c.name, c.logo, mod, width = null, logo = true,
-                    favourite = fav, onFavourite = { toggleFavourite(ctx, Kind.LIVE, c.sourceId, c.streamId, c.name) },
-                    onFocus = { lastCard = k },
-                ) { playLive(ctx, c.sourceId, c.categoryId, channels.indexOf(c), c.streamId) }
-            }
+            ChannelPosters(channels, cat.chipKey)
         }
         Kind.MOVIE -> {
             val progress = rememberProgress()

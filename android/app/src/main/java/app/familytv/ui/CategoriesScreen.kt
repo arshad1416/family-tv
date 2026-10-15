@@ -16,6 +16,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -35,40 +36,53 @@ import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Icon
 import androidx.tv.material3.Text
 import app.familytv.app
+import app.familytv.data.CatalogDao
 import app.familytv.data.CategoryEntity
+import app.familytv.data.ChannelEntity
 import app.familytv.data.Kind
 import app.familytv.portal.Profile
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.withContext
 
 private val SECTIONS = listOf(Kind.LIVE to Page.Live, Kind.MOVIE to Page.Movies, Kind.SERIES to Page.Series)
 private const val ADULT_CONTENT = "Adult Content"
+/** The Sports tile's value for `kind`: live channels from every sports category, by sport. */
+private const val SPORTS = "sports"
 
 /**
  * Pick Live TV, Movies or Series, then one of its categories. Each section ends with Adult Content,
  * holding the adult categories the other pages never show; it asks for the profile's parental PIN
- * each time it opens (and doesn't when the profile has none). Back steps up one level.
+ * each time it opens (and doesn't when the profile has none). Sports lists the live channels of
+ * the sports categories by sport ([groupBySport]). Back steps up one level.
  */
 @Composable
 fun CategoriesScreen(vm: MainViewModel, profile: Profile) {
     var kind by rememberSaveable { mutableStateOf<String?>(null) }
     var catKey by rememberSaveable { mutableStateOf<String?>(null) }
+    var sport by rememberSaveable { mutableStateOf<Sport?>(null) }
     // Not saveable: leaving the page locks Adult Content again.
     var adult by remember { mutableStateOf(false) }
     var asking by remember { mutableStateOf(false) }
     val nav = rememberSeriesNav()
     val ctx = LocalContext.current
-    val all by remember(kind) { kind?.let { ctx.app.db.catalog().categories(it) } ?: flowOf(emptyList()) }
+    val listKind = if (kind == SPORTS) Kind.LIVE else kind
+    val all by remember(listKind) { listKind?.let { ctx.app.db.catalog().categories(it) } ?: flowOf(emptyList()) }
         .collectAsState(initial = emptyList())
     val mine by ctx.app.myCategoryOrder.order.collectAsState()
-    val normal = remember(all, profile, mine) { visibleCategories(all, profile, mine[kind].orEmpty()) }
+    val normal = remember(all, profile, mine) { visibleCategories(all, profile, mine[listKind].orEmpty()) }
+    var sports by remember(kind, normal) { mutableStateOf<Map<Sport, List<ChannelEntity>>?>(null) }
+    LaunchedEffect(kind, normal) {
+        if (kind == SPORTS) sports = withContext(Dispatchers.IO) { sportsChannels(ctx.app.db.catalog(), normal) }
+    }
     val adults = remember(all, profile, mine) { adultCategories(all, profile, mine[kind].orEmpty()) }
     val cat = (if (adult) adults else normal).firstOrNull { it.chipKey == catKey }
-    val section = SECTIONS.firstOrNull { it.first == kind }?.second
+    val section = SECTIONS.firstOrNull { it.first == kind }?.second?.label ?: SPORTS_LABEL.takeIf { kind == SPORTS }
     // On TV, each step down or back up moves focus to the new level's first tile, once it's there.
     val entry = pageEntry()
     var moved by remember { mutableStateOf(false) }
-    LaunchedEffect(kind, cat, adult, asking) {
+    LaunchedEffect(kind, cat, adult, asking, sport) {
         if (!moved) { moved = true; return@LaunchedEffect }
         repeat(20) { delay(50); if (entry.attached > 0) return@LaunchedEffect entry.focus() }
     }
@@ -77,16 +91,30 @@ fun CategoriesScreen(vm: MainViewModel, profile: Profile) {
         BackHandler(enabled = kind != null) {
             when {
                 cat != null -> catKey = null
+                sport != null -> sport = null
                 asking -> asking = false
                 adult -> adult = false
                 else -> kind = null
             }
         }
         Column {
-            val title = listOfNotNull(section?.label, ADULT_CONTENT.takeIf { adult || asking }, cat?.name).joinToString("  ›  ")
+            val title = listOfNotNull(section, ADULT_CONTENT.takeIf { adult || asking }, cat?.name, sport?.label).joinToString("  ›  ")
             if (title.isNotEmpty()) Text(title, fontSize = 22.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(bottom = 12.dp))
             when {
-                section == null -> Tiles(SECTIONS.map { (k, p) -> Tile(p.label, p.icon) { kind = k; adult = false; catKey = null } })
+                section == null -> Tiles(
+                    SECTIONS.map { (k, p) -> Tile(p.label, p.icon) { kind = k; adult = false; catKey = null } } +
+                        Tile(SPORTS_LABEL, Icons.Filled.Star) { kind = SPORTS; adult = false; catKey = null; sport = null },
+                )
+                kind == SPORTS -> {
+                    val groups = sports
+                    val list = sport?.let { groups?.get(it) }
+                    when {
+                        groups == null -> EmptyState("Finding the sports channels…")
+                        list != null -> ChannelPosters(list, "sport/${sport!!.name}")
+                        groups.isEmpty() -> EmptyState("No sports channels on this line.")
+                        else -> Tiles(groups.map { (s, chs) -> Tile("${s.label} · ${chs.size}") { sport = s } })
+                    }
+                }
                 cat != null -> CategoryPosters(profile, cat, nav)
                 asking -> PinPrompt(profile) { asking = false; adult = true }
                 else -> {
@@ -101,6 +129,17 @@ fun CategoriesScreen(vm: MainViewModel, profile: Profile) {
             }
         }
     }
+}
+
+private const val SPORTS_LABEL = "Sports"
+
+/** The live channels of the sports categories among [categories] (already filtered and ordered), by sport. */
+private suspend fun sportsChannels(dao: CatalogDao, categories: List<CategoryEntity>): Map<Sport, List<ChannelEntity>> {
+    val picked = categories.filter { Sport.isSportsCategory(it.name) }
+    val channels = picked.groupBy { it.sourceId }.flatMap { (src, cats) ->
+        cats.map { it.categoryId }.distinct().chunked(500).flatMap { dao.channelsIn(src, it) }
+    }
+    return groupBySport(picked, channels)
 }
 
 private class Tile(val label: String, val icon: ImageVector? = null, val onClick: () -> Unit)
