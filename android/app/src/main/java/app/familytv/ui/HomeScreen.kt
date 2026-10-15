@@ -126,6 +126,15 @@ fun entryPoint(on: Boolean = true): Modifier {
 /** Sends focus to the page's entry point, e.g. after closing an episode list. */
 fun PageEntry.focus() { if (attached > 0) runCatching { requester.requestFocus() } }
 
+/**
+ * Coming back from the rail returns to the item you left, or the page's entry point.
+ * Needs Compose 1.8+: on 1.7 this restorer also stopped D-pad Up from a grid's top row
+ * reaching the category chips (TvFocusTest covers both).
+ */
+@OptIn(ExperimentalComposeUiApi::class)
+fun Modifier.restoresFocus(entry: PageEntry): Modifier =
+    focusRestorer { if (entry.attached > 0) entry.requester else FocusRequester.Default }
+
 @Composable
 fun pageEntry(): PageEntry = LocalPageEntry.current
 
@@ -165,7 +174,7 @@ fun HomeScreen(vm: MainViewModel, config: DeviceConfig) {
                 .fillMaxSize()
                 .padding(start = RAIL)
                 .onFocusChanged { contentFocused = it.hasFocus }
-                .focusRestorer { if (entry.attached > 0) entry.requester else FocusRequester.Default },
+                .restoresFocus(entry),
         ) {
             CompositionLocalProvider(LocalPageEntry provides entry) {
                 Box(Modifier.fillMaxSize().padding(start = 28.dp, end = 36.dp, top = 24.dp)) {
