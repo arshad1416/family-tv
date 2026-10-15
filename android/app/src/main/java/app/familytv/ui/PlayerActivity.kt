@@ -1,5 +1,6 @@
 package app.familytv.ui
 
+import android.annotation.SuppressLint
 import android.graphics.Color
 import android.net.Uri
 import android.os.Build
@@ -520,6 +521,12 @@ class PlayerActivity : ComponentActivity() {
         hideOverlay?.cancel()
         if (ms > 0) hideOverlay = lifecycleScope.launch { delay(ms); overlay.visibility = TextView.GONE }
     }
+
+    private val exit = HoldBackToExit(this)
+
+    // androidx marks this restricted, but overriding the platform method is fine.
+    @SuppressLint("RestrictedApi")
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean = exit.onKey(event) || super.dispatchKeyEvent(event)
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
         if (panelKey(keyCode, event) || upFromControls(keyCode)) return true
