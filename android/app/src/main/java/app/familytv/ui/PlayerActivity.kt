@@ -108,6 +108,8 @@ class PlayerActivity : ComponentActivity() {
     private var hideOverlay: Job? = null
 
     private var channels by mutableStateOf<List<ChannelEntity>>(emptyList())
+    /** Which list [channels] is: the category it was opened from, or one picked in the big guide. */
+    private var playingList by mutableStateOf<ListKey>("" to "")
     private var index = 0
     private var triedHls = false
     private var profile: Profile? = null
@@ -126,6 +128,7 @@ class PlayerActivity : ComponentActivity() {
     private var guideOpen by mutableStateOf(false)
     /** TV: the full guide that Back opens over live TV (see [PlayerGuide]). */
     private var bigGuide by mutableStateOf(GuideMode.Off)
+    private var guideCategories by mutableStateOf(false)
     private var guideWindow: android.graphics.Rect? = null
     private var programmes by mutableStateOf<Map<String, List<NowNext>>>(emptyMap())
     private var programmesAt = 0L
@@ -146,12 +149,13 @@ class PlayerActivity : ComponentActivity() {
     private var touch = false
     private var controls by mutableStateOf(false)
     private var controlsJob: Job? = null
-    /** TV live: Back opens the guide over the video, then shrinks the video, then leaves. */
+    /** TV live: Back opens the guide over the video, then shrinks the video, then opens the categories, then leaves. */
     private val guideBack = object : OnBackPressedCallback(false) {
-        override fun handleOnBackPressed() = when (bigGuide) {
-            GuideMode.Off -> openBigGuide()
-            GuideMode.Over -> showBigGuide(GuideMode.Picture)
-            GuideMode.Picture -> finish()
+        override fun handleOnBackPressed() = when {
+            bigGuide == GuideMode.Off -> openBigGuide()
+            bigGuide == GuideMode.Over -> showBigGuide(GuideMode.Picture)
+            !guideCategories -> guideCategories = true
+            else -> finish()
         }
     }
     private val closeGuideOnBack = object : OnBackPressedCallback(false) {
@@ -246,6 +250,7 @@ class PlayerActivity : ComponentActivity() {
                 val src = intent.getStringExtra(EXTRA_SOURCE) ?: return@launch finish()
                 val cat = intent.getStringExtra(EXTRA_CATEGORY) ?: return@launch finish()
                 channels = app.db.catalog().channels(src, cat).first()
+                playingList = src to cat
                 guideBack.isEnabled = !touch && channels.isNotEmpty()
                 val stream = intent.getStringExtra(EXTRA_STREAM)
                 index = channels.indexOfFirst { it.streamId == stream }.takeIf { it >= 0 }
@@ -274,7 +279,11 @@ class PlayerActivity : ComponentActivity() {
                 val shownMode = remember { mutableStateOf(GuideMode.Over) }
                 if (bigGuide != GuideMode.Off) shownMode.value = bigGuide
                 AnimatedVisibility(bigGuide != GuideMode.Off, enter = fadeIn(tween(VIDEO_MOVE_MS.toInt())), exit = fadeOut(tween(VIDEO_MOVE_MS.toInt()))) {
-                    PlayerGuide(shownMode.value, channels, playing, rememberFavouriteKeys(), onPick = ::pickFromBigGuide, onWindow = ::onGuideWindow)
+                    LiveGuide(
+                        shownMode.value, profile, playingList, channels, playing,
+                        categoriesOpen = guideCategories, onCategoriesOpen = { guideCategories = it },
+                        onPick = ::pickFromBigGuide, onWindow = ::onGuideWindow,
+                    )
                 }
                 if (bigGuide == GuideMode.Off) LiveOverlay(channels, playing, banner, guideOpen, programmes, onTune = ::tuneFromGuide, onFocusChannel = { if (guideOpen) banner = it }, touch = touchUi)
             } else if ((vodControls || buttonsActive) && panel == null) {
@@ -626,6 +635,7 @@ class PlayerActivity : ComponentActivity() {
     /** Over the video it closes itself when left alone; with the small picture it stays until Back or OK. */
     private fun showBigGuide(mode: GuideMode) {
         bigGuide = mode
+        if (mode != GuideMode.Picture) guideCategories = false
         bigGuideJob?.cancel()
         if (mode == GuideMode.Over) closeBigGuideLater()
         layoutVideo()
@@ -642,9 +652,17 @@ class PlayerActivity : ComponentActivity() {
         bigGuideJob = lifecycleScope.launch { delay(30_000); closeBigGuide() }
     }
 
-    /** OK in the big guide: another channel plays in the small picture; the one already playing goes full screen. */
-    private fun pickFromBigGuide(i: Int) {
-        if (i == index) return closeBigGuide()
+    /**
+     * OK in the big guide: another channel plays in the small picture; the one already playing
+     * goes full screen. A channel from another category makes that category the one Up/Down zaps through.
+     */
+    private fun pickFromBigGuide(list: ListKey, listChannels: List<ChannelEntity>, i: Int) {
+        if (list == playingList && i == index) return closeBigGuide()
+        if (list != playingList) {
+            channels = listChannels
+            playingList = list
+            programmesAt = 0
+        }
         index = i
         playChannel()
         banner = null

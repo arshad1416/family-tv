@@ -37,7 +37,9 @@ passwords on a remote, and when a TV goes black the portal tells you why.
   device, since Trakt has no live TV.
 - Live TV on a TV remote: OK shows the channel list; Back opens the full guide over the video, and
   Back again shrinks the video into a window at the top of the guide. OK on another channel plays it
-  in that window, OK again goes full screen, and a third Back leaves live TV.
+  in that window, OK again goes full screen. A third Back opens the categories beside the guide
+  (OK shows that category's channels; a channel picked there becomes the list Up/Down zaps through),
+  and Back once more leaves live TV.
 - Holding Back for about a second on any screen asks whether to exit Family TV (Cancel is selected).
 - Captions, audio/video tracks and stream info in the player. Live TV: D-pad right opens Options;
   movies and episodes: press up from the player controls for the CC, audio & video and info buttons;
