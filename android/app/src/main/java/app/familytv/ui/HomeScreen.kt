@@ -34,7 +34,7 @@ import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -99,7 +99,7 @@ enum class Page(val label: String, val icon: ImageVector) {
     Movies("Movies", Icons.Filled.Star),
     Series("Series", Icons.AutoMirrored.Filled.List),
     Search("Search", Icons.Filled.Search),
-    Settings("Settings", Icons.Filled.Settings),
+    Settings("Settings", Icons.Outlined.Settings),
 }
 
 /** Where focus lands the first time it moves from the rail into a page. */
