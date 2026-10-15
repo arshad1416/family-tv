@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.Image
@@ -62,21 +63,24 @@ class MainActivity : ComponentActivity() {
         setContent {
             FamilyTvTheme {
                 Surface(modifier = Modifier.fillMaxSize(), colors = SurfaceDefaults.colors(containerColor = Tv.Bg, contentColor = Tv.Text)) {
-                    val screen by vm.screen.collectAsState()
-                    when (val s = screen) {
-                        Screen.Loading -> Centered { Text("Starting…", fontSize = 22.sp) }
-                        is Screen.Pairing -> PairingScreen(s.code)
-                        is Screen.Syncing -> SyncingScreen(s)
-                        is Screen.Failed -> Centered {
-                            val retry = remember { FocusRequester() }
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text(s.message, fontSize = 22.sp)
-                                Spacer(Modifier.height(16.dp))
-                                TvButton("Try again", { vm.stop(); vm.start() }, Modifier.focusRequester(retry))
-                                LaunchedEffect(Unit) { runCatching { retry.requestFocus() } }
+                    // Android 15 draws edge to edge; keep clear of a phone's status and navigation bars.
+                    Box(Modifier.fillMaxSize().safeDrawingPadding()) {
+                        val screen by vm.screen.collectAsState()
+                        when (val s = screen) {
+                            Screen.Loading -> Centered { Text("Starting…", fontSize = 22.sp) }
+                            is Screen.Pairing -> PairingScreen(s.code)
+                            is Screen.Syncing -> SyncingScreen(s)
+                            is Screen.Failed -> Centered {
+                                val retry = remember { FocusRequester() }
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text(s.message, fontSize = 22.sp)
+                                    Spacer(Modifier.height(16.dp))
+                                    TvButton("Try again", { vm.stop(); vm.start() }, Modifier.focusRequester(retry))
+                                    LaunchedEffect(Unit) { runCatching { retry.requestFocus() } }
+                                }
                             }
+                            is Screen.Ready -> HomeScreen(vm, s.config)
                         }
-                        is Screen.Ready -> HomeScreen(vm, s.config)
                     }
                     message?.let { text ->
                         Dialog(onDismissRequest = { message = null }) {
