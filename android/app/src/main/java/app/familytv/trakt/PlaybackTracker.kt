@@ -77,7 +77,12 @@ class PlaybackTracker private constructor(
 
     private fun report(action: String) {
         val dur = duration()
-        if (dur <= 0) return
+        if (dur <= 0) {
+            // Some streams never report a length: keep the spot on this device (resumeAt falls back
+            // to the position), but send Trakt nothing, since it only takes a percentage.
+            if (!player.isCurrentMediaItemLive && player.currentPosition > 0) sync.record(item, TraktSync.TICK, player.currentPosition, 0, 0f)
+            return
+        }
         val ended = player.playbackState == Player.STATE_ENDED
         val pos = if (ended) dur else player.currentPosition.coerceIn(0, dur)
         sync.record(item, action, pos, dur, if (ended) 100f else ProgressRules.percent(pos, dur))
