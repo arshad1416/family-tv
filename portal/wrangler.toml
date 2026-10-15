@@ -17,6 +17,8 @@ database_id = "12893bd7-f93d-49b9-8cc0-2472e4f8370a"
 
 # Hosts the TV app at /tv. Upload with:
 #   npx wrangler r2 object put family-tv-apps/family-tv.apk --file <apk>
+# and the Rust test build (arshad1416/family-tv-rust) at /tvrust:
+#   npx wrangler r2 object put family-tv-apps/family-tv-rust.apk --file <apk> --remote
 [[r2_buckets]]
 binding = "APPS"
 bucket_name = "family-tv-apps"

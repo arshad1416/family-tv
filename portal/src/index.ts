@@ -30,6 +30,8 @@ export interface Env {
 }
 
 const APK_KEY = "family-tv.apk";
+/** The Rust rewrite (arshad1416/family-tv-rust): its own package, installed next to this app. */
+const RUST_APK_KEY = "family-tv-rust.apk";
 const LATEST_KEY = "latest.json";
 
 const PAIR_TTL_MS = 30 * 60 * 1000;
@@ -714,12 +716,12 @@ async function adminNewLine(req: Request, env: Env) {
   return json({ ok: true, sourceId, username: login.username });
 }
 
-async function appDownload(env: Env, method: string): Promise<Response> {
-  const obj = env.APPS ? await env.APPS.get(APK_KEY) : null;
+async function appDownload(env: Env, method: string, key = APK_KEY): Promise<Response> {
+  const obj = env.APPS ? await env.APPS.get(key) : null;
   if (!obj) return json({ error: "no app uploaded yet" }, 404);
   const headers = {
     "content-type": "application/vnd.android.package-archive",
-    "content-disposition": 'attachment; filename="family-tv.apk"',
+    "content-disposition": `attachment; filename="${key}"`,
     "content-length": String(obj.size),
     "cache-control": "no-store",
   };
@@ -753,6 +755,7 @@ export async function handle(req: Request, env: Env): Promise<Response> {
 
   // TV app download: short enough to type into Downloader on a remote.
   if ((m === "GET" || m === "HEAD") && (p === "/tv" || p === "/app.apk")) return appDownload(env, m);
+  if ((m === "GET" || m === "HEAD") && (p === "/tvrust" || p === "/tvrust/")) return appDownload(env, m, RUST_APK_KEY);
 
   // Device endpoints
   if (m === "POST" && p === "/api/device/register") return deviceRegister(req, env);
