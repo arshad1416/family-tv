@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.Image
@@ -63,7 +64,8 @@ class MainActivity : ComponentActivity() {
             FamilyTvTheme {
                 Surface(modifier = Modifier.fillMaxSize(), colors = SurfaceDefaults.colors(containerColor = Tv.Bg, contentColor = Tv.Text)) {
                     val screen by vm.screen.collectAsState()
-                    when (val s = screen) {
+                    // targetSdk 35 forces edge-to-edge: keep content clear of a phone's status/nav bars (no-op on TVs).
+                    Box(Modifier.fillMaxSize().safeDrawingPadding()) { when (val s = screen) {
                         Screen.Loading -> Centered { Text("Starting…", fontSize = 22.sp) }
                         is Screen.Pairing -> PairingScreen(s.code)
                         is Screen.Syncing -> SyncingScreen(s)
@@ -77,7 +79,7 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                         is Screen.Ready -> HomeScreen(vm, s.config)
-                    }
+                    } }
                     message?.let { text ->
                         Dialog(onDismissRequest = { message = null }) {
                             Column(
