@@ -19,6 +19,13 @@ passwords on a remote, and when a TV goes black the portal tells you why.
 - Lists stream straight into SQLite in batches of 500, and the guide keeps only the next 48 hours for
   your channels. That keeps memory flat on 1 GB Fire TV Sticks.
 - D-pad up/down changes channel. A live stream that fails on `.ts` retries once as HLS (`.m3u8`).
+- **Favourites:** hold OK (or press Menu) on any channel, movie or series to add or remove it; on a
+  phone or tablet tap the heart. Live TV, Movies and Series each get a *Favourites* category at the
+  top, and Home a *Favourites* row. Favourites survive channel reloads.
+- **Trakt (optional):** connect a Trakt account in Settings with a code and a QR (no typing on the
+  remote). Favourite movies and series follow the Trakt watchlist both ways, and watched marks and
+  resume points sync through Trakt scrobbling, so every device on the same Trakt account agrees.
+  Channel favourites stay on the device, since Trakt has no live TV.
 - **Help → Run a check**, which also runs by itself when playback fails. It works out which of these
   is the problem and tells the viewer in plain words:
 
@@ -100,6 +107,21 @@ Merging to `main` runs `.github/workflows/release.yml`: it builds a signed APK, 
 Secrets stay in Bitwarden Secrets Manager (EU), in a project of their own:
 `FAMILYTV_KEYSTORE_B64`, `FAMILYTV_KEYSTORE_PASSWORD` and `CLOUDFLARE_API_TOKEN` (R2 edit on this
 account). GitHub holds only `BWS_ACCESS_TOKEN`, for a machine account that can read that project.
+
+### 4. Trakt sync (optional)
+1. At <https://trakt.tv/oauth/applications/new> create an app: any name, **Redirect URI**
+   `https://familytv.arshadkazi.ca/trakt` (Trakt refuses the old `urn:ietf:wg:oauth:2.0:oob`; if you
+   change it, set `TRAKT_REDIRECT_URI` in `wrangler.toml` to match), no JavaScript (CORS) origins, and under Permissions tick
+   */scrobble* (*/checkin* is not used).
+2. Give the Worker its id and secret, then redeploy:
+   ```bash
+   cd portal
+   npx wrangler secret put TRAKT_CLIENT_ID
+   npx wrangler secret put TRAKT_CLIENT_SECRET
+   ```
+The secret never reaches the APK: the TV asks the portal (only once paired) to exchange and refresh
+its Trakt tokens, then calls Trakt directly with its own token. Without these two secrets the TVs hide
+the Trakt section. No database migration is needed; Trakt tokens live on each device.
 
 ## Develop
 | Where | Command |

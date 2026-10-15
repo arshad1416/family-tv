@@ -47,6 +47,9 @@ import app.familytv.data.Kind
 import app.familytv.data.MovieEntity
 import app.familytv.data.SeriesEntity
 import app.familytv.portal.Profile
+import app.familytv.trakt.ProgressRules
+import app.familytv.user.Favourites
+import app.familytv.user.ProgressKey
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -84,6 +87,8 @@ fun SearchScreen(vm: MainViewModel, profile: Profile) {
         )
     }
     val progs = rememberProgrammes(results.channels)
+    val favKeys = rememberFavouriteKeys()
+    val progress = rememberProgress()
 
     val touch = LocalFormFactor.current.touch
     nav.Host(profile) {
@@ -121,21 +126,35 @@ fun SearchScreen(vm: MainViewModel, profile: Profile) {
                 if (r.channels.isNotEmpty()) item("ch") {
                     Shelf("Channels") {
                         itemsIndexed(r.channels, key = { _, c -> "${c.sourceId}/${c.streamId}" }) { _, c ->
-                            ChannelCard(c, c.epgId?.let { progs[it] }?.firstOrNull()) { playLive(ctx, c.sourceId, c.categoryId, 0, c.streamId) }
+                            ChannelCard(
+                                c, c.epgId?.let { progs[it] }?.firstOrNull(),
+                                favourite = Favourites.key(Kind.LIVE, c.sourceId, c.streamId) in favKeys,
+                                onFavourite = { toggleFavourite(ctx, Kind.LIVE, c.sourceId, c.streamId, c.name) },
+                            ) { playLive(ctx, c.sourceId, c.categoryId, 0, c.streamId) }
                         }
                     }
                 }
                 if (r.movies.isNotEmpty()) item("mv") {
                     Shelf("Movies") {
                         itemsIndexed(r.movies, key = { _, m -> "${m.sourceId}/${m.streamId}" }) { _, m ->
-                            PosterCard(m.name, m.poster) { scope.launch { playMovieNow(ctx, profile, m) } }
+                            val p = progress[ProgressKey.movie(m.sourceId, m.streamId)]
+                            PosterCard(
+                                m.name, m.poster,
+                                favourite = Favourites.key(Kind.MOVIE, m.sourceId, m.streamId) in favKeys,
+                                onFavourite = { toggleFavourite(ctx, Kind.MOVIE, m.sourceId, m.streamId, m.name) },
+                                watched = p?.watched == true, progress = ProgressRules.bar(p),
+                            ) { scope.launch { playMovieNow(ctx, profile, m) } }
                         }
                     }
                 }
                 if (r.series.isNotEmpty()) item("se") {
                     Shelf("Series") {
                         itemsIndexed(r.series, key = { _, s -> s.key }) { _, s ->
-                            PosterCard(s.name, s.poster, entryPoint(nav.back == s.key)) { nav.open = s }
+                            PosterCard(
+                                s.name, s.poster, entryPoint(nav.back == s.key),
+                                favourite = Favourites.key(Kind.SERIES, s.sourceId, s.seriesId) in favKeys,
+                                onFavourite = { toggleFavourite(ctx, Kind.SERIES, s.sourceId, s.seriesId, s.name) },
+                            ) { nav.open = s }
                         }
                     }
                 }

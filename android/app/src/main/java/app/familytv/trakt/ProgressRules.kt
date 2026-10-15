@@ -1,0 +1,35 @@
+package app.familytv.trakt
+
+import app.familytv.user.ProgressEntity
+
+/** When something counts as watched and where to pick it up again. Pure, unit tested. */
+object ProgressRules {
+    /** Trakt marks a scrobble as watched from 80%; we use the same line so devices agree. */
+    const val WATCHED_PERCENT = 80f
+
+    /** Less than this in, starting over is nicer than a resume. */
+    private const val MIN_RESUME_MS = 30_000L
+
+    fun percent(positionMs: Long, durationMs: Long): Float =
+        if (durationMs <= 0) 0f else (positionMs * 100f / durationMs).coerceIn(0f, 100f)
+
+    fun isWatched(percent: Float) = percent >= WATCHED_PERCENT
+
+    /**
+     * Where to start, or null for the beginning. Another device's resume point only has a
+     * percentage (Trakt keeps no position), so it becomes a position once the duration is known.
+     * Only the percentage decides: something watched before still resumes a rewatch.
+     */
+    fun resumeAt(p: ProgressEntity?, durationMs: Long): Long? {
+        if (p == null || isWatched(p.percent)) return null
+        val at = if (durationMs > 0 && p.percent > 0f) (durationMs * p.percent / 100f).toLong() else p.positionMs
+        if (at < MIN_RESUME_MS) return null
+        return if (durationMs > 0) at.coerceAtMost(durationMs - 5_000).takeIf { it >= MIN_RESUME_MS } else at
+    }
+
+    /** A remote resume point only replaces ours when it was saved later. */
+    fun remoteIsNewer(remotePausedAt: Long, local: ProgressEntity?): Boolean = local == null || remotePausedAt > local.updatedAt
+
+    /** Fraction for the progress line on a poster or episode (0 when there is none to show). */
+    fun bar(p: ProgressEntity?): Float = if (p == null || isWatched(p.percent)) 0f else (p.percent / 100f).coerceIn(0f, 1f)
+}

@@ -117,13 +117,13 @@ class Catalog(private val db: AppDb) {
 
         t.step("Loading movies", 0.35f)
         streamBatches(XtreamUrls.api(server, user, pass, "get_vod_streams"), { dao.upsertMovies(it) }, { t.rows(it, 20_000, "movies") }) { st ->
-            MovieEntity(s.id, st.id, st.name, st.icon, st.categoryId, st.rating, st.ext, null, st.added, gen)
+            MovieEntity(s.id, st.id, st.name, st.icon, st.categoryId, st.rating, st.ext, null, st.added, gen, st.tmdb, st.year)
         }
         dao.pruneMovies(s.id, gen)
 
         t.step("Loading series", 0.2f)
         streamBatches(XtreamUrls.api(server, user, pass, "get_series"), { dao.upsertSeries(it) }, { t.rows(it, 5_000, "series") }) { st ->
-            SeriesEntity(s.id, st.id, st.name, st.icon, st.categoryId, st.plot, st.rating, gen)
+            SeriesEntity(s.id, st.id, st.name, st.icon, st.categoryId, st.plot, st.rating, gen, st.tmdb, st.year)
         }
         dao.pruneSeries(s.id, gen)
 
@@ -204,6 +204,13 @@ class Catalog(private val db: AppDb) {
     suspend fun episodes(sourceId: String, seriesId: String, s: Source): List<XtreamParser.Episode> = withContext(Dispatchers.IO) {
         val server = dao.source(sourceId)?.activeServer ?: s.serverUrls!!.first()
         get(XtreamUrls.api(server, s.username!!, s.password.orEmpty(), "get_series_info", mapOf("series_id" to seriesId))) { XtreamParser.episodes(it) }
+    }
+
+    /** TMDB/IMDb ids and year from get_vod_info or get_series_info (Xtream only). */
+    suspend fun infoIds(sourceId: String, id: String, s: Source, series: Boolean): XtInfoIds = withContext(Dispatchers.IO) {
+        val server = dao.source(sourceId)?.activeServer ?: s.serverUrls!!.first()
+        val (action, param) = if (series) "get_series_info" to "series_id" else "get_vod_info" to "vod_id"
+        get(XtreamUrls.api(server, s.username!!, s.password.orEmpty(), action, mapOf(param to id))) { XtreamParser.infoIds(it) }
     }
 
     // --- streaming helpers ---

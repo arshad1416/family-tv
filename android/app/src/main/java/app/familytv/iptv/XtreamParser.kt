@@ -18,7 +18,13 @@ data class XtStream(
     val rating: String?,
     val added: Long,
     val plot: String?,
+    /** TMDB id when the panel lists it (movies and series); lets Trakt match without a title search. */
+    val tmdb: String? = null,
+    val year: Int? = null,
 )
+
+/** Ids from get_vod_info / get_series_info, for matching against Trakt. */
+data class XtInfoIds(val tmdb: String?, val imdb: String?, val year: Int?)
 
 data class XtAccount(
     val auth: Boolean,
@@ -64,6 +70,8 @@ object XtreamParser {
                     rating = m["rating"]?.takeIf { it.isNotBlank() && it != "0" },
                     added = (m["added"] ?: m["last_modified"])?.toLongOrNull()?.times(1000) ?: 0L,
                     plot = m["plot"]?.takeIf { it.isNotBlank() },
+                    tmdb = tmdbId(m["tmdb"] ?: m["tmdb_id"]),
+                    year = yearOf(m["year"] ?: m["releaseDate"] ?: m["release_date"] ?: m["releasedate"]),
                 ),
             )
         }
@@ -134,6 +142,33 @@ object XtreamParser {
         r.endObject()
         return out.sortedWith(compareBy({ it.season }, { it.episode }))
     }
+
+    /** get_vod_info / get_series_info: the ids live in the top-level "info" object. */
+    fun infoIds(reader: Reader): XtInfoIds {
+        val r = JsonReader(reader).apply { isLenient = true }
+        if (r.peek() != JsonToken.BEGIN_OBJECT) { r.skipValue(); return XtInfoIds(null, null, null) }
+        var info: Map<String, String?> = emptyMap()
+        r.beginObject()
+        while (r.hasNext()) {
+            if (r.nextName() == "info" && r.peek() == JsonToken.BEGIN_OBJECT) info = readFlatObject(r) else r.skipValue()
+        }
+        r.endObject()
+        val imdb = (info["imdb_id"] ?: info["imdb"])?.trim()?.takeIf { IMDB.matches(it) }
+        return XtInfoIds(
+            tmdb = tmdbId(info["tmdb_id"] ?: info["tmdb"]),
+            imdb = imdb,
+            year = yearOf(info["year"] ?: info["releasedate"] ?: info["releaseDate"] ?: info["release_date"]),
+        )
+    }
+
+    private val IMDB = Regex("tt\\d{5,10}")
+    private val YEAR = Regex("(19|20)\\d{2}")
+
+    /** Panels send "0", "", "null" or a float for a missing id. */
+    internal fun tmdbId(v: String?): String? =
+        v?.trim()?.substringBefore('.')?.takeIf { id -> id.isNotEmpty() && id.all { it.isDigit() } && id.trimStart('0').isNotEmpty() }
+
+    internal fun yearOf(v: String?): Int? = v?.let { YEAR.find(it)?.value?.toInt() }
 
     private fun eachObject(reader: Reader, onObject: (Map<String, String?>) -> Unit) {
         val r = JsonReader(reader).apply { isLenient = true }

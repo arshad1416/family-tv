@@ -34,6 +34,7 @@ import app.familytv.data.NowNext
 import app.familytv.iptv.Streams
 import app.familytv.portal.Profile
 import app.familytv.sync.PlaybackStatus
+import app.familytv.trakt.PlaybackTracker
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -63,6 +64,8 @@ class PlayerActivity : ComponentActivity() {
     private var title = ""
     private var tunedAt = 0L
     private var retries = 0
+    /** Movies and episodes: resume point and Trakt scrobbles. */
+    private var tracker: PlaybackTracker? = null
 
     // Live overlay state, drawn by LiveOverlay in a ComposeView.
     private var overlayView: ComposeView? = null
@@ -136,6 +139,7 @@ class PlayerActivity : ComponentActivity() {
             title = intent.getStringExtra(EXTRA_TITLE).orEmpty()
             view.useController = true
             start(url, title)
+            tracker = PlaybackTracker.attach(this, intent, player)
         } else {
             view.useController = false
             view.isFocusable = false
@@ -358,6 +362,7 @@ class PlayerActivity : ComponentActivity() {
 
     override fun onDestroy() {
         PlaybackStatus.stopped()
+        tracker?.finish()
         player.release()
         super.onDestroy()
     }

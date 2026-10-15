@@ -83,6 +83,8 @@ class CommandRunner(private val context: Context) {
             context.app.catalog.refresh(profile)
             PlaybackStatus.lastRefresh = System.currentTimeMillis()
             PlaybackStatus.lastRefreshError = null
+            // New lists can carry titles that are on the Trakt watchlist or history: pull again.
+            context.app.trakt.sync.soon()
         } catch (e: Exception) {
             PlaybackStatus.lastRefreshError = e.message
             throw e

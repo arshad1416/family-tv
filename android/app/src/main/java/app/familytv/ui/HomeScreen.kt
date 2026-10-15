@@ -82,6 +82,10 @@ import app.familytv.iptv.Streams
 import app.familytv.portal.DeviceConfig
 import app.familytv.portal.Profile
 import app.familytv.sync.PlaybackStatus
+import app.familytv.trakt.PlayItem
+import app.familytv.trakt.ProgressRules
+import app.familytv.user.Favourites
+import app.familytv.user.ProgressKey
 import coil.compose.AsyncImage
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.flowOf
@@ -362,7 +366,8 @@ private fun HomePage(vm: MainViewModel, profile: Profile, onNavigate: (Page) -> 
     val hero = remember { mutableStateOf<Hero?>(null) }
     val nav = rememberSeriesNav()
 
-    val liveCat = categories(vm, profile, Kind.LIVE).firstOrNull()
+    val liveCats = categories(vm, profile, Kind.LIVE)
+    val liveCat = liveCats.firstOrNull()
     val channels by remember(liveCat) { liveCat?.let { dao.channels(it.sourceId, it.categoryId) } ?: flowOf(emptyList()) }.collectAsState(initial = emptyList())
     val onNow = remember(channels) { channels.take(30) }
     val progs = rememberProgrammes(onNow)
@@ -371,13 +376,30 @@ private fun HomePage(vm: MainViewModel, profile: Profile, onNavigate: (Page) -> 
     val movieKeys = remember(movieCats) { movieCats.map { it.sourceId to it.categoryId }.toSet() }
     var recent by remember { mutableStateOf(emptyList<MovieEntity>()) }
     LaunchedEffect(movieKeys) { recent = dao.recentMovies(300).filter { (it.sourceId to it.categoryId) in movieKeys }.take(30) }
-    val seriesCat = categories(vm, profile, Kind.SERIES).firstOrNull()
+    val seriesCats = categories(vm, profile, Kind.SERIES)
+    val seriesCat = seriesCats.firstOrNull()
     val series by remember(seriesCat) { seriesCat?.let { dao.series(it.sourceId, it.categoryId) } ?: flowOf(emptyList()) }.collectAsState(initial = emptyList())
 
-    if (onNow.isEmpty() && recent.isEmpty() && series.isEmpty()) {
+    // Favourites of every kind, newest first, as one row.
+    val favs = rememberFavourites()
+    val favKeys = rememberFavouriteKeys(favs)
+    val favChannels = rememberFavouriteChannels(favs, liveCats)
+    val favMovies = rememberFavouriteMovies(favs, movieCats)
+    val favSeries = rememberFavouriteSeries(favs, seriesCats)
+    val favRow: List<Pair<String, Any>> = remember(favs, favChannels, favMovies, favSeries) {
+        val byKey = HashMap<String, Any>()
+        favChannels.forEach { byKey[Favourites.key(Kind.LIVE, it.sourceId, it.streamId)] = it }
+        favMovies.forEach { byKey[Favourites.key(Kind.MOVIE, it.sourceId, it.streamId)] = it }
+        favSeries.forEach { byKey[Favourites.key(Kind.SERIES, it.sourceId, it.seriesId)] = it }
+        favs.mapNotNull { f -> Favourites.key(f.kind, f.sourceId, f.itemId).let { k -> byKey[k]?.let { k to it } } }
+    }
+    val progress = rememberProgress()
+    var openedFromFavourites by remember { mutableStateOf(false) }
+
+    if (onNow.isEmpty() && recent.isEmpty() && series.isEmpty() && favRow.isEmpty()) {
         return EmptyState(PlaybackStatus.lastRefreshError?.let { "Couldn't load channels: $it. Open Settings and run a check." } ?: "Nothing here yet.")
     }
-    val firstRow = when { nav.back != null -> -1; onNow.isNotEmpty() -> 0; recent.isNotEmpty() -> 1; else -> 2 }
+    val firstRow = when { nav.back != null -> -1; favRow.isNotEmpty() -> 3; onNow.isNotEmpty() -> 0; recent.isNotEmpty() -> 1; else -> 2 }
     // Touch: a swipeable hero of what's on and what's new, since there's no focus to follow.
     val heroes = remember(touch, onNow, progs, recent) {
         if (!touch) emptyList() else buildList {
@@ -396,11 +418,40 @@ private fun HomePage(vm: MainViewModel, profile: Profile, onNavigate: (Page) -> 
             if (!touch) HeroHeader(hero)
             LazyColumn(verticalArrangement = Arrangement.spacedBy(22.dp), contentPadding = PaddingValues(bottom = 40.dp)) {
                 if (heroes.isNotEmpty()) item("hero") { HeroCarousel(heroes) }
+                if (favRow.isNotEmpty()) item("favourites") {
+                    Shelf("Favourites") {
+                        itemsIndexed(favRow, key = { _, (k, _) -> k }) { i, (_, x) ->
+                            val entry = if (firstRow < 0) openedFromFavourites && x is SeriesEntity && nav.back == x.key else firstRow == 3 && i == 0
+                            when (x) {
+                                is ChannelEntity -> PosterCard(
+                                    x.name, x.logo, entryPoint(entry), logo = true, favourite = true,
+                                    onFavourite = { toggleFavourite(ctx, Kind.LIVE, x.sourceId, x.streamId, x.name) },
+                                    onFocus = { hero.value = Hero(x.name, "Favourite channel  ·  ${x.num}", null) },
+                                ) { playLive(ctx, x.sourceId, x.categoryId, 0, x.streamId) }
+                                is MovieEntity -> {
+                                    val p = progress[ProgressKey.movie(x.sourceId, x.streamId)]
+                                    PosterCard(
+                                        x.name, x.poster, entryPoint(entry), favourite = true, watched = p?.watched == true, progress = ProgressRules.bar(p),
+                                        onFavourite = { toggleFavourite(ctx, Kind.MOVIE, x.sourceId, x.streamId, x.name) },
+                                        onFocus = { hero.value = Hero(x.name, "Favourite movie", null) },
+                                    ) { scope.launch { playMovieNow(ctx, profile, x) } }
+                                }
+                                is SeriesEntity -> PosterCard(
+                                    x.name, x.poster, entryPoint(entry), favourite = true,
+                                    onFavourite = { toggleFavourite(ctx, Kind.SERIES, x.sourceId, x.seriesId, x.name) },
+                                    onFocus = { hero.value = Hero(x.name, "Favourite series", x.plot) },
+                                ) { openedFromFavourites = true; nav.open = x }
+                            }
+                        }
+                    }
+                }
                 if (onNow.isNotEmpty()) item("now") {
                     Shelf("On now", viewAll(Page.Live)) {
                         itemsIndexed(onNow, key = { _, c -> c.streamId }) { i, c ->
                             val p = c.epgId?.let { progs[it] }.orEmpty()
                             ChannelCard(c, p.firstOrNull(), entryPoint(firstRow == 0 && i == 0),
+                                favourite = Favourites.key(Kind.LIVE, c.sourceId, c.streamId) in favKeys,
+                                onFavourite = { toggleFavourite(ctx, Kind.LIVE, c.sourceId, c.streamId, c.name) },
                                 onFocus = { hero.value = Hero(p.firstOrNull()?.title ?: c.name, "${c.num}  ${c.name}", p.firstOrNull()?.let { "${time(it.start)} – ${time(it.stop)}" + (p.getOrNull(1)?.let { n -> "   ·   Next: ${n.title}" } ?: "") }) },
                             ) { playLive(ctx, c.sourceId, c.categoryId, i) }
                         }
@@ -409,7 +460,14 @@ private fun HomePage(vm: MainViewModel, profile: Profile, onNavigate: (Page) -> 
                 if (recent.isNotEmpty()) item("movies") {
                     Shelf("Recently added movies", viewAll(Page.Movies)) {
                         itemsIndexed(recent, key = { _, m -> "${m.sourceId}/${m.streamId}" }) { i, m ->
-                            PosterCard(m.name, m.poster, entryPoint(firstRow == 1 && i == 0), onFocus = { hero.value = Hero(m.name, "Movie", m.rating?.takeIf { it.isNotBlank() && it != "0" }?.let { "Rating $it" }) }) {
+                            val p = progress[ProgressKey.movie(m.sourceId, m.streamId)]
+                            PosterCard(
+                                m.name, m.poster, entryPoint(firstRow == 1 && i == 0),
+                                favourite = Favourites.key(Kind.MOVIE, m.sourceId, m.streamId) in favKeys,
+                                onFavourite = { toggleFavourite(ctx, Kind.MOVIE, m.sourceId, m.streamId, m.name) },
+                                watched = p?.watched == true, progress = ProgressRules.bar(p),
+                                onFocus = { hero.value = Hero(m.name, "Movie", m.rating?.takeIf { it.isNotBlank() && it != "0" }?.let { "Rating $it" }) },
+                            ) {
                                 scope.launch { playMovieNow(ctx, profile, m) }
                             }
                         }
@@ -418,7 +476,12 @@ private fun HomePage(vm: MainViewModel, profile: Profile, onNavigate: (Page) -> 
                 if (series.isNotEmpty()) item("series") {
                     Shelf("Series", viewAll(Page.Series)) {
                         itemsIndexed(series.take(30), key = { _, s -> "${s.sourceId}/${s.seriesId}" }) { i, s ->
-                            PosterCard(s.name, s.poster, entryPoint(if (firstRow < 0) nav.back == s.key else firstRow == 2 && i == 0), onFocus = { hero.value = Hero(s.name, "Series", s.plot) }) { nav.open = s }
+                            PosterCard(
+                                s.name, s.poster, entryPoint(if (firstRow < 0) !openedFromFavourites && nav.back == s.key else firstRow == 2 && i == 0),
+                                favourite = Favourites.key(Kind.SERIES, s.sourceId, s.seriesId) in favKeys,
+                                onFavourite = { toggleFavourite(ctx, Kind.SERIES, s.sourceId, s.seriesId, s.name) },
+                                onFocus = { hero.value = Hero(s.name, "Series", s.plot) },
+                            ) { openedFromFavourites = false; nav.open = s }
                         }
                     }
                 }
@@ -458,9 +521,18 @@ fun Shelf(title: String, onViewAll: (() -> Unit)? = null, content: LazyListScope
 }
 
 @Composable
-fun ChannelCard(c: ChannelEntity, now: NowNext?, modifier: Modifier = Modifier, onFocus: () -> Unit = {}, onClick: () -> Unit) {
-    FocusBox(onClick = onClick, onFocus = onFocus, modifier = modifier.width(280.dp).height(112.dp), scale = 1.04f) { focused ->
-        Row(Modifier.fillMaxSize().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+fun ChannelCard(
+    c: ChannelEntity,
+    now: NowNext?,
+    modifier: Modifier = Modifier,
+    favourite: Boolean = false,
+    onFavourite: (() -> Unit)? = null,
+    onFocus: () -> Unit = {},
+    onClick: () -> Unit,
+) {
+    val heart = LocalFormFactor.current.touch && onFavourite != null
+    FocusBox(onClick = onClick, onLongClick = onFavourite, onFocus = onFocus, modifier = modifier.width(280.dp).height(112.dp), scale = 1.04f) { focused ->
+        Row(Modifier.fillMaxSize().padding(start = 12.dp, top = 12.dp, bottom = 12.dp, end = if (heart) 0.dp else 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Logo(c.logo, 64)
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
@@ -471,16 +543,43 @@ fun ChannelCard(c: ChannelEntity, now: NowNext?, modifier: Modifier = Modifier, 
                     ProgressLine(progress(now.start, now.stop), fill = if (focused) Tv.Text else Tv.Accent)
                 }
             }
+            if (heart) FavouriteButton(favourite, onFavourite!!)
+            else MarkBadge(favourite = favourite, size = 20.dp)
         }
     }
 }
 
+/**
+ * Artwork tile. [onFavourite] adds hold-OK or Menu (TV) or a heart button (touch) to toggle the
+ * favourite; [watched] and [progress] draw the tick and the resume line. [logo] fits a channel
+ * logo instead of cropping a poster.
+ */
 @Composable
-fun PosterCard(name: String, poster: String?, modifier: Modifier = Modifier, width: Dp? = 140.dp, onFocus: () -> Unit = {}, onClick: () -> Unit) {
+fun PosterCard(
+    name: String,
+    poster: String?,
+    modifier: Modifier = Modifier,
+    width: Dp? = 140.dp,
+    logo: Boolean = false,
+    favourite: Boolean = false,
+    onFavourite: (() -> Unit)? = null,
+    watched: Boolean = false,
+    progress: Float = 0f,
+    onFocus: () -> Unit = {},
+    onClick: () -> Unit,
+) {
+    val heart = LocalFormFactor.current.touch && onFavourite != null
     Column(if (width != null) Modifier.width(width) else Modifier.fillMaxWidth()) {
-        FocusBox(onClick = onClick, onFocus = onFocus, outline = true, scale = 1.06f, color = Tv.Raised, modifier = modifier.fillMaxWidth().aspectRatio(2f / 3f), contentAlignment = Alignment.Center) {
+        FocusBox(onClick = onClick, onLongClick = onFavourite, onFocus = onFocus, outline = true, scale = 1.06f, color = Tv.Raised, modifier = modifier.fillMaxWidth().aspectRatio(2f / 3f), contentAlignment = Alignment.Center) {
             Text(name, Modifier.padding(8.dp), fontSize = 13.sp, maxLines = 4, color = Tv.Muted)
-            if (poster != null) AsyncImage(poster, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+            if (poster != null) {
+                if (logo) AsyncImage(poster, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize().padding(20.dp))
+                else AsyncImage(poster, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+            }
+            MarkBadge(Modifier.align(Alignment.TopStart), watched = watched)
+            if (heart) FavouriteButton(favourite, onFavourite!!, Modifier.align(Alignment.TopEnd))
+            else MarkBadge(Modifier.align(Alignment.TopEnd), favourite = favourite)
+            if (progress > 0f) ProgressLine(progress, Modifier.align(Alignment.BottomCenter).padding(8.dp), height = 4.dp)
         }
         Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 13.sp, color = Tv.Muted, modifier = Modifier.padding(top = 6.dp))
     }
@@ -537,10 +636,12 @@ fun playLive(ctx: Context, sourceId: String, categoryId: String, index: Int, str
     )
 }
 
-fun play(ctx: Context, url: String, title: String) {
-    ctx.startActivity(Intent(ctx, PlayerActivity::class.java).putExtra(PlayerActivity.EXTRA_URL, url).putExtra(PlayerActivity.EXTRA_TITLE, title))
+/** [item] names the catalog movie or episode, so the player can resume it and tell Trakt. */
+fun play(ctx: Context, url: String, title: String, item: PlayItem? = null) {
+    val i = Intent(ctx, PlayerActivity::class.java).putExtra(PlayerActivity.EXTRA_URL, url).putExtra(PlayerActivity.EXTRA_TITLE, title)
+    ctx.startActivity(item?.putInto(i) ?: i)
 }
 
 suspend fun playMovieNow(ctx: Context, profile: Profile, m: MovieEntity) {
-    Streams(ctx.app.db, profile).movie(m)?.let { play(ctx, it, m.name) }
+    Streams(ctx.app.db, profile).movie(m)?.let { play(ctx, it, m.name, PlayItem.movie(m.sourceId, m.streamId, m.name)) }
 }

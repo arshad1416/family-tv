@@ -25,7 +25,11 @@ bucket_name = "family-tv-apps"
 # Latest TV app build offered to devices (0 = no update offered).
 LATEST_APP_VERSION_CODE = "0"
 LATEST_APP_URL = ""
+# Redirect URI registered on the Trakt app (only checked by Trakt on token refresh).
+TRAKT_REDIRECT_URI = "https://familytv.arshadkazi.ca/trakt"
 
 # Secrets (wrangler secret put):
 #   ADMIN_TOKEN  long random string; the admin page asks for it once per browser
 #   CONFIG_KEY   base64 of 32 random bytes; encrypts provider logins at rest
+#   TRAKT_CLIENT_ID      optional: Trakt app client id (trakt.tv/oauth/applications); enables Trakt sync on the TVs
+#   TRAKT_CLIENT_SECRET  optional: that app's client secret; only this Worker sees it, never the APK

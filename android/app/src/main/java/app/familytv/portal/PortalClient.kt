@@ -75,6 +75,13 @@ class PortalClient(context: Context, private val baseUrl: String = BuildConfig.P
     suspend fun reachability(urls: List<String>): List<ReachResult> =
         post("/api/device/reachability", mapOf("urls" to urls), ReachResponse::class.java).results
 
+    /**
+     * Trakt sign-in calls that need the client secret: "code", "token", "refresh" or "revoke".
+     * The portal adds the secret and answers with Trakt's own status.
+     */
+    suspend fun trakt(call: String, body: Map<String, String> = emptyMap()): TraktProxyResult =
+        post("/api/device/trakt/$call", body, TraktProxyResult::class.java)
+
     private suspend fun <T> get(path: String, type: Class<T>): T = call(Request.Builder().url(baseUrl + path).get(), type, true)
 
     private suspend fun <T> post(path: String, body: Any, type: Class<T>, auth: Boolean = true): T =

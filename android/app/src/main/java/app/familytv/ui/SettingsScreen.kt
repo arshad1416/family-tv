@@ -70,6 +70,8 @@ fun SettingsScreen(vm: MainViewModel, config: DeviceConfig) {
                     Info("App version", BuildConfig.VERSION_NAME)
                     Info("Lists updated", if (PlaybackStatus.lastRefresh > 0) DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(PlaybackStatus.lastRefresh)) else "this session not yet")
                 }
+                // Only shown when the portal has Trakt set up.
+                if (config.trakt?.clientId != null) TraktPanel(if (touch) Modifier else Modifier.widthIn(max = 560.dp))
                 if (!config.profile?.parentalPin.isNullOrEmpty() && !unlocked) {
                     Panel {
                         Text("Parental lock", fontSize = 20.sp, fontWeight = FontWeight.Bold)
@@ -87,13 +89,13 @@ fun SettingsScreen(vm: MainViewModel, config: DeviceConfig) {
 }
 
 @Composable
-private fun Panel(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+internal fun Panel(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
     val fill = if (LocalFormFactor.current.touch) Modifier.fillMaxWidth() else Modifier
     Column(modifier.then(fill).background(Tv.Panel, Tv.Shape).padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) { content() }
 }
 
 @Composable
-private fun Info(label: String, value: String) {
+internal fun Info(label: String, value: String) {
     // The value takes the rest of the row and wraps, so a narrow panel can't squeeze it to nothing.
     Row {
         Text(label, Modifier.width(130.dp), fontSize = 15.sp, color = Tv.Muted)
