@@ -32,4 +32,4 @@ TRAKT_REDIRECT_URI = "https://familytv.arshadkazi.ca/trakt"
 #   ADMIN_TOKEN  long random string; the admin page asks for it once per browser
 #   CONFIG_KEY   base64 of 32 random bytes; encrypts provider logins at rest
 #   TRAKT_CLIENT_ID      optional: Trakt app client id (trakt.tv/oauth/applications); enables Trakt sync on the TVs
-#   TRAKT_CLIENT_SECRET  optional: that app's client secret; only this Worker sees it, never the APK
+#   TRAKT_CLIENT_SECRET  optional, older Trakt apps only (new apps are PKCE-only and issue none); only this Worker sees it

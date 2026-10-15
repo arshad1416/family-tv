@@ -247,7 +247,14 @@ export function traktRedirectUri(env: Env, req: Request): string {
 }
 
 export function traktConfigured(env: Env): boolean {
-  return !!(env.TRAKT_CLIENT_ID && env.TRAKT_CLIENT_SECRET);
+  return !!env.TRAKT_CLIENT_ID;
+}
+
+/** Trakt apps made since Oct 2026 are PKCE-only and have no secret; older apps still send theirs. */
+function traktClient(env: Env): Record<string, string> {
+  return env.TRAKT_CLIENT_SECRET
+    ? { client_id: env.TRAKT_CLIENT_ID!, client_secret: env.TRAKT_CLIENT_SECRET }
+    : { client_id: env.TRAKT_CLIENT_ID! };
 }
 
 async function requireTraktDevice(req: Request, env: Env): Promise<DeviceRow> {
@@ -303,8 +310,7 @@ async function traktDeviceToken(req: Request, env: Env) {
   const b = await body<{ code?: unknown }>(req);
   return traktPost(env, "/oauth/device/token", {
     code: tokenField(b.code, "code"),
-    client_id: env.TRAKT_CLIENT_ID!,
-    client_secret: env.TRAKT_CLIENT_SECRET!,
+    ...traktClient(env),
   });
 }
 
@@ -313,8 +319,7 @@ async function traktRefresh(req: Request, env: Env) {
   const b = await body<{ refreshToken?: unknown }>(req);
   return traktPost(env, "/oauth/token", {
     refresh_token: tokenField(b.refreshToken, "refreshToken"),
-    client_id: env.TRAKT_CLIENT_ID!,
-    client_secret: env.TRAKT_CLIENT_SECRET!,
+    ...traktClient(env),
     redirect_uri: traktRedirectUri(env, req),
     grant_type: "refresh_token",
   });
@@ -325,8 +330,7 @@ async function traktRevoke(req: Request, env: Env) {
   const b = await body<{ token?: unknown }>(req);
   return traktPost(env, "/oauth/revoke", {
     token: tokenField(b.token, "token"),
-    client_id: env.TRAKT_CLIENT_ID!,
-    client_secret: env.TRAKT_CLIENT_SECRET!,
+    ...traktClient(env),
   });
 }
 

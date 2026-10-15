@@ -66,6 +66,15 @@ describe("trakt token proxy", () => {
     expect(calls[0].body).toEqual({ code: "dc", client_id: "client-123", client_secret: SECRET });
   });
 
+  it("works without a secret for PKCE-only Trakt apps", async () => {
+    const calls = mockTrakt(400, {});
+    const e = { ...env(), TRAKT_CLIENT_SECRET: undefined } as unknown as Env;
+    expect((await handle(post("/api/device/trakt/token", { code: "dc" }), e)).status).toBe(200);
+    expect(calls[0].body).toEqual({ code: "dc", client_id: "client-123" });
+    await handle(post("/api/device/trakt/refresh", { refreshToken: "r1" }), e);
+    expect(calls[1].body).not.toHaveProperty("client_secret");
+  });
+
   it("refreshes with the registered redirect URI", async () => {
     const calls = mockTrakt(200, { access_token: "a2", refresh_token: "r2", expires_in: 86400, created_at: 1 });
     const res = await handle(post("/api/device/trakt/refresh", { refreshToken: "r1" }), env());

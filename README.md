@@ -113,14 +113,16 @@ account). GitHub holds only `BWS_ACCESS_TOKEN`, for a machine account that can r
    `https://familytv.arshadkazi.ca/trakt` (Trakt refuses the old `urn:ietf:wg:oauth:2.0:oob`; if you
    change it, set `TRAKT_REDIRECT_URI` in `wrangler.toml` to match), no JavaScript (CORS) origins, and under Permissions tick
    */scrobble* (*/checkin* is not used).
-2. Give the Worker its id and secret, then redeploy:
+2. Give the Worker the app's Client ID, then redeploy:
    ```bash
    cd portal
    npx wrangler secret put TRAKT_CLIENT_ID
-   npx wrangler secret put TRAKT_CLIENT_SECRET
    ```
-The secret never reaches the APK: the TV asks the portal (only once paired) to exchange and refresh
-its Trakt tokens, then calls Trakt directly with its own token. Without these two secrets the TVs hide
+   Apps created since October 2026 are PKCE-only and show "Not issued" for the Client Secret; the
+   device-code sign-in works without one. An older app that has a secret can also set
+   `TRAKT_CLIENT_SECRET`, which only this Worker ever sees.
+The TV asks the portal (only once paired) to exchange and refresh its Trakt tokens, then calls Trakt
+directly with its own token. Without `TRAKT_CLIENT_ID` the TVs hide
 the Trakt section. No database migration is needed; Trakt tokens live on each device.
 
 ## Develop
