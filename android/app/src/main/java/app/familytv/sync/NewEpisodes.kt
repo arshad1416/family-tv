@@ -21,27 +21,34 @@ import app.familytv.portal.Profile
 import app.familytv.ui.MainActivity
 import app.familytv.user.EpisodeWatchEntity
 import app.familytv.user.NewEpisodeList
-import app.familytv.user.ProgressKey
 import app.familytv.user.Pending
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
 
 /**
- * Watches favourite shows for new episodes. Every few hours the background check-in asks the
- * provider for each favourite show's episode list; newer episodes than last time are added to the
- * show's unwatched list (its counter and a row on Home) and post a notification. Watching them
- * counts the show back down. The first look at a show only records where it is, so adding a
- * favourite never alerts.
+ * Watches favourite shows for episodes waiting to be watched. Every few hours (and when the app
+ * starts, if due) it asks the provider for each favourite show's episode list. The episodes after
+ * the furthest one the family watched, plus any that arrived since the last check, become the
+ * show's counter and put it in a row on Home; arrivals also post a notification. Watching them
+ * counts the show back down. The first look at a show never alerts.
  */
 class NewEpisodes(private val app: FamilyTvApp) {
     private val dao get() = app.userDb.user()
     private val prefs get() = app.getSharedPreferences("new_episodes", Context.MODE_PRIVATE)
 
-    /** Runs [check] when the last one was long enough ago. */
+    private val running = Mutex()
+
+    /** Runs [check] when the last one was long enough ago (the app start and the worker both ask). */
     suspend fun checkIfDue(profile: Profile) {
-        val now = System.currentTimeMillis()
-        if (now - prefs.getLong(LAST_RUN, 0) < INTERVAL_MS) return
-        prefs.edit().putLong(LAST_RUN, now).apply()
-        check(profile)
+        if (!running.tryLock()) return
+        try {
+            val now = System.currentTimeMillis()
+            if (now - prefs.getLong(LAST_RUN, 0) < INTERVAL_MS) return
+            prefs.edit().putLong(LAST_RUN, now).apply()
+            check(profile)
+        } finally {
+            running.unlock()
+        }
     }
 
     suspend fun check(profile: Profile) {
@@ -61,26 +68,20 @@ class NewEpisodes(private val app: FamilyTvApp) {
             val latest = EpisodeGuide.latest(episodes) ?: continue
             val now = System.currentTimeMillis()
             val old = known[f.sourceId to f.itemId]
-            val arrived = old?.let { EpisodeGuide.after(episodes, it.latestSeason to it.latestEpisode) }.orEmpty()
-            val listed = old?.let { NewEpisodeList.decode(it.newEpisodes) }.orEmpty()
-            // Watched ones drop off; the provider may also have pulled an episode.
-            val exists = episodes.mapTo(HashSet()) { it.season to it.episode }
-            val pending = (listed + arrived).distinct().filter { it in exists }
-            val keys = pending.map { (s, e) -> ProgressKey.episode(f.sourceId, f.itemId, s, e) }
-            val watched = dao.progressFor(keys).filter { it.watched }.mapTo(HashSet()) { it.season to it.episode }
-            val unwatched = pending.filter { it !in watched }
-            val legacy = old != null && old.newEpisodes.isEmpty() && old.newCount > 0 && arrived.isEmpty()
+            val since = old?.let { it.latestSeason to it.latestEpisode }
+            val arrived = since?.let { EpisodeGuide.after(episodes, it) }.orEmpty()
+            val watched = dao.watchedEpisodes(f.sourceId, f.itemId).mapTo(HashSet()) { it.season to it.episode }
+            val waiting = EpisodeGuide.waiting(episodes, old?.let { NewEpisodeList.decode(it.newEpisodes) }.orEmpty(), since, watched)
             dao.upsertEpisodeWatch(
                 EpisodeWatchEntity(
                     f.sourceId, f.itemId, f.name, latest.first, latest.second, now,
-                    newCount = if (legacy) old!!.newCount else unwatched.size,
+                    newCount = waiting.size,
                     newSince = when {
-                        legacy -> old!!.newSince
-                        unwatched.isEmpty() -> 0
+                        waiting.isEmpty() -> 0
                         arrived.isNotEmpty() -> now
                         else -> old?.newSince?.takeIf { it > 0 } ?: now
                     },
-                    newEpisodes = if (legacy) "" else NewEpisodeList.encode(unwatched),
+                    newEpisodes = NewEpisodeList.encode(waiting),
                 ),
             )
             if (arrived.isNotEmpty()) fresh += SeriesTitles.parse(f.name).title to arrived.size
@@ -120,7 +121,8 @@ class NewEpisodes(private val app: FamilyTvApp) {
     companion object {
         private const val CHANNEL = "new_episodes"
         private const val NOTIFICATION_ID = 2001
-        private const val LAST_RUN = "lastRun"
+        // Renamed when the counter started counting every episode waiting, so it updates right away.
+        private const val LAST_RUN = "lastRunWaiting"
         private const val ASKED = "asked"
         private const val INTERVAL_MS = 6 * 3_600_000L
         private const val PAUSE_MS = 1_500L

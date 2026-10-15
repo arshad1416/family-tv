@@ -68,6 +68,19 @@ class WatchedTest {
         assertEquals(emptyList<Pair<Int, Int>>(), EpisodeGuide.after(show, 2 to 2))
     }
 
+    @Test fun waitingCountsEverythingAfterTheFurthestWatched() {
+        // Watched up to S1E2: S1E3, S2E1, S2E2 are waiting, even on a first look.
+        assertEquals(listOf(1 to 3, 2 to 1, 2 to 2), EpisodeGuide.waiting(show, emptyList(), null, setOf(1 to 1, 1 to 2)))
+        // Nothing watched and a first look: nothing yet, so favouriting a show doesn't light it up.
+        assertEquals(emptyList<Pair<Int, Int>>(), EpisodeGuide.waiting(show, emptyList(), null, emptySet()))
+        // Nothing watched: only episodes that arrived since the last look.
+        assertEquals(listOf(2 to 2), EpisodeGuide.waiting(show, emptyList(), 2 to 1, emptySet()))
+        // A listed episode the provider pulled, or one watched since, drops off.
+        assertEquals(listOf(2 to 2), EpisodeGuide.waiting(show, listOf(2 to 1, 2 to 2, 9 to 9), null, setOf(2 to 1)))
+        // Specials don't count as the furthest watched.
+        assertEquals(emptyList<Pair<Int, Int>>(), EpisodeGuide.waiting(show, emptyList(), null, setOf(0 to 1)))
+    }
+
     @Test fun newEpisodeListRoundTripsAndSkipsJunk() {
         assertEquals("1:5,2:1", NewEpisodeList.encode(listOf(1 to 5, 2 to 1)))
         assertEquals(listOf(1 to 5, 2 to 1), NewEpisodeList.decode("1:5,2:1"))
