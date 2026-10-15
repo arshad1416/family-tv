@@ -38,6 +38,27 @@ describe("Panel", () => {
   });
 });
 
+describe("Panel's default fetch", () => {
+  it("calls the global fetch as a plain function, as Workers require", async () => {
+    const real = globalThis.fetch;
+    // Like workerd: fetch refuses to run as a method of some other object.
+    globalThis.fetch = function (this: unknown) {
+      if (this !== undefined && this !== globalThis) throw new TypeError("Illegal invocation");
+      return Promise.resolve(new Response(JSON.stringify({ status: "true", username: "a", credits: "1", enabled: "1" })));
+    } as typeof fetch;
+    try {
+      expect((await new Panel("k").reseller()).credits).toBe(1);
+    } finally {
+      globalThis.fetch = real;
+    }
+  });
+
+  it("names why the panel was unreachable without quoting the key", async () => {
+    const p = new Panel("secret-key", (async (u: RequestInfo | URL) => { throw new TypeError(`failed ${String(u)}`); }) as typeof fetch);
+    await expect(p.reseller()).rejects.toThrow(/panel unreachable \(TypeError: failed .*api_key=…\)/);
+  });
+});
+
 describe("line helpers", () => {
   it("splits a line link into server and login", () => {
     expect(loginFromLineUrl("http://srv.example:8080/get.php?username=ab&password=cd&type=m3u_plus")).toEqual({
