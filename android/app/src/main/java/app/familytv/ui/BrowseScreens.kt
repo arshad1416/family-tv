@@ -249,7 +249,7 @@ private class GridItem(
     val watched: Boolean = false,
     val progress: Float = 0f,
     val onFavourite: (() -> Unit)? = null,
-    /** Set for movies: the card gets a Trailer button (looked up when pressed). */
+    /** Set for movies: the card gets a Trailer button (looked up when pressed) and hold-OK opens [MovieActions]. */
     val movie: MovieEntity? = null,
 )
 
@@ -277,6 +277,7 @@ private fun PosterGrid(
                 it.name, it.poster, entryPoint(if (hasBack) it.key == back else i == 0), width = null,
                 favourite = it.favourite, onFavourite = it.onFavourite, watched = it.watched, progress = it.progress,
                 onTrailer = if (it.movie != null && profile != null) movieTrailerAction(profile, it.movie) else null,
+                onLongPress = it.movie?.let { m -> { MovieActions.open = m } },
             ) { onClick(i) }
         }
     }
@@ -289,5 +290,5 @@ internal fun FavouritesHint(text: String) {
 }
 
 private fun vodHint(form: FormFactor, what: String) =
-    (if (form.touch) "Tap the heart on $what" else "Hold OK (or press Menu) on $what") +
+    (if (form.touch) "Tap the heart on $what" else "Hold OK (or press Menu) on $what" + if (what == "a movie") " and choose Add to Favourites" else "") +
         " to add it here. With Trakt connected in Settings, favourite movies and series follow your Trakt watchlist on every device."

@@ -1,6 +1,10 @@
 package app.familytv.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
@@ -52,9 +56,11 @@ import kotlinx.coroutines.launch
 class MainActivity : ComponentActivity() {
     private val vm: MainViewModel by viewModels()
     private var message by mutableStateOf<String?>(null)
+    private val askNotifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        askForNotificationsOnce()
         lifecycleScope.launch {
             app.commands.events.collect { e ->
                 if (e is CommandRunner.UiEvent.Message) message = e.text
@@ -83,6 +89,7 @@ class MainActivity : ComponentActivity() {
                             is Screen.Ready -> HomeScreen(vm, s.config)
                         }
                     }
+                    MovieActionsDialog()
                     message?.let { text ->
                         Dialog(onDismissRequest = { message = null }) {
                             Column(
@@ -106,6 +113,16 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         vm.start()
+        app.scope.launch { runCatching { app.newEpisodes.check() } }
+    }
+
+    /** Android 13+ needs a yes before new-episode notifications show; asked once, never nagged. */
+    private fun askForNotificationsOnce() {
+        if (Build.VERSION.SDK_INT < 33 || checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) return
+        val prefs = getSharedPreferences("new_episodes", MODE_PRIVATE)
+        if (prefs.getBoolean("askedNotifications", false)) return
+        prefs.edit().putBoolean("askedNotifications", true).apply()
+        askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
 
     override fun onStop() {

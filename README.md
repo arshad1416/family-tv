@@ -19,12 +19,23 @@ passwords on a remote, and when a TV goes black the portal tells you why.
 - Lists stream straight into SQLite in batches of 500, and the guide keeps only the next 48 hours for
   your channels. That keeps memory flat on 1 GB Fire TV Sticks.
 - D-pad up/down changes channel. A live stream that fails on `.ts` retries once as HLS (`.m3u8`).
-- **Favourites:** hold OK (or press Menu) on any channel, movie or series to add or remove it; on a
-  phone or tablet tap the heart. Live TV, Movies and Series each get a *Favourites* category at the
-  top, and Home a *Favourites* row. Favourites survive channel reloads.
+- **Favourites:** hold OK (or press Menu) on any channel or series to add or remove it (on a movie
+  it opens a menu with *Add to Favourites*); on a phone or tablet tap the heart. Live TV, Movies and
+  Series each get a *Favourites* category at the top, and Home a *Favourites* row. Favourites
+  survive channel reloads.
+- **Watched marks:** anything played past 80% is marked watched. To mark by hand, hold OK on a
+  movie and choose *Mark as watched*, hold OK on an episode, or use *Mark Season N as watched* on a
+  series page; the same controls take a mark back. On a phone or tablet, long-press a movie, or open
+  an episode and tap *Mark watched*. The series page's *Play* button moves on past the last watched
+  episode, so marking a season watched takes you to the next one.
+- **New episodes:** every few hours the TV checks each favourite series (Xtream lines) for new
+  episodes. Home gets a *New episodes* row until the show is opened, and a notification goes out
+  (shown on phones, tablets and Fire TV; Google TV may keep it to itself). The first check of a
+  show only notes what is there, so nothing old is announced.
 - **Trakt (optional):** connect a Trakt account in Settings with a code and a QR (no typing on the
   remote). Favourite movies and series follow the Trakt watchlist both ways, and watched marks and
-  resume points sync through Trakt scrobbling, so every device on the same Trakt account agrees.
+  resume points sync through Trakt scrobbling (and marks set or taken back by hand through Trakt
+  history), so every device on the same Trakt account agrees.
   Channel favourites stay on the device, since Trakt has no live TV.
 - Captions, audio/video tracks and stream info in the player. Live TV: D-pad right opens Options;
   movies and episodes: press up from the player controls for the CC, audio & video and info buttons;

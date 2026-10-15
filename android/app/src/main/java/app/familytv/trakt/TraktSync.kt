@@ -28,6 +28,7 @@ import java.time.Instant
  * Keeps this device and the Trakt account in step:
  * - movie and series favourites <-> the Trakt watchlist (two-way, see [WatchlistMerge]);
  * - watched marks: pulled from sync/watched, pushed by scrobble stop (or sync/history when that failed);
+ *   marks set or taken back by hand go through sync/history and sync/history/remove;
  * - resume points: pulled from sync/playback, pushed by scrobble start/pause/stop.
  * Live channels have no Trakt equivalent, so channel favourites never leave the device.
  */
@@ -129,9 +130,17 @@ class TraktSync(private val app: FamilyTvApp, private val trakt: Trakt) {
 
     // ---- watched ----
 
-    /** Watched here while Trakt couldn't be reached: send through sync/history. */
+    /**
+     * Watched marks Trakt hasn't heard about: ones finished while it couldn't be reached and ones
+     * set by hand go to sync/history; ones taken back by hand go to sync/history/remove.
+     */
     private suspend fun history(budget: Budget) {
-        val rows = user.pendingHistory()
+        val (watched, unwatched) = user.pendingHistory().partition { it.watched }
+        pushHistory("/sync/history", watched, budget, dated = true)
+        pushHistory("/sync/history/remove", unwatched, budget, dated = false)
+    }
+
+    private suspend fun pushHistory(path: String, rows: List<ProgressEntity>, budget: Budget, dated: Boolean) {
         if (rows.isEmpty()) return
         val movies = ArrayList<Map<String, Any>>()
         val shows = LinkedHashMap<MediaIds, MutableMap<Int, MutableList<Map<String, Any>>>>()
@@ -139,14 +148,14 @@ class TraktSync(private val app: FamilyTvApp, private val trakt: Trakt) {
         for (p in rows) {
             val movie = p.kind == ProgressKey.MOVIE
             val ids = idsFor(if (movie) Kind.MOVIE else Kind.SERIES, p.sourceId, p.itemId, budget) ?: continue
-            val at = iso(p.updatedAt)
-            if (movie) movies += mapOf("ids" to ids.toTrakt(), "watched_at" to at)
-            else shows.getOrPut(ids) { sortedMapOf() }.getOrPut(p.season) { ArrayList() } += mapOf("number" to p.episode, "watched_at" to at)
+            val at = if (dated) mapOf("watched_at" to iso(p.updatedAt)) else emptyMap()
+            if (movie) movies += mapOf("ids" to ids.toTrakt()) + at
+            else shows.getOrPut(ids) { sortedMapOf() }.getOrPut(p.season) { ArrayList() } += mapOf("number" to p.episode) + at
             sent += p.key
         }
         if (sent.isEmpty()) return
         trakt.post(
-            "/sync/history",
+            path,
             mapOf(
                 "movies" to movies,
                 "shows" to shows.map { (ids, seasons) ->
@@ -154,6 +163,7 @@ class TraktSync(private val app: FamilyTvApp, private val trakt: Trakt) {
                 },
             ),
         )
+        // Cleared per request, so a failure on the second one doesn't send the first again.
         sent.chunked(500).forEach { user.clearPendingHistory(it) }
     }
 
@@ -177,6 +187,8 @@ class TraktSync(private val app: FamilyTvApp, private val trakt: Trakt) {
             val rows = chunk.mapNotNull { (fresh, at) ->
                 val e = existing[fresh.key]
                 when {
+                    // Taken back by hand here; Trakt hasn't heard yet.
+                    e != null && e.pendingHistory && !e.watched -> null
                     e == null -> fresh.copy(watched = true, percent = 100f, updatedAt = at)
                     // Finished on another device after it last stopped here.
                     at > e.updatedAt -> e.copy(watched = true, percent = 100f, positionMs = 0, updatedAt = at)
@@ -236,8 +248,36 @@ class TraktSync(private val app: FamilyTvApp, private val trakt: Trakt) {
             user.upsertProgress(row)
             if (action == TICK || !trakt.signedIn) return@launch
             val sent = runCatching { scrobble(item, action, percent) }.isSuccess
-            if (finished && !sent) user.upsertProgress(row.copy(pendingHistory = true))
+            // Sent: nothing left pending, including an unmark made by hand before this rewatch.
+            if (finished) user.upsertProgress(row.copy(pendingHistory = !sent))
         }
+    }
+
+    /**
+     * Marks movies or episodes watched (or not) by hand, starting them over next time either way.
+     * Only items whose mark changes are touched; returns how many. Trakt hears on the next sync.
+     */
+    suspend fun setWatched(items: List<PlayItem>, watched: Boolean): Int {
+        val now = System.currentTimeMillis()
+        var changed = 0
+        for (chunk in items.chunked(500)) {
+            val existing = user.progressFor(chunk.map { it.key }).associateBy { it.key }
+            val rows = chunk.mapNotNull { i ->
+                val old = existing[i.key]
+                if ((old?.watched == true) == watched) return@mapNotNull null
+                (old ?: ProgressEntity(i.key, i.kind, i.sourceId, i.itemId, i.season, i.episode)).copy(
+                    watched = watched,
+                    percent = if (watched) 100f else 0f,
+                    positionMs = 0,
+                    updatedAt = now,
+                    pendingHistory = trakt.signedIn,
+                )
+            }
+            if (rows.isNotEmpty()) user.upsertProgressRows(rows)
+            changed += rows.size
+        }
+        if (changed > 0) soon()
+        return changed
     }
 
     private suspend fun scrobble(item: PlayItem, action: String, percent: Float) = scrobbleLock.withLock {

@@ -396,6 +396,11 @@ private fun HomePage(vm: MainViewModel, profile: Profile, onNavigate: (Page) -> 
     }
     val progress = rememberProgress()
     var openedFromFavourites by remember { mutableStateOf(false) }
+    // Favourite shows with episodes that arrived since they were last opened.
+    val freshLabels by remember { ctx.app.newEpisodes.fresh }.collectAsState()
+    val fresh = remember(favSeries, freshLabels) {
+        groupSeries(favSeries).mapNotNull { g -> g.copies.firstNotNullOfOrNull { freshLabels[it.key] }?.let { g to it } }
+    }
 
     if (onNow.isEmpty() && recent.isEmpty() && series.isEmpty() && favRow.isEmpty()) {
         return EmptyState(PlaybackStatus.lastRefreshError?.let { "Couldn't load channels: $it. Open Settings and run a check." } ?: "Nothing here yet.")
@@ -419,6 +424,17 @@ private fun HomePage(vm: MainViewModel, profile: Profile, onNavigate: (Page) -> 
             if (!touch) HeroHeader(hero)
             LazyColumn(verticalArrangement = Arrangement.spacedBy(22.dp), contentPadding = PaddingValues(bottom = 40.dp)) {
                 if (heroes.isNotEmpty()) item("hero") { HeroCarousel(heroes) }
+                if (fresh.isNotEmpty()) item("new-episodes") {
+                    Shelf("New episodes") {
+                        itemsIndexed(fresh, key = { _, (g, _) -> "new/${g.key}" }) { _, (g, label) ->
+                            PosterCard(
+                                g.title, g.poster, favourite = true,
+                                onFavourite = { toggleShowFavourite(ctx, g, true) },
+                                onFocus = { hero.value = Hero(g.title, "New: $label", g.plot) },
+                            ) { openedFromFavourites = false; nav.open = g }
+                        }
+                    }
+                }
                 if (favRow.isNotEmpty()) item("favourites") {
                     Shelf("Favourites") {
                         itemsIndexed(favRow, key = { _, (k, _) -> k }) { i, (_, x) ->
@@ -435,6 +451,7 @@ private fun HomePage(vm: MainViewModel, profile: Profile, onNavigate: (Page) -> 
                                         x.name, x.poster, entryPoint(entry), favourite = true, watched = p?.watched == true, progress = ProgressRules.bar(p),
                                         onTrailer = movieTrailerAction(profile, x),
                                         onFavourite = { toggleFavourite(ctx, Kind.MOVIE, x.sourceId, x.streamId, x.name) },
+                                        onLongPress = { MovieActions.open = x },
                                         onFocus = { hero.value = Hero(x.name, "Favourite movie", null) },
                                     ) { scope.launch { playMovieNow(ctx, profile, x) } }
                                 }
@@ -469,6 +486,7 @@ private fun HomePage(vm: MainViewModel, profile: Profile, onNavigate: (Page) -> 
                                 onFavourite = { toggleFavourite(ctx, Kind.MOVIE, m.sourceId, m.streamId, m.name) },
                                 watched = p?.watched == true, progress = ProgressRules.bar(p),
                                 onTrailer = movieTrailerAction(profile, m),
+                                onLongPress = { MovieActions.open = m },
                                 onFocus = { hero.value = Hero(m.name, "Movie", m.rating?.takeIf { it.isNotBlank() && it != "0" }?.let { "Rating $it" }) },
                             ) {
                                 scope.launch { playMovieNow(ctx, profile, m) }
@@ -555,7 +573,7 @@ fun ChannelCard(
 
 /**
  * Artwork tile. [onFavourite] adds hold-OK or Menu (TV) or a heart button (touch) to toggle the
- * favourite; [watched] and [progress] draw the tick and the resume line. [logo] fits a channel
+ * favourite; [onLongPress] gives hold-OK and Menu to something else instead (the movie actions); [watched] and [progress] draw the tick and the resume line. [logo] fits a channel
  * logo instead of cropping a poster. [onTrailer] adds a Trailer button (over the poster on touch,
  * beside the name on TV).
  */
@@ -571,13 +589,14 @@ fun PosterCard(
     watched: Boolean = false,
     progress: Float = 0f,
     onTrailer: (() -> Unit)? = null,
+    onLongPress: (() -> Unit)? = null,
     onFocus: () -> Unit = {},
     onClick: () -> Unit,
 ) {
     val touch = LocalFormFactor.current.touch
     val heart = touch && onFavourite != null
     Column(if (width != null) Modifier.width(width) else Modifier.fillMaxWidth()) {
-        FocusBox(onClick = onClick, onLongClick = onFavourite, onFocus = onFocus, outline = true, scale = 1.06f, color = Tv.Raised, modifier = modifier.fillMaxWidth().aspectRatio(2f / 3f), contentAlignment = Alignment.Center) {
+        FocusBox(onClick = onClick, onLongClick = onLongPress ?: onFavourite, onFocus = onFocus, outline = true, scale = 1.06f, color = Tv.Raised, modifier = modifier.fillMaxWidth().aspectRatio(2f / 3f), contentAlignment = Alignment.Center) {
             Text(name, Modifier.padding(8.dp), fontSize = 13.sp, maxLines = 4, color = Tv.Muted)
             if (poster != null) {
                 if (logo) AsyncImage(poster, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize().padding(20.dp))
