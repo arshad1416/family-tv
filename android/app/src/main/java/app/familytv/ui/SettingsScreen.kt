@@ -70,6 +70,7 @@ fun SettingsScreen(vm: MainViewModel, config: DeviceConfig) {
                 }
                 // Only shown when the portal has Trakt set up.
                 if (config.trakt?.clientId != null) TraktPanel()
+                RealDebridPanel()
                 PackageSorterPanel(config.profile)
             }
         })

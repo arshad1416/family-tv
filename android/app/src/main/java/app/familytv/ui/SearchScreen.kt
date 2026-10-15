@@ -93,6 +93,7 @@ fun SearchScreen(vm: MainViewModel, profile: Profile) {
     val showFavs = ShowFavourites(rememberFavouriteShowRows(favs))
     val shows = remember(results.series) { groupSeries(results.series) }
     val progress = rememberProgress()
+    val rdIndex = rememberRdIndex()
 
     val touch = LocalFormFactor.current.touch
     nav.Host(vm, profile) {
@@ -149,7 +150,8 @@ fun SearchScreen(vm: MainViewModel, profile: Profile) {
                                 onFavourite = { toggleFavourite(ctx, Kind.MOVIE, m.sourceId, m.streamId, m.name) },
                                 watched = p?.watched == true, progress = ProgressRules.bar(p),
                                 onTrailer = movieTrailerAction(profile, m),
-                                onMenu = { menus.open = movieMenu(ctx, m, fav, p?.watched == true) },
+                                rd = rdIndex.movie(m.name, m.year) != null,
+                                        onMenu = { menus.open = movieMenu(ctx, m, fav, p?.watched == true, rdIndex.movie(m.name, m.year), scope) { scope.launch { playMovieNow(ctx, profile, m) } } },
                             ) { scope.launch { playMovieNow(ctx, profile, m) } }
                         }
                     }

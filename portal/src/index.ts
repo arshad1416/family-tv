@@ -217,6 +217,7 @@ async function deviceConfig(req: Request, env: Env) {
     subtitlesApiKey: subtitlesApiKey(env),
     tmdbApiKey: tmdbApiKey(env),
     tvdbApiKey: tvdbApiKey(env),
+    realDebrid: await rdAccount(env, d.profile_id),
   });
 }
 
@@ -399,6 +400,116 @@ async function traktRevoke(req: Request, env: Env) {
     token: tokenField(b.token, "token"),
     ...traktClient(env),
   });
+}
+
+// ---------- Real-Debrid, one account per profile ----------
+// A TV signs in with Real-Debrid's device code itself, then hands the credentials here. Every TV
+// in the profile then asks the portal for the access token, and only the portal refreshes it,
+// so TVs never race each other's refresh.
+
+const RD_TOKEN_URL = "https://api.real-debrid.com/oauth/v2/token";
+const RD_GRANT = "http://oauth.net/grant_type/device/1.0";
+const RD_REFRESH_MARGIN_MS = 10 * 60 * 1000;
+
+interface RdSecret {
+  clientId: string;
+  clientSecret: string;
+  accessToken: string;
+  refreshToken: string;
+}
+
+interface RdRow {
+  data_enc: string;
+  username: string | null;
+  expires_at: number;
+}
+
+async function requirePaired(req: Request, env: Env): Promise<string> {
+  const d = await requireDevice(req, env);
+  if (!d.profile_id) throw new HttpError(403, "device not paired");
+  return d.profile_id;
+}
+
+const rdRow = (env: Env, profileId: string) =>
+  env.DB.prepare("SELECT data_enc, username, expires_at FROM profile_debrid WHERE profile_id = ?").bind(profileId).first<RdRow>();
+
+/** For the device config: whose Real-Debrid account the profile uses, or null. */
+async function rdAccount(env: Env, profileId: string): Promise<{ username: string | null } | null> {
+  // Before the migration runs the table is missing; that must not break every TV's config.
+  const row = await rdRow(env, profileId).catch(() => null);
+  return row ? { username: row.username } : null;
+}
+
+async function rdSave(env: Env, profileId: string, s: RdSecret, username: string | null, expiresAt: number, by: string | null) {
+  const now = Date.now();
+  await env.DB.prepare(
+    `INSERT INTO profile_debrid (profile_id, data_enc, username, expires_at, linked_by, updated_at) VALUES (?,?,?,?,?,?)
+     ON CONFLICT (profile_id) DO UPDATE SET data_enc = excluded.data_enc, username = excluded.username,
+       expires_at = excluded.expires_at, linked_by = COALESCE(excluded.linked_by, linked_by), updated_at = excluded.updated_at`,
+  )
+    .bind(profileId, await sealJson(env.CONFIG_KEY, s), username, expiresAt, by, now)
+    .run();
+}
+
+async function rdLink(req: Request, env: Env) {
+  const d = await requireDevice(req, env);
+  if (!d.profile_id) throw new HttpError(403, "device not paired");
+  const b = await body<Record<string, unknown>>(req);
+  const secret: RdSecret = {
+    clientId: tokenField(b.clientId, "clientId"),
+    clientSecret: tokenField(b.clientSecret, "clientSecret"),
+    accessToken: tokenField(b.accessToken, "accessToken"),
+    refreshToken: tokenField(b.refreshToken, "refreshToken"),
+  };
+  const expiresIn = Number(b.expiresIn) > 0 ? Number(b.expiresIn) : 3600;
+  await rdSave(env, d.profile_id, secret, clip(typeof b.username === "string" ? b.username : null), Date.now() + expiresIn * 1000, d.id);
+  return json({ ok: true });
+}
+
+/**
+ * The profile's access token, refreshed when it is close to running out, or when a TV says
+ * Real-Debrid refused it ({rejected: token}). 404: no account; 410: the account must sign in again.
+ */
+async function rdToken(req: Request, env: Env) {
+  const profileId = await requirePaired(req, env);
+  const b = req.method === "POST" ? await body<{ rejected?: unknown }>(req) : {};
+  const row = await rdRow(env, profileId);
+  if (!row) return json({ error: "not linked" }, 404);
+  const s = await openJson<RdSecret>(env.CONFIG_KEY, row.data_enc);
+  const current = { accessToken: s.accessToken, expiresAt: row.expires_at, username: row.username };
+  const rejected = b.rejected === s.accessToken;
+  if (!rejected && row.expires_at - Date.now() > RD_REFRESH_MARGIN_MS) return json(current);
+  let res: Response;
+  try {
+    res = await fetch(RD_TOKEN_URL, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded", "user-agent": "FamilyTV-Portal/1" },
+      body: new URLSearchParams({ client_id: s.clientId, client_secret: s.clientSecret, code: s.refreshToken, grant_type: RD_GRANT }).toString(),
+    });
+  } catch {
+    throw new HttpError(502, "real-debrid unreachable");
+  }
+  if ([400, 401, 403].includes(res.status)) {
+    await env.DB.prepare("DELETE FROM profile_debrid WHERE profile_id = ?").bind(profileId).run();
+    return json({ error: "signed out" }, 410);
+  }
+  const t = res.ok ? ((await res.json().catch(() => null)) as { access_token?: string; refresh_token?: string; expires_in?: number } | null) : null;
+  if (!t?.access_token) {
+    // Real-Debrid is having a moment: an unexpired token may still work.
+    if (!rejected && row.expires_at > Date.now()) return json(current);
+    throw new HttpError(502, `real-debrid refresh failed (${res.status})`);
+  }
+  const next: RdSecret = { ...s, accessToken: t.access_token, refreshToken: t.refresh_token || s.refreshToken };
+  const expiresAt = Date.now() + (Number(t.expires_in) > 0 ? Number(t.expires_in) : 3600) * 1000;
+  await rdSave(env, profileId, next, row.username, expiresAt, null);
+  return json({ accessToken: next.accessToken, expiresAt, username: row.username });
+}
+
+/** Signs the whole profile out of Real-Debrid. */
+async function rdUnlink(req: Request, env: Env) {
+  const profileId = await requirePaired(req, env);
+  await env.DB.prepare("DELETE FROM profile_debrid WHERE profile_id = ?").bind(profileId).run();
+  return json({ ok: true });
 }
 
 // ---------- admin API ----------
@@ -931,6 +1042,9 @@ export async function handle(req: Request, env: Env): Promise<Response> {
   if (m === "POST" && p === "/api/device/trakt/token") return traktDeviceToken(req, env);
   if (m === "POST" && p === "/api/device/trakt/refresh") return traktRefresh(req, env);
   if (m === "POST" && p === "/api/device/trakt/revoke") return traktRevoke(req, env);
+  if (m === "POST" && p === "/api/device/realdebrid/link") return rdLink(req, env);
+  if ((m === "GET" || m === "POST") && p === "/api/device/realdebrid/token") return rdToken(req, env);
+  if (m === "POST" && p === "/api/device/realdebrid/unlink") return rdUnlink(req, env);
   let mm = p.match(/^\/api\/device\/commands\/([a-f0-9]+)\/ack$/);
   if (m === "POST" && mm) return deviceAck(req, env, mm[1]);
 

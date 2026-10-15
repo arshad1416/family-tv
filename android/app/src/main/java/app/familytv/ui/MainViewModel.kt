@@ -82,6 +82,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         // Pull favourites, watched marks and resume points from Trakt on every start and reload.
         app.trakt.refreshState()
         app.trakt.sync.soon(0)
+        app.realDebrid.onConfig(config.realDebrid)
         // Recount the episodes waiting on favourite shows once Trakt's watched marks have had a moment.
         app.scope.launch { delay(60_000); runCatching { app.newEpisodes.checkIfDue(profile) } }
         app.commands.runAll(config.commands, profile)
