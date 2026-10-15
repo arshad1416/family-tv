@@ -19,6 +19,7 @@ import app.familytv.iptv.EpisodeGuide
 import app.familytv.iptv.SeriesTitles
 import app.familytv.portal.Profile
 import app.familytv.ui.MainActivity
+import app.familytv.ui.copyIds
 import app.familytv.user.EpisodeWatchEntity
 import app.familytv.user.NewEpisodeList
 import app.familytv.user.Pending
@@ -61,6 +62,7 @@ class NewEpisodes(private val app: FamilyTvApp) {
         val keep = favs.mapTo(HashSet()) { it.sourceId to it.itemId }
         known.keys.filter { it !in keep }.forEach { (s, id) -> dao.deleteEpisodeWatch(s, id) }
         val fresh = ArrayList<Pair<String, Int>>()
+        val report = ArrayList<String>()
         for ((i, f) in favs.take(MAX_SHOWS).withIndex()) {
             val src = profile.sources.firstOrNull { it.id == f.sourceId && it.type == "xtream" } ?: continue
             if (i > 0) delay(PAUSE_MS) // one show at a time, gently, so the provider never sees a burst
@@ -70,8 +72,13 @@ class NewEpisodes(private val app: FamilyTvApp) {
             val old = known[f.sourceId to f.itemId]
             val since = old?.let { it.latestSeason to it.latestEpisode }
             val arrived = since?.let { EpisodeGuide.after(episodes, it) }.orEmpty()
-            val watched = dao.watchedEpisodes(f.sourceId, f.itemId).mapTo(HashSet()) { it.season to it.episode }
+            // Watched on any copy of the show (another language or quality) counts.
+            val watched = app.db.copyIds(f.sourceId, f.itemId)
+                .flatMap { (s, id) -> dao.watchedEpisodes(s, id) }.mapTo(HashSet()) { it.season to it.episode }
             val waiting = EpisodeGuide.waiting(episodes, old?.let { NewEpisodeList.decode(it.newEpisodes) }.orEmpty(), since, watched)
+            val furthest = watched.filter { it.first > 0 }.maxWithOrNull(compareBy({ it.first }, { it.second }))
+            report += "${f.name.take(36)}: has S${latest.first}E${latest.second}, watched " +
+                (furthest?.let { "S${it.first}E${it.second}" } ?: "none") + ", ${waiting.size} waiting"
             dao.upsertEpisodeWatch(
                 EpisodeWatchEntity(
                     f.sourceId, f.itemId, f.name, latest.first, latest.second, now,
@@ -86,6 +93,8 @@ class NewEpisodes(private val app: FamilyTvApp) {
             )
             if (arrived.isNotEmpty()) fresh += SeriesTitles.parse(f.name).title to arrived.size
         }
+        // What the counter found, for the admin page (the TVs have no other way to show it).
+        PlaybackStatus.followed = mapOf("at" to System.currentTimeMillis(), "shows" to report.take(REPORT_SHOWS))
         if (fresh.isNotEmpty()) notify(fresh.distinctBy { it.first })
     }
 
@@ -127,6 +136,8 @@ class NewEpisodes(private val app: FamilyTvApp) {
         private const val INTERVAL_MS = 6 * 3_600_000L
         private const val PAUSE_MS = 1_500L
         private const val MAX_SHOWS = 60
+        // Kept short: the portal stores 8,000 characters of the whole status.
+        private const val REPORT_SHOWS = 15
 
         private fun allowed(ctx: Context) = Build.VERSION.SDK_INT < 33 ||
             ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED

@@ -101,6 +101,12 @@ suspend fun AppDb.allCopies(group: SeriesGroup): List<SeriesEntity> {
     return groupSeries(rows).firstOrNull { g -> g.copies.any { it.key == anchor } }?.copies ?: group.copies
 }
 
+/** (sourceId, seriesId) of every copy of a show, itself first; just itself when the catalog doesn't list it. */
+suspend fun AppDb.copyIds(sourceId: String, seriesId: String): List<Pair<String, String>> {
+    val row = catalog().seriesItem(sourceId, seriesId) ?: return listOf(sourceId to seriesId)
+    return (listOf(row) + allCopies(SeriesGroup(row.key, listOf(row)))).map { it.sourceId to it.seriesId }.distinct()
+}
+
 /** Which show has its page open, and which poster to refocus when it closes. */
 class SeriesNav {
     var open by mutableStateOf<SeriesGroup?>(null)

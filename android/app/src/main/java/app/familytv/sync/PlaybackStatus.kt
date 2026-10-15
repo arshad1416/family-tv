@@ -17,6 +17,8 @@ object PlaybackStatus {
     @Volatile var lastCrashAt: Long = 0
     /** How the last refresh used the extra guides (see [app.familytv.iptv.Catalog]); null when there are none. */
     @Volatile var guide: Map<String, Any?>? = null
+    /** The last new-episodes check: per favourite show, newest episode, furthest watched and the count (see [NewEpisodes]). */
+    @Volatile var followed: Map<String, Any?>? = null
 
     fun started(t: String) {
         title = t; startedAt = System.currentTimeMillis(); bufferingEvents = 0; bitrateKbps = null; droppedFrames = 0
@@ -35,5 +37,6 @@ object PlaybackStatus {
         // The portal keeps 8,000 characters of this, so the trace leaves room for the rest.
         "lastCrash" to lastCrash?.let { mapOf("at" to lastCrashAt, "trace" to it.take(4000)) },
         "guide" to guide,
+        "followed" to followed,
     )
 }
