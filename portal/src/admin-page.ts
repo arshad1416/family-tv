@@ -1,4 +1,6 @@
 // Single-file admin UI, served by the Worker. No build step, no external requests.
+import { DEFAULT_EXTRA_GUIDES } from "./model";
+
 export const ADMIN_PAGE = /* html */ `<!doctype html>
 <html lang="en">
 <head>
@@ -42,6 +44,7 @@ const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":
 let token = null;
 try { token = localStorage.getItem("ftv_admin"); } catch {}
 let tab = "devices", verdicts = {}, profiles = [];
+const DEFAULT_GUIDES = ${JSON.stringify(DEFAULT_EXTRA_GUIDES)};
 
 async function api(path, opts = {}) {
   const res = await fetch(path, { ...opts, headers: { "content-type": "application/json", authorization: "Bearer " + token, ...(opts.headers || {}) } });
@@ -87,7 +90,7 @@ async function renderDevices() {
     html += '<div class="card"><div class="row"><span class="dot ' + cls + '"></span><strong>' + esc(d.nickname) + '</strong><span class="muted small">' +
       esc(d.manufacturer) + " " + esc(d.model) + " · app " + esc(d.app_version) + " · " + esc(d.profile_name) + " · seen " + ago(d.last_seen) +
       '</span><span style="margin-left:auto"><button class="b" data-open="' + esc(d.id) + '">Details</button></span></div>' +
-      (playing || err ? '<div class="small" style="margin-top:6px">' + playing + " " + err + "</div>" : "") +
+      (playing || err ? '<div class="small" style="margin-top:6px">' + playing + " " + err + "</div>" : "") + guideLine(d.status && d.status.guide) +
       (v ? '<div class="small" style="margin-top:6px">Last check: <strong>' + esc(v.label) + "</strong> (" + ago(d.last_verdict_at) + ")</div>" : "") +
       '<div id="d-' + esc(d.id) + '"></div></div>';
   }
@@ -102,6 +105,18 @@ async function renderDevices() {
     } catch (e) { $("#pairmsg").innerHTML = '<span class="err">' + esc(e.message) + "</span>"; }
   };
   document.querySelectorAll("[data-open]").forEach((b) => (b.onclick = () => openDevice(b.dataset.open, devices.find((x) => x.id === b.dataset.open))));
+}
+
+// How the TV's last refresh used the extra guides; unmatched thin channels are candidates for a pin.
+function guideLine(g) {
+  if (!g) return "";
+  const linked = Object.values(g.linked || {}).reduce((a, b) => a + b, 0);
+  let html = '<div class="small" style="margin-top:6px">Guide: ' + g.switched + " of " + g.thin + " thin channels now use an extra guide; " +
+    linked + " channels linked in all";
+  if (g.unmatchedCount) html += '<details><summary>' + g.unmatchedCount + " thin channels with no match (pin them in the profile)</summary>" + esc((g.unmatched || []).join(", ")) +
+    (g.unmatchedCount > (g.unmatched || []).length ? " …" : "") + "</details>";
+  if (g.errors) html += '<span class="err">' + esc(g.errors.join("; ")) + "</span>";
+  return html + "</div>";
 }
 
 async function openDevice(id, dev) {
@@ -172,6 +187,18 @@ async function renderProfiles(editId) {
   document.querySelectorAll("[data-edit]").forEach((b) => (b.onclick = () => renderProfiles(b.dataset.edit)));
 }
 
+// Extra guides fill channels the provider's guide leaves thin; pins link channels the TV can't match by name.
+function guidesCard(d) {
+  const urls = (d.extraGuides || DEFAULT_GUIDES).join("\\n");
+  const pins = Object.entries(d.guidePins || {}).map(([n, g]) => n + " = " + g).join("\\n");
+  return '<div class="card"><h3 style="margin-top:0">Extra guides</h3>' +
+    '<p class="muted small">Used only for channels the provider guide leaves thin, first one first. One URL per line; empty turns them off.</p>' +
+    '<textarea id="xg" rows="3">' + esc(urls) + "</textarea>" +
+    '<label>Channel pins, one per line: channel name = guide channel id (for example CA| CTV HD = CTV.Toronto.HD.ca2)</label>' +
+    '<textarea id="gp" rows="3">' + esc(pins) + "</textarea>" +
+    '<p class="muted small">Each epgshare01 guide lists its channel ids in a .txt file next to it, such as epg_ripper_CA2.txt.</p></div>';
+}
+
 // Category order and visibility, per kind. Rows are what the profile's TVs reported, saved order first.
 const KINDS = [["live", "Live TV"], ["movie", "Movies"], ["series", "TV Shows"]];
 let catKind = "live";
@@ -211,7 +238,7 @@ function editProfile(p) {
   const paint = () => {
     $("#app").innerHTML = '<div class="card"><label>Profile name</label><input id="pname" value="' + esc(draft.name) + '">' +
       '<label>Parental PIN (optional, locks adult categories)</label><input id="ppin" type="password" value="' + esc(draft.data.parentalPin) + '"></div>' +
-      draft.data.sources.map(sourceForm).join("") + categoriesCard(draft, reported) +
+      draft.data.sources.map(sourceForm).join("") + guidesCard(draft.data) + categoriesCard(draft, reported) +
       '<div class="row"><button class="b" id="adds">Add source</button><button class="b p" id="save">Save</button>' +
       (draft.id ? '<button class="b" id="delp">Delete profile</button>' : "") + '<button class="b" id="back">Back</button><span id="perr" class="err"></span></div>';
     $("#adds").onclick = () => { collect(); draft.data.sources.push({ id: crypto.randomUUID(), type: "xtream", name: "Line " + (draft.data.sources.length + 1) }); paint(); };
@@ -233,6 +260,13 @@ function editProfile(p) {
   const collect = () => {
     draft.name = $("#pname").value;
     draft.data.parentalPin = $("#ppin").value || undefined;
+    draft.data.extraGuides = $("#xg").value.split(/\\s+/).filter(Boolean);
+    const pins = {};
+    for (const line of $("#gp").value.split("\\n")) {
+      const at = line.lastIndexOf("=");
+      if (at > 0 && line.slice(at + 1).trim()) pins[line.slice(0, at).trim()] = line.slice(at + 1).trim();
+    }
+    draft.data.guidePins = pins;
     // Hidden names of the kind on screen are re-read from the checkboxes; other kinds' stay as they were.
     const rows = categoryRows(draft, reported);
     if (document.querySelector("[data-show]")) {

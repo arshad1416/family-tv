@@ -26,10 +26,16 @@ data class XmltvProgramme(
     val cast: List<String> = emptyList(),
 )
 
+/** A `<channel>` from an XMLTV guide: its id and every display name, for matching by name. */
+data class XmltvChannel(val id: String, val names: List<String>)
+
 /**
  * Streaming XMLTV reader. Only programmes inside [windowStart, windowEnd] and (if given) for
  * channels in [wanted] are emitted, so a 200 MB guide never has to fit in memory or the DB.
  * Where a guide gives a title or description in several languages, [lang]'s wins.
+ *
+ * Guides list their channels before the programmes: [onChannel] gets each one, and
+ * [beforeProgrammes] runs once before the first programme, so a caller can still fill [wanted].
  */
 object XmltvParser {
     fun parse(
@@ -38,11 +44,17 @@ object XmltvParser {
         windowEnd: Long,
         wanted: Set<String>?,
         lang: String? = null,
+        onChannel: ((XmltvChannel) -> Unit)? = null,
+        beforeProgrammes: () -> Unit = {},
         onProgramme: (XmltvProgramme) -> Unit,
     ) {
         var event = p.eventType
+        var programmes = false
         while (event != XmlPullParser.END_DOCUMENT) {
-            if (event == XmlPullParser.START_TAG && p.name == "programme") {
+            if (event == XmlPullParser.START_TAG && p.name == "channel" && onChannel != null) {
+                channel(p)?.let(onChannel)
+            } else if (event == XmlPullParser.START_TAG && p.name == "programme") {
+                if (!programmes) { programmes = true; beforeProgrammes() }
                 val channel = p.getAttributeValue(null, "channel")
                 val start = parseTime(p.getAttributeValue(null, "start"))
                 val stop = parseTime(p.getAttributeValue(null, "stop"))
@@ -52,6 +64,13 @@ object XmltvParser {
             }
             event = p.next()
         }
+    }
+
+    private fun channel(p: XmlPullParser): XmltvChannel? {
+        val id = p.getAttributeValue(null, "id")?.trim()
+        val names = ArrayList<String>()
+        children(p) { if (p.name == "display-name") text(p)?.let(names::add) else skip(p) }
+        return id?.takeIf { it.isNotEmpty() }?.let { XmltvChannel(it, names) }
     }
 
     private fun programme(p: XmlPullParser, channel: String, start: Long, stop: Long, lang: String?): XmltvProgramme {

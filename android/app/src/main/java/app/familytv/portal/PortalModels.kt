@@ -20,6 +20,10 @@ data class Profile(
     val hiddenCategories: List<String>? = null,
     /** Category names per kind ("live", "movie", "series") in the order to list them; others follow in the provider's order. */
     val categoryOrder: Map<String, List<String>>? = null,
+    /** XMLTV guides (by priority) for channels the provider's own guide leaves thin, such as epgshare01's. */
+    val extraGuides: List<String>? = null,
+    /** Provider channel name to an extra guide's channel id, for channels the name rules can't link. */
+    val guidePins: Map<String, String>? = null,
 )
 
 data class Command(val id: String, val type: String, val payload: Map<String, Any?>?)

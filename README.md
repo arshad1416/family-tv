@@ -20,6 +20,13 @@ passwords on a remote, and when a TV goes black the portal tells you why.
   description, picture and cast. When the guide has no description or picture for the focused
   programme, it is looked up on TMDB (with the portal's key) or TVmaze and labelled "Details from
   TMDB/TVmaze". News, sport and the like are never looked up.
+- **Extra guides:** each profile lists XMLTV guides (epgshare01's Canada, US and India files unless the
+  admin changes them) for channels the provider's guide leaves thin. A channel links to one extra-guide
+  channel by a portal pin, its guide id, or its name without country prefix and HD/SD tags. Links
+  never cross countries and never pick between regional feeds ("CA| CTV" stays unlinked). A channel whose
+  provider schedule covers 80% of the next day keeps it and only gains missing details from the same
+  show; a thinner one shows the extra guide's whole schedule. The admin page lists thin channels that
+  nothing linked, ready to pin.
 - Several server URLs per Xtream line, so a backup URL is used automatically when the main one fails.
 - Lists stream straight into SQLite in batches of 500, and the guide keeps only the next 48 hours for
   your channels. That keeps memory flat on 1 GB Fire TV Sticks.

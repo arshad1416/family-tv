@@ -20,6 +20,27 @@ export interface ProfileData {
   hiddenCategories?: string[];
   /** Category names per kind in the order the TVs list them; ones not named keep the provider's order after these. */
   categoryOrder?: Partial<Record<CategoryKind, string[]>>;
+  /**
+   * XMLTV guides, by priority, for channels the provider's own guide leaves thin. Unset means
+   * DEFAULT_EXTRA_GUIDES; an empty list turns them off.
+   */
+  extraGuides?: string[];
+  /** Provider channel name → an extra guide's channel id, for channels the TV can't link by name. */
+  guidePins?: Record<string, string>;
+}
+
+/** epgshare01's Canada, US and India guides (free; Gracenote listings, about 6.5 MB each). */
+export const DEFAULT_EXTRA_GUIDES = [
+  "https://epgshare01.online/epgshare01/epg_ripper_CA2.xml.gz",
+  "https://epgshare01.online/epgshare01/epg_ripper_US2.xml.gz",
+  "https://epgshare01.online/epgshare01/epg_ripper_IN1.xml.gz",
+];
+const MAX_EXTRA_GUIDES = 4;
+const MAX_PINS = 500;
+
+/** The profile as TVs get it: extra guides resolved to the defaults when the admin never set them. */
+export function forDevice(p: ProfileData): ProfileData {
+  return { ...p, extraGuides: p.extraGuides ?? DEFAULT_EXTRA_GUIDES };
 }
 
 const MAX_CATEGORIES = 1000;
@@ -46,16 +67,19 @@ export const MASK = "••••••";
 export function profileHosts(p: ProfileData): Set<string> {
   const hosts = new Set<string>();
   for (const s of p.sources) {
-    for (const u of [...(s.serverUrls ?? []), s.m3uUrl, s.epgUrl]) {
-      if (!u) continue;
-      try {
-        hosts.add(new URL(u).host.toLowerCase());
-      } catch {
-        /* ignore malformed */
-      }
-    }
+    for (const u of [...(s.serverUrls ?? []), s.m3uUrl, s.epgUrl]) addHost(hosts, u);
   }
+  for (const u of p.extraGuides ?? DEFAULT_EXTRA_GUIDES) addHost(hosts, u);
   return hosts;
+}
+
+function addHost(hosts: Set<string>, u: string | undefined) {
+  if (!u) return;
+  try {
+    hosts.add(new URL(u).host.toLowerCase());
+  } catch {
+    /* ignore malformed */
+  }
 }
 
 /** Passwords never leave the portal towards the admin page; the page sends MASK back to mean "unchanged". */
@@ -105,6 +129,24 @@ export function validateProfile(p: unknown): ProfileData {
       if (names.length) order[k] = names;
     }
     d.categoryOrder = order;
+  }
+  if (d.extraGuides !== undefined) {
+    if (!Array.isArray(d.extraGuides)) throw new Error("extraGuides must be a list");
+    const urls = [...new Set(d.extraGuides.map((u) => String(u).trim()).filter(Boolean))];
+    if (urls.length > MAX_EXTRA_GUIDES) throw new Error(`at most ${MAX_EXTRA_GUIDES} extra guides`);
+    urls.forEach(assertHttpUrl);
+    d.extraGuides = urls;
+  }
+  if (d.guidePins !== undefined) {
+    if (!d.guidePins || typeof d.guidePins !== "object" || Array.isArray(d.guidePins)) throw new Error("guidePins must be an object");
+    const pins: Record<string, string> = {};
+    for (const [name, id] of Object.entries(d.guidePins)) {
+      const n = name.trim().slice(0, 120);
+      const g = String(id ?? "").trim().slice(0, 200);
+      if (n && g) pins[n] = g;
+    }
+    if (Object.keys(pins).length > MAX_PINS) throw new Error(`at most ${MAX_PINS} guide pins`);
+    d.guidePins = pins;
   }
   return d;
 }

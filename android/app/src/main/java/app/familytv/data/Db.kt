@@ -13,6 +13,7 @@ import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 
 /** One row per provider line in the profile. [activeServer] is the Xtream URL that answered last. */
@@ -136,6 +137,17 @@ interface CatalogDao {
     @Query("DELETE FROM series WHERE sourceId = :sourceId AND gen <> :gen") suspend fun pruneSeries(sourceId: String, gen: Long)
     @Query("DELETE FROM programmes WHERE stop < :before OR start > :after") suspend fun pruneProgrammes(before: Long, after: Long)
     @Query("DELETE FROM programmes WHERE epgId IN (SELECT epgId FROM channels WHERE sourceId = :sourceId)") suspend fun clearProgrammesFor(sourceId: String)
+
+    // Extra guides (see app.familytv.iptv.GuideMatch): their rows live under "x:<guide channel id>".
+    @Query("DELETE FROM programmes WHERE epgId LIKE 'x:%'") suspend fun clearExtraProgrammes()
+    @Query("DELETE FROM programmes WHERE epgId IN (:epgIds)") suspend fun deleteProgrammes(epgIds: List<String>)
+    @Query("SELECT * FROM programmes WHERE epgId = :epgId AND stop > :from AND start < :until ORDER BY start")
+    suspend fun programmeRows(epgId: String, from: Long, until: Long): List<ProgrammeEntity>
+    @Update suspend fun updateProgrammes(p: List<ProgrammeEntity>)
+    /** Points a channel at another schedule until the next refresh rewrites it from the provider. */
+    @Query("UPDATE channels SET epgId = :epgId WHERE sourceId = :sourceId AND streamId = :streamId")
+    suspend fun setChannelGuide(sourceId: String, streamId: String, epgId: String)
+    @Query("SELECT * FROM categories WHERE kind = :kind") suspend fun categoryList(kind: String): List<CategoryEntity>
 
     @Query("SELECT * FROM sources") suspend fun sources(): List<SourceEntity>
     @Query("SELECT * FROM sources WHERE id = :id") suspend fun source(id: String): SourceEntity?

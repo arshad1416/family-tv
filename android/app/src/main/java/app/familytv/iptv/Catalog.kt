@@ -12,6 +12,7 @@ import app.familytv.data.SeriesEntity
 import app.familytv.data.SourceEntity
 import app.familytv.portal.Profile
 import app.familytv.portal.Source
+import app.familytv.sync.PlaybackStatus
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
@@ -59,7 +60,8 @@ class Catalog(private val db: AppDb) {
         dao.dropSourcesExcept(profile.sources.map { it.id }.ifEmpty { listOf("") })
         dao.dropOrphanChannels(); dao.dropOrphanMovies(); dao.dropOrphanSeries(); dao.dropOrphanCategories()
         val errors = mutableListOf<String>()
-        val t = Tracker(profile.sources.size, onProgress)
+        val extras = profile.extraGuides.orEmpty().distinct().take(MAX_EXTRA_GUIDES)
+        val t = Tracker(profile.sources.size + (if (extras.isEmpty()) 0 else 1), onProgress)
         for ((i, s) in profile.sources.withIndex()) {
             t.startSource(i)
             try {
@@ -71,6 +73,8 @@ class Catalog(private val db: AppDb) {
                 errors += "${s.name}: ${e.message}"
             }
         }
+        t.startSource(profile.sources.size)
+        loadExtraGuides(profile, extras, t)
         onProgress(Progress("Finishing", 1f))
         val now = System.currentTimeMillis()
         dao.pruneProgrammes(before = now - 2 * HOUR, after = now + GUIDE_HOURS * HOUR)
@@ -195,12 +199,7 @@ class Catalog(private val db: AppDb) {
                 val pending = ArrayList<ProgrammeEntity>(BATCH)
                 var kept = 0
                 XmltvParser.parse(parser, now - 2 * HOUR, now + GUIDE_HOURS * HOUR, wanted, Locale.getDefault().language) { p ->
-                    pending += ProgrammeEntity(
-                        epgId = p.channel, start = p.start, stop = p.stop, title = p.title, description = p.description,
-                        subTitle = p.subTitle, season = p.season, episode = p.episode,
-                        category = p.categories.joinToString(", ").ifEmpty { null }, icon = p.icon, rating = p.rating,
-                        year = p.year, isNew = p.isNew, cast = p.cast.joinToString(", ").ifEmpty { null },
-                    )
+                    pending += entity(p, p.channel)
                     if (pending.size >= BATCH) {
                         val chunk = pending.toList(); pending.clear(); runBlocking { dao.insertProgrammes(chunk) }
                         kept += chunk.size; t.rows(kept, 30_000, "programmes")
@@ -211,6 +210,123 @@ class Catalog(private val db: AppDb) {
         } catch (e: Exception) {
             android.util.Log.w("Catalog", "guide load failed: ${e.javaClass.simpleName}")
         }
+    }
+
+    private fun entity(p: XmltvProgramme, epgId: String) = ProgrammeEntity(
+        epgId = epgId, start = p.start, stop = p.stop, title = p.title, description = p.description,
+        subTitle = p.subTitle, season = p.season, episode = p.episode,
+        category = p.categories.joinToString(", ").ifEmpty { null }, icon = p.icon, rating = p.rating,
+        year = p.year, isNew = p.isNew, cast = p.cast.joinToString(", ").ifEmpty { null },
+    )
+
+    /**
+     * The profile's extra guides, in priority order. Each provider channel is linked to at most one
+     * extra-guide channel (see [GuideMatch]); a channel whose provider schedule covers most of the
+     * next day keeps it and only gains missing details, and a thin one shows the extra schedule
+     * instead. Never both on one channel: their slot times differ. Failures never fail the refresh.
+     */
+    private suspend fun loadExtraGuides(profile: Profile, urls: List<String>, t: Tracker) {
+        dao.clearExtraProgrammes()
+        if (urls.isEmpty()) { PlaybackStatus.guide = null; return }
+        val channels = ArrayList<ChannelEntity>()
+        var offset = 0
+        while (true) {
+            val page = dao.allChannels(2000, offset)
+            if (page.isEmpty()) break
+            channels += page; offset += page.size
+        }
+        if (channels.isEmpty()) return
+        val cats = dao.categoryList(Kind.LIVE).associate { (it.sourceId to it.categoryId) to it.name }
+        val pins = profile.guidePins.orEmpty().entries.associate { GuideMatch.key(it.key) to it.value.trim() }
+        val provider = channels.map { c -> GuideMatch.Channel(c.name, c.epgId, cats[c.sourceId to c.categoryId]) }
+        val links = arrayOfNulls<GuideMatch.Link>(channels.size)
+        val errors = ArrayList<String>()
+        val now = System.currentTimeMillis()
+
+        for ((n, url) in urls.withIndex()) {
+            t.step("Loading extra guide ${n + 1} of ${urls.size}", 1f / urls.size)
+            val guideChannels = ArrayList<XmltvChannel>()
+            val wanted = HashSet<String>()
+            try {
+                open(url).use { res ->
+                    val input = res.body!!.byteStream().let { if (isGzip(url, res)) GZIPInputStream(it, 64 * 1024) else it }
+                    val parser = Xml.newPullParser().apply { setInput(input, null) }
+                    val pending = ArrayList<ProgrammeEntity>(BATCH)
+                    var kept = 0
+                    XmltvParser.parse(
+                        parser, now - 2 * HOUR, now + GUIDE_HOURS * HOUR, wanted, Locale.getDefault().language,
+                        onChannel = guideChannels::add,
+                        beforeProgrammes = {
+                            // Channels come first in the file: link the ones earlier guides didn't.
+                            val index = GuideMatch.Index(guideChannels)
+                            for (i in channels.indices) {
+                                if (links[i] != null) continue
+                                links[i] = GuideMatch.link(provider[i], index, pins[GuideMatch.key(channels[i].name)])?.also { wanted += it.guideId }
+                            }
+                        },
+                    ) { p ->
+                        pending += entity(p, GuideMatch.EXTRA_PREFIX + p.channel)
+                        if (pending.size >= BATCH) {
+                            val chunk = pending.toList(); pending.clear(); runBlocking { dao.insertProgrammes(chunk) }
+                            kept += chunk.size; t.rows(kept, 20_000, "programmes")
+                        }
+                    }
+                    if (pending.isNotEmpty()) dao.insertProgrammes(pending)
+                }
+            } catch (e: Exception) {
+                errors += "guide ${n + 1}: ${e.message ?: e.javaClass.simpleName}"
+            }
+        }
+
+        // Per channel: keep the provider's schedule (filling gaps) or switch to the extra one.
+        val day = now + 24 * HOUR
+        val own = channels.map { c -> c.epgId?.takeUnless { it.startsWith(GuideMatch.EXTRA_PREFIX) } }
+        val linked = links.filterNotNull()
+        val next = (own.filterNotNull() + linked.map { GuideMatch.EXTRA_PREFIX + it.guideId }).distinct()
+            .chunked(500).flatMap { dao.programmes(it, now, day) }.groupBy { it.epgId }
+        val used = HashSet<String>()
+        val filled = HashSet<String>()
+        val hidden = profile.hiddenCategories.orEmpty().map { it.lowercase() }.toSet()
+        // Thin channels nothing links, the admin's ordered categories first: those are worth a pin.
+        val order = profile.categoryOrder?.get(Kind.LIVE).orEmpty().withIndex().associate { (n, name) -> name.lowercase() to n }
+        val unmatched = ArrayList<Pair<Int, String>>()
+        var thin = 0
+        var switched = 0
+        for ((i, c) in channels.withIndex()) {
+            val ownId = own[i]
+            val cover = ownId?.let { GuideMatch.coverage(next[it].orEmpty(), c.name, now, day) } ?: 0f
+            val link = links[i]
+            if (cover < GuideMatch.GOOD_COVERAGE) thin++
+            if (link == null) {
+                val cat = cats[c.sourceId to c.categoryId]?.lowercase()
+                if (cover < GuideMatch.GOOD_COVERAGE && cat !in hidden) unmatched += (order[cat] ?: Int.MAX_VALUE) to c.name.take(60)
+                continue
+            }
+            val extraId = GuideMatch.EXTRA_PREFIX + link.guideId
+            if (cover >= GuideMatch.GOOD_COVERAGE) {
+                if (ownId != null && filled.add(ownId)) {
+                    val changed = GuideMatch.fill(
+                        dao.programmeRows(ownId, now - 2 * HOUR, now + GUIDE_HOURS * HOUR),
+                        dao.programmeRows(extraId, now - 2 * HOUR, now + GUIDE_HOURS * HOUR),
+                    )
+                    if (changed.isNotEmpty()) dao.updateProgrammes(changed)
+                }
+            } else if (GuideMatch.coverage(next[extraId].orEmpty(), c.name, now, day) > cover) {
+                dao.setChannelGuide(c.sourceId, c.streamId, extraId)
+                used += extraId
+                switched++
+            }
+        }
+        linked.map { GuideMatch.EXTRA_PREFIX + it.guideId }.distinct().filter { it !in used }.chunked(500).forEach { dao.deleteProgrammes(it) }
+        PlaybackStatus.guide = mapOf(
+            "channels" to channels.size,
+            "thin" to thin,
+            "linked" to linked.groupingBy { it.how.name.lowercase() }.eachCount(),
+            "switched" to switched,
+            "unmatchedCount" to unmatched.size,
+            "unmatched" to unmatched.sortedBy { it.first }.take(MAX_REPORTED).map { it.second },
+            "errors" to errors.takeIf { it.isNotEmpty() },
+        )
     }
 
     /** Seasons, episodes (with stills and synopses) and the show's own plot, from get_series_info. */
@@ -267,5 +383,8 @@ class Catalog(private val db: AppDb) {
         const val BATCH = 500
         const val HOUR = 3_600_000L
         const val GUIDE_HOURS = 48L
+        const val MAX_EXTRA_GUIDES = 4
+        /** Thin channels with no extra guide, listed for the admin (the portal keeps a few KB of status). */
+        const val MAX_REPORTED = 30
     }
 }
