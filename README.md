@@ -67,16 +67,17 @@ passwords on a remote, and when a TV goes black the portal tells you why.
   (OK shows that category's channels; a channel picked there becomes the list Up/Down zaps through),
   and Back once more leaves live TV.
 - Holding Back for about a second on any screen asks whether to exit Family TV (Cancel is selected).
-- Captions, audio/video tracks and stream info in the player. Live TV: D-pad right opens Options;
-  movies and episodes: press up from the player controls for the CC, audio & video and info buttons;
+- Captions, picture format, audio/video tracks and stream info in the player. Live TV: D-pad right opens Options;
+  movies and episodes: press up from the player controls for the CC, picture & sound and info buttons;
   phones and tablets: tap the video. The remote's Info, Captions and Menu keys work too.
   - **Captions** come from the stream itself first (CEA-608 in live TV, subtitle tracks in movies,
     HLS subtitle renditions). On/off and the caption language are remembered.
   - **Online subtitles** for movies and episodes with none of their own come from OpenSubtitles.com,
     matched by the provider's TMDB/IMDb ids (series id + season + episode for episodes), falling back
     to title and year. Only shown when the portal has an `OPENSUBTITLES_API_KEY`.
-  - **Audio & video** lists each audio track (language, codec, channels) and video quality
-    (resolution, bitrate, Auto) when there's more than one.
+  - **Picture & sound** sets the picture format (Original, Zoom to fill, Stretch, 16:9, 4:3; kept
+    for every channel and video after it), and lists each audio track (language, codec, channels)
+    and video quality (resolution, bitrate, Auto) when there's more than one.
   - **Stream info** shows what is really playing: codecs, resolution, frame rate (declared and
     rendered), declared and measured bitrate, HDR, audio channels and sample rate, stream type,
     dropped frames and buffer, updating every second.

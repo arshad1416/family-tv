@@ -53,6 +53,7 @@ import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.extractor.DefaultExtractorsFactory
+import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import app.familytv.BuildConfig
 import app.familytv.app
@@ -62,7 +63,10 @@ import app.familytv.data.NowNext
 import app.familytv.iptv.Streams
 import app.familytv.player.CaptionPrefs
 import app.familytv.player.ONLINE_SUFFIX
+import app.familytv.player.Aspect
+import app.familytv.player.AspectPref
 import app.familytv.player.OnlineSubtitles
+import app.familytv.player.boxMargins
 import app.familytv.player.PlayerTracks
 import app.familytv.player.StatsCollector
 import app.familytv.player.StreamStats
@@ -104,6 +108,7 @@ class PlayerActivity : ComponentActivity() {
     private lateinit var overlay: TextView
     private lateinit var tracks: PlayerTracks
     private lateinit var captionPrefs: CaptionPrefs
+    private lateinit var aspect: AspectPref
     private val stats = StatsCollector()
     private var hideOverlay: Job? = null
 
@@ -204,6 +209,12 @@ class PlayerActivity : ComponentActivity() {
             keepScreenOn = true
             setShowBuffering(PlayerView.SHOW_BUFFERING_ALWAYS)
         }
+        aspect = AspectPref(this)
+        // A forced 16:9 or 4:3 box depends on the view's size, which changes with rotation.
+        view.addOnLayoutChangeListener { _, l, t, r, b, ol, ot, or, ob ->
+            if (r - l != or - ol || b - t != ob - ot) view.post { applyAspect() }
+        }
+        applyAspect()
         overlay = TextView(this).apply {
             setTextColor(Color.WHITE)
             textSize = 22f
@@ -272,7 +283,7 @@ class PlayerActivity : ComponentActivity() {
                     onClose = ::finish,
                     captionsOn = tracks.captionsOn,
                     onCaptions = { openPanel(PlayerPanel.Captions) },
-                    onTracks = if (tracks.hasChoices) ({ openPanel(PlayerPanel.Tracks) }) else null,
+                    onTracks = { openPanel(PlayerPanel.Tracks) },
                     onInfo = { openPanel(PlayerPanel.Info) },
                 )
                 // The guide fades in over the video and out again; the last mode stays drawn while it fades.
@@ -299,8 +310,32 @@ class PlayerActivity : ComponentActivity() {
                     repeat(5) { withFrameNanos { }; if (runCatching { buttonsFocus.requestFocus() }.isSuccess) return@LaunchedEffect }
                 }
             }
-            PlayerPanels(panel, tracks, online, live, touch, stats = ::snapshot, onOpen = ::openPanel, onClose = ::closePanel)
+            PlayerPanels(panel, tracks, online, live, touch, aspect.value, onAspect = ::pickAspect, stats = ::snapshot, onOpen = ::openPanel, onClose = ::closePanel)
         }
+    }
+
+    private fun pickAspect(a: Aspect) {
+        aspect.set(a)
+        applyAspect()
+    }
+
+    /**
+     * Original, zoom and stretch are PlayerView's resize modes. 16:9 and 4:3 stretch the video into
+     * the largest box of that shape, by margins on the video frame (the controls keep the full screen).
+     */
+    private fun applyAspect() {
+        val a = aspect.value
+        view.resizeMode = when (a) {
+            Aspect.Fit -> AspectRatioFrameLayout.RESIZE_MODE_FIT
+            Aspect.Fill -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+            else -> AspectRatioFrameLayout.RESIZE_MODE_FILL
+        }
+        val frame = view.findViewById<View>(androidx.media3.ui.R.id.exo_content_frame) ?: return
+        val lp = frame.layoutParams as? FrameLayout.LayoutParams ?: return
+        val (x, y) = a.ratio?.let { boxMargins(view.width, view.height, it) } ?: (0 to 0)
+        if (lp.leftMargin == x && lp.rightMargin == x && lp.topMargin == y && lp.bottomMargin == y) return
+        lp.setMargins(x, y, x, y)
+        frame.layoutParams = lp
     }
 
     private fun snapshot(): StreamStats = stats.snapshot(player, url, tracks.captionSummary())

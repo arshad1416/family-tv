@@ -88,7 +88,7 @@ fun LiveOverlay(
             RoundIcon(Icons.AutoMirrored.Filled.ArrowBack, "Close player", Modifier.align(Alignment.TopStart).padding(16.dp), touch.onClose)
             Row(Modifier.align(Alignment.TopEnd).padding(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 CaptionButton(touch.captionsOn, onClick = touch.onCaptions)
-                touch.onTracks?.let { RoundIcon(Icons.Filled.Settings, "Audio and video tracks", onClick = it) }
+                touch.onTracks?.let { RoundIcon(Icons.Filled.Settings, "Picture and sound", onClick = it) }
                 RoundIcon(Icons.Filled.Info, "Stream info", onClick = touch.onInfo)
             }
             Column(Modifier.align(Alignment.CenterEnd).padding(end = 16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -109,7 +109,7 @@ class TouchControls(
     val onClose: () -> Unit,
     val captionsOn: Boolean = false,
     val onCaptions: () -> Unit = {},
-    /** Null when there is only one audio and one video track. */
+    /** Picture format, and audio/video tracks when there is a choice; null hides the button. */
     val onTracks: (() -> Unit)? = null,
     val onInfo: () -> Unit = {},
 )
