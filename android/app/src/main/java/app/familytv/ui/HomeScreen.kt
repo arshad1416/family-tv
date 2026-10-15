@@ -110,7 +110,7 @@ class PageEntry {
     var attached = 0
 }
 
-private val LocalPageEntry = staticCompositionLocalOf { PageEntry() }
+internal val LocalPageEntry = staticCompositionLocalOf { PageEntry() }
 
 /** Marks the composable this modifier goes on as the page's entry point (when [on]). */
 @Composable

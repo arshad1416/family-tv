@@ -59,25 +59,28 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 
-private const val SLOT = 30 * 60_000L
-private const val HOURS = 6
+internal const val SLOT = 30 * 60_000L
+internal const val HOURS = 6
 
 /** Grid geometry per form factor. TV keeps its original sizes; a phone pins only logo and number. */
-private class GuideDims(val slotW: Dp, val chanW: Dp, val rowH: Dp) {
+internal class GuideDims(val slotW: Dp, val chanW: Dp, val rowH: Dp) {
     val gridW = slotW * (HOURS * 2)
     fun span(ms: Long): Dp = slotW * (ms.toFloat() / SLOT)
 }
 
-private val TV_DIMS = GuideDims(slotW = 190.dp, chanW = 230.dp, rowH = 60.dp)
+internal val TV_DIMS = GuideDims(slotW = 190.dp, chanW = 230.dp, rowH = 60.dp)
 private val PHONE_DIMS = GuideDims(slotW = 132.dp, chanW = 64.dp, rowH = 64.dp)
 private val TABLET_DIMS = GuideDims(slotW = 170.dp, chanW = 200.dp, rowH = 64.dp)
+
+/** Height of the player guide's small video window (16:9). */
+internal val PICTURE_H = 176.dp
 
 // Android TV's default keeps the focused item pinned 30% in, which would jerk every row sideways
 // on each Up/Down; the interface default only scrolls as far as needed to show the cell.
 @OptIn(ExperimentalFoundationApi::class)
 private val MinimalScroll = object : BringIntoViewSpec {}
 
-private data class GuideFocus(val channel: ChannelEntity, val prog: NowNext?)
+internal data class GuideFocus(val channel: ChannelEntity, val prog: NowNext?)
 
 /**
  * Classic grid guide: channels down the left, half-hour slots across, six hours from the
@@ -142,8 +145,9 @@ fun GuideScreen(vm: MainViewModel, profile: Profile) {
     }
 }
 
+/** The focused programme's details; [picture] (the player's small video window) sits at the left when given. */
 @Composable
-private fun GuideHeader(focus: MutableState<GuideFocus?>, now: State<Long>) {
+internal fun GuideHeader(focus: MutableState<GuideFocus?>, now: State<Long>, picture: (@Composable () -> Unit)? = null) {
     val ctx = LocalContext.current
     val f = focus.value
     // Description is fetched only for the cell that focus rests on.
@@ -152,7 +156,8 @@ private fun GuideHeader(focus: MutableState<GuideFocus?>, now: State<Long>) {
         desc = null
         desc = f?.prog?.let { p -> delay(250); ctx.app.db.catalog().description(p.epgId, p.start) }
     }
-    Row(Modifier.fillMaxWidth().height(128.dp)) {
+    Row(Modifier.fillMaxWidth().height(if (picture != null) PICTURE_H else 128.dp)) {
+        picture?.let { it(); Spacer(Modifier.width(24.dp)) }
         Column(Modifier.weight(1f)) {
             Text(f?.prog?.title ?: f?.channel?.name ?: "Guide", fontSize = 28.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             f?.let {
@@ -178,7 +183,7 @@ private fun NowBar(now: State<Long>, onNow: () -> Unit) {
 }
 
 @Composable
-private fun TimeBar(d: GuideDims, start: Long, scroll: ScrollState, now: State<Long>) {
+internal fun TimeBar(d: GuideDims, start: Long, scroll: ScrollState, now: State<Long>) {
     Row(Modifier.fillMaxWidth().height(30.dp)) {
         Box(Modifier.width(d.chanW).fillMaxHeight(), contentAlignment = Alignment.CenterStart) {
             Text("Today", fontSize = 14.sp, color = Tv.Muted, maxLines = 1, modifier = Modifier.padding(start = 10.dp))
@@ -198,7 +203,7 @@ private fun TimeBar(d: GuideDims, start: Long, scroll: ScrollState, now: State<L
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun GuideRow(
+internal fun GuideRow(
     d: GuideDims,
     c: ChannelEntity,
     list: List<NowNext>,
