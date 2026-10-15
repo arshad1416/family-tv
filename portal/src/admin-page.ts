@@ -28,10 +28,13 @@ label{display:block;font-size:13px;color:var(--muted);margin:8px 0 3px}
 .verdict.s0{border-color:var(--ok)}.verdict.s1,.verdict.s2{border-color:var(--warn)}.verdict.s3{border-color:var(--bad)}
 pre{white-space:pre-wrap;word-break:break-word;font-size:12px;background:var(--bg);padding:8px;border-radius:6px;max-height:300px;overflow:auto}
 .err{color:var(--bad)}
+table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:7px 6px;border-top:1px solid var(--line);vertical-align:middle}th{font-size:13px;color:var(--muted);font-weight:500;border-top:0}
+.ok{color:var(--ok)}.warn{color:var(--warn)}
+@media (max-width:700px){.wide{display:none}}
 </style>
 </head>
 <body>
-<header><h1>Family TV</h1><nav><button data-tab="devices" class="on">Devices</button><button data-tab="profiles">Profiles</button></nav></header>
+<header><h1>Family TV</h1><nav><button data-tab="devices" class="on">Devices</button><button data-tab="profiles">Profiles</button><button data-tab="lines">Lines</button></nav></header>
 <main id="app"></main>
 <script>
 const $ = (s, el = document) => el.querySelector(s);
@@ -191,12 +194,84 @@ function editProfile(p) {
   paint();
 }
 
+// ---------- 8K lines ----------
+
+const plural = (n, w) => n + " " + w + (n === 1 ? "" : "s");
+function leftText(l) {
+  if (l.daysLeft == null) return '<span class="muted">unknown</span>';
+  if (l.daysLeft < 0) return '<span class="err">expired ' + plural(-l.daysLeft, "day") + " ago</span>";
+  const cls = l.daysLeft <= 7 ? "err" : l.daysLeft <= 30 ? "warn" : "ok";
+  return '<span class="' + cls + '">' + plural(l.daysLeft, "day") + "</span>";
+}
+
+async function renderLines(refresh) {
+  $("#app").innerHTML = '<div class="card muted">' + (refresh ? "Asking the panel about every line…" : "Loading lines…") + "</div>";
+  const [panel, data, p] = await Promise.all([api("/api/admin/panel"), api("/api/admin/lines" + (refresh ? "?refresh=1" : "")), api("/api/admin/profiles")]);
+  profiles = p.profiles;
+  if (!panel.configured) {
+    $("#app").innerHTML = '<div class="card"><h3 style="margin-top:0">Connect the 8K panel</h3><p>Add your reseller API key to the portal as the secret <code>IPTV_PANEL_API_KEY</code>, then redeploy it. ' +
+      "This page then shows each profile's line, how long it has left, and lets you renew or create lines.</p></div>";
+    return;
+  }
+  const months = (panel.months || [1, 3, 6, 12]).map((m) => '<option value="' + m + '">' + plural(m, "month") + "</option>").join("");
+  let html = '<div class="card row">' + (panel.error ? '<span class="err">Panel: ' + esc(panel.error) + "</span>" :
+    "<span><strong>" + esc(panel.reseller.credits) + '</strong> credits</span><span class="muted small">reseller ' + esc(panel.reseller.username) + "</span>") +
+    '<button class="b" id="lrefresh" style="margin-left:auto">Check all lines now</button></div>';
+  html += '<div class="card"><h3 style="margin-top:0">Lines</h3>';
+  if (!data.lines.length) html += '<p class="muted">No profile has an Xtream login yet. Create a line below or add one in Profiles.</p>';
+  else {
+    html += '<table><tr><th>Profile</th><th class="wide">Line</th><th>Expires</th><th>Left</th><th class="wide">Status</th><th>Renew</th></tr>';
+    for (const l of data.lines) {
+      const status = l.error ? '<span class="err">' + esc(l.error) + "</span>" : l.enabled === false ? '<span class="err">disabled on the panel</span>' :
+        l.enabled ? "active" + (l.maxConnections ? " · " + plural(l.maxConnections, "screen") : "") : "";
+      html += "<tr><td><strong>" + esc(l.profileName) + '</strong></td><td class="wide">' + esc(l.sourceName) + '<div class="muted small">' + esc(l.username) + "</div></td>" +
+        "<td>" + esc(l.expire || "") + "</td><td>" + leftText(l) + '</td><td class="wide small">' + status +
+        (l.checkedAt ? '<div class="muted">checked ' + ago(l.checkedAt) + "</div>" : "") + "</td>" +
+        '<td><div class="row" style="gap:6px;flex-wrap:nowrap"><select style="width:auto" data-m="' + esc(l.profileId + "/" + l.sourceId) + '">' + months + "</select>" +
+        '<button class="b" data-renew="' + esc(l.profileId + "/" + l.sourceId) + '">Renew</button></div></td></tr>';
+    }
+    html += "</table>";
+  }
+  html += '<div id="lmsg" class="small"></div></div>';
+  const popts = profiles.map((x) => '<option value="' + esc(x.id) + '">' + esc(x.name) + "</option>").join("");
+  const pkgs = (panel.packages || []).map((x) => '<option value="' + esc(x.id) + '">' + esc(x.name) + "</option>").join("");
+  html += '<div class="card"><h3 style="margin-top:0">New line for a profile</h3><p class="muted small">Creates a line on the panel (uses credits) and adds it to the profile. Its TVs pick it up within a minute.</p><div class="grid">' +
+    '<div><label>Profile</label><select id="nprof">' + (popts || '<option value="">Create a profile first</option>') + "</select></div>" +
+    '<div><label>Package</label><select id="npkg">' + (pkgs || '<option value="">No packages from the panel</option>') + "</select></div>" +
+    '<div><label>Length</label><select id="nmon">' + months + "</select></div>" +
+    '<div><label>Name in the profile</label><input id="nname" value="8K line"></div></div>' +
+    '<p><button class="b p" id="ncreate">Create line</button> <span id="nmsg" class="small"></span></p></div>';
+  $("#app").innerHTML = html;
+  $("#lrefresh").onclick = () => renderLines(true);
+  document.querySelectorAll("[data-renew]").forEach((b) => (b.onclick = async () => {
+    const key = b.dataset.renew, [profileId, sourceId] = key.split("/");
+    const l = data.lines.find((x) => x.profileId === profileId && x.sourceId === sourceId);
+    const m = +document.querySelector('[data-m="' + CSS.escape(key) + '"]').value;
+    if (!confirm("Renew " + l.profileName + " (" + l.username + ") for " + plural(m, "month") + "? This uses panel credits.")) return;
+    b.disabled = true; $("#lmsg").textContent = "Renewing…";
+    try { await api("/api/admin/lines/renew", { method: "POST", body: JSON.stringify({ profileId, sourceId, months: m }) }); renderLines(); }
+    catch (e) { b.disabled = false; $("#lmsg").innerHTML = '<span class="err">' + esc(e.message) + "</span>"; }
+  }));
+  $("#ncreate").onclick = async () => {
+    const profileId = $("#nprof").value, packageId = $("#npkg").value, m = +$("#nmon").value;
+    if (!profileId || !packageId) return;
+    const pname = profiles.find((x) => x.id === profileId).name, pkg = $("#npkg").selectedOptions[0].textContent;
+    if (!confirm("Create a new " + plural(m, "month") + " line (" + pkg + ") for " + pname + "? This uses panel credits.")) return;
+    $("#ncreate").disabled = true; $("#nmsg").textContent = "Creating…";
+    try {
+      const r = await api("/api/admin/lines/new", { method: "POST", body: JSON.stringify({ profileId, packageId, months: m, name: $("#nname").value }) });
+      if (r.ok) renderLines();
+      else { $("#ncreate").disabled = false; $("#nmsg").innerHTML = '<span class="err">' + esc(r.error) + "</span> Link: " + esc(r.url); }
+    } catch (e) { $("#ncreate").disabled = false; $("#nmsg").innerHTML = '<span class="err">' + esc(e.message) + "</span>"; }
+  };
+}
+
 async function render() {
   if (!token) return askToken();
   document.querySelectorAll("nav button").forEach((b) => b.classList.toggle("on", b.dataset.tab === tab));
   try {
     if (!Object.keys(verdicts).length) verdicts = await api("/api/admin/verdicts");
-    if (tab === "devices") await renderDevices(); else await renderProfiles();
+    if (tab === "devices") await renderDevices(); else if (tab === "lines") await renderLines(); else await renderProfiles();
   } catch (e) { if (token) $("#app").innerHTML = '<div class="card err">' + esc(e.message) + "</div>"; }
 }
 document.querySelectorAll("nav button").forEach((b) => (b.onclick = () => { tab = b.dataset.tab; render(); }));

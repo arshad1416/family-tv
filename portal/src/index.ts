@@ -2,6 +2,7 @@ import { openJson, pairCode, randomId, sealJson, sha256Hex, timingSafeEqual } fr
 import { maskSecrets, mergeSecrets, profileHosts, validateProfile, VERDICTS, type ProfileData } from "./model";
 import { probe } from "./reachability";
 import { ADMIN_PAGE } from "./admin-page";
+import { daysLeft, loginFromLineUrl, Panel, PanelError, RENEW_MONTHS } from "./panel";
 
 export interface Env {
   DB: D1Database;
@@ -21,6 +22,10 @@ export interface Env {
   TMDB_API_KEY?: string;
   /** Optional secret: TheTVDB v4 API key, delivered only to paired TVs as a fallback after TMDB. */
   TVDB_API_KEY?: string;
+  /** Optional secret: the 8K Gold reseller panel API key; enables the Lines page (credits, expiry, renew, new lines). */
+  IPTV_PANEL_API_KEY?: string;
+  /** Tests only: stands in for the panel. */
+  PANEL?: Panel;
 }
 
 const APK_KEY = "family-tv.apk";
@@ -480,6 +485,178 @@ async function adminSaveProfile(req: Request, env: Env, id: string | null) {
   return json({ id });
 }
 
+// ---------- 8K reseller panel ----------
+
+/** Re-ask the panel about a line after this long; the Lines page can force it. */
+const LINE_STALE_MS = 6 * 60 * 60 * 1000;
+
+function panel(env: Env): Panel {
+  if (env.PANEL) return env.PANEL;
+  const key = optionalKey(env.IPTV_PANEL_API_KEY);
+  if (!key) throw new HttpError(404, "the 8K panel isn't set up: add the IPTV_PANEL_API_KEY secret to the portal");
+  return new Panel(key);
+}
+
+const panelConfigured = (env: Env) => !!env.PANEL || !!optionalKey(env.IPTV_PANEL_API_KEY);
+
+/** Panel failures are the panel's words, shown to the admin as a 502. */
+async function viaPanel<T>(f: () => Promise<T>): Promise<T> {
+  try {
+    return await f();
+  } catch (e) {
+    if (e instanceof PanelError) throw new HttpError(502, e.message);
+    throw e;
+  }
+}
+
+async function adminPanel(env: Env) {
+  if (!panelConfigured(env)) return json({ configured: false });
+  const p = panel(env);
+  try {
+    const [reseller, packages] = await Promise.all([p.reseller(), p.packages()]);
+    return json({ configured: true, reseller, packages, months: RENEW_MONTHS });
+  } catch (e) {
+    if (e instanceof PanelError) return json({ configured: true, error: e.message, months: RENEW_MONTHS });
+    throw e;
+  }
+}
+
+interface LineRow {
+  profile_id: string;
+  source_id: string;
+  username: string;
+  expire: string | null;
+  enabled: number | null;
+  max_connections: number | null;
+  note: string | null;
+  error: string | null;
+  checked_at: number;
+}
+
+async function allProfiles(env: Env) {
+  const { results } = await env.DB.prepare("SELECT id, name, data_enc FROM profiles ORDER BY name").all<{ id: string; name: string; data_enc: string }>();
+  return Promise.all(results.map(async (r) => ({ id: r.id, name: r.name, data: await openJson<ProfileData>(env.CONFIG_KEY, r.data_enc) })));
+}
+
+async function checkLine(env: Env, p: Panel, profileId: string, sourceId: string, username: string, password: string) {
+  const now = Date.now();
+  try {
+    const l = await p.line(username, password);
+    await env.DB.prepare(
+      `INSERT INTO line_status (profile_id, source_id, username, expire, enabled, max_connections, note, error, checked_at) VALUES (?,?,?,?,?,?,?,NULL,?)
+       ON CONFLICT (profile_id, source_id) DO UPDATE SET username = excluded.username, expire = excluded.expire, enabled = excluded.enabled,
+         max_connections = excluded.max_connections, note = excluded.note, error = NULL, checked_at = excluded.checked_at`,
+    )
+      .bind(profileId, sourceId, username, l.expire, l.enabled ? 1 : 0, l.maxConnections, l.note, now)
+      .run();
+  } catch (e) {
+    if (!(e instanceof PanelError)) throw e;
+    // Keep the last good expiry on screen; just note why this check failed.
+    await env.DB.prepare(
+      `INSERT INTO line_status (profile_id, source_id, username, error, checked_at) VALUES (?,?,?,?,?)
+       ON CONFLICT (profile_id, source_id) DO UPDATE SET username = excluded.username, error = excluded.error, checked_at = excluded.checked_at`,
+    )
+      .bind(profileId, sourceId, username, e.message, now)
+      .run();
+  }
+}
+
+/**
+ * Every Xtream login across the profiles, with what the panel last said about it. Lines not
+ * checked for [LINE_STALE_MS] (or all, with [force]) are re-checked one at a time, gently.
+ */
+async function adminLines(env: Env, force: boolean) {
+  const profiles = await allProfiles(env);
+  const { results } = await env.DB.prepare("SELECT * FROM line_status").all<LineRow>();
+  const known = new Map(results.map((r) => [r.profile_id + "/" + r.source_id, r]));
+  const logins = profiles.flatMap((pr) =>
+    pr.data.sources.filter((s) => s.type === "xtream" && s.username && s.password).map((s) => ({ profile: pr, source: s })),
+  );
+  if (panelConfigured(env)) {
+    const p = panel(env);
+    const now = Date.now();
+    for (const { profile, source } of logins) {
+      const row = known.get(profile.id + "/" + source.id);
+      if (force || !row || row.username !== source.username || now - row.checked_at > LINE_STALE_MS) {
+        await checkLine(env, p, profile.id, source.id, source.username!, source.password!);
+      }
+    }
+  }
+  // Forget lines whose source was removed from its profile.
+  const live = new Set(logins.map((l) => l.profile.id + "/" + l.source.id));
+  const gone = results.filter((r) => !live.has(r.profile_id + "/" + r.source_id));
+  if (gone.length) await env.DB.batch(gone.map((r) => env.DB.prepare("DELETE FROM line_status WHERE profile_id = ? AND source_id = ?").bind(r.profile_id, r.source_id)));
+  const fresh = new Map((await env.DB.prepare("SELECT * FROM line_status").all<LineRow>()).results.map((r) => [r.profile_id + "/" + r.source_id, r]));
+  const lines = logins.map(({ profile, source }) => {
+    const r = fresh.get(profile.id + "/" + source.id);
+    return {
+      profileId: profile.id,
+      profileName: profile.name,
+      sourceId: source.id,
+      sourceName: source.name,
+      username: source.username,
+      expire: r?.expire ?? null,
+      daysLeft: r?.expire ? daysLeft(r.expire) : null,
+      enabled: r?.enabled == null ? null : r.enabled === 1,
+      maxConnections: r?.max_connections ?? null,
+      note: r?.note ?? null,
+      error: r?.error ?? null,
+      checkedAt: r?.checked_at ?? null,
+    };
+  });
+  lines.sort((a, b) => (a.daysLeft ?? 1e9) - (b.daysLeft ?? 1e9));
+  return json({ configured: panelConfigured(env), lines });
+}
+
+async function findLogin(env: Env, profileId: unknown, sourceId: unknown) {
+  if (typeof profileId !== "string" || typeof sourceId !== "string") throw new HttpError(400, "profileId and sourceId are required");
+  const profile = await loadProfile(env, profileId);
+  const source = profile?.sources.find((s) => s.id === sourceId);
+  if (!source) throw new HttpError(404, "line not found");
+  if (source.type !== "xtream" || !source.username || !source.password) throw new HttpError(400, "only Xtream logins can be renewed");
+  return { username: source.username, password: source.password };
+}
+
+/** Spends credits: the admin page confirms first. */
+async function adminRenewLine(req: Request, env: Env) {
+  const b = await body<{ profileId?: unknown; sourceId?: unknown; months?: unknown }>(req);
+  const months = Number(b.months);
+  if (!RENEW_MONTHS.includes(months)) throw new HttpError(400, `months must be one of ${RENEW_MONTHS.join(", ")}`);
+  const login = await findLogin(env, b.profileId, b.sourceId);
+  const p = panel(env);
+  await viaPanel(() => p.renew(login.username, login.password, months));
+  await checkLine(env, p, b.profileId as string, b.sourceId as string, login.username, login.password);
+  return json({ ok: true });
+}
+
+/**
+ * Creates a line on the panel (spends credits) and adds it to the profile as an Xtream source,
+ * so the profile's TVs pick it up on their next check-in.
+ */
+async function adminNewLine(req: Request, env: Env) {
+  const b = await body<{ profileId?: unknown; packageId?: unknown; months?: unknown; name?: unknown }>(req);
+  const months = Number(b.months);
+  if (!RENEW_MONTHS.includes(months)) throw new HttpError(400, `months must be one of ${RENEW_MONTHS.join(", ")}`);
+  if (typeof b.profileId !== "string" || typeof b.packageId !== "string" || !b.packageId) throw new HttpError(400, "profileId and packageId are required");
+  const profileId = b.profileId;
+  const row = await env.DB.prepare("SELECT name FROM profiles WHERE id = ?").bind(profileId).first<{ name: string }>();
+  const profile = await loadProfile(env, profileId);
+  if (!row || !profile) throw new HttpError(404, "profile not found");
+  const p = panel(env);
+  const created = await viaPanel(() => p.newLine(months, b.packageId as string, `Family TV: ${row.name}`.slice(0, 100)));
+  const login = loginFromLineUrl(created.url);
+  // The credits are spent either way; hand back the link so the line can be added by hand.
+  if (!login) return json({ ok: false, url: created.url, error: "Line created, but its link wasn't a normal Xtream link. Add it to the profile by hand." });
+  const sourceId = crypto.randomUUID();
+  const name = typeof b.name === "string" && b.name.trim() ? b.name.trim().slice(0, 60) : "8K line";
+  profile.sources.push({ id: sourceId, type: "xtream", name, serverUrls: [login.serverUrl], username: login.username, password: login.password });
+  await env.DB.prepare("UPDATE profiles SET data_enc = ?, updated_at = ? WHERE id = ?").bind(await sealJson(env.CONFIG_KEY, profile), Date.now(), profileId).run();
+  const { results } = await env.DB.prepare("SELECT id FROM devices WHERE profile_id = ?").bind(profileId).all<{ id: string }>();
+  for (const d of results) await queueCommand(env, d.id, "refresh", null);
+  await checkLine(env, p, profileId, sourceId, login.username, login.password);
+  return json({ ok: true, sourceId, username: login.username });
+}
+
 async function appDownload(env: Env, method: string): Promise<Response> {
   const obj = env.APPS ? await env.APPS.get(APK_KEY) : null;
   if (!obj) return json({ error: "no app uploaded yet" }, 404);
@@ -541,6 +718,10 @@ export async function handle(req: Request, env: Env): Promise<Response> {
     if (m === "GET" && p === "/api/admin/profiles") return adminProfiles(env);
     if (m === "POST" && p === "/api/admin/profiles") return adminSaveProfile(req, env, null);
     if (m === "GET" && p === "/api/admin/verdicts") return json(VERDICTS);
+    if (m === "GET" && p === "/api/admin/panel") return adminPanel(env);
+    if (m === "GET" && p === "/api/admin/lines") return adminLines(env, url.searchParams.get("refresh") === "1");
+    if (m === "POST" && p === "/api/admin/lines/renew") return adminRenewLine(req, env);
+    if (m === "POST" && p === "/api/admin/lines/new") return adminNewLine(req, env);
     if ((mm = p.match(/^\/api\/admin\/profiles\/([a-f0-9]+)$/))) {
       if (m === "PUT") return adminSaveProfile(req, env, mm[1]);
       if (m === "DELETE") {

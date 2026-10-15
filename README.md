@@ -80,6 +80,10 @@ passwords on a remote, and when a TV goes black the portal tells you why.
 - **Profiles:** one per household, holding its lines (Xtream or M3U, with backup URLs and a guide URL),
   an optional parental PIN for adult categories, and hidden categories. Saving a profile reloads every
   TV on it.
+- **Lines** (with the 8K reseller panel connected): every profile's Xtream line with its expiry date
+  and days left, red within a week; renew one for 1, 3, 6 or 12 months; your credit balance; and
+  **New line for a profile**, which creates a line in a chosen package and adds it to that profile.
+  Both ask before spending credits. Lines are re-checked when the page opens if older than 6 hours.
 - Provider passwords are encrypted at rest (AES-GCM, `CONFIG_KEY`), never sent back to the browser,
   and only delivered to paired TVs.
 - The portal's reachability check only probes hosts that are in that TV's own profile, and only the
@@ -108,6 +112,10 @@ Optional, for trailers and richer episode pages: `npx wrangler secret put TMDB_A
 read access token from themoviedb.org → Settings → API) and/or `npx wrangler secret put TVDB_API_KEY`
 (a TheTVDB v4 project key). Paired TVs get them with their config. Trailers and episode details come
 from the provider first, then TMDB, then TheTVDB; without the keys only the provider's own data is used.
+Optional, for the Lines page: `npx wrangler secret put IPTV_PANEL_API_KEY` (the 8K Gold reseller
+panel's API key; it stays in the Worker and is only sent to cms-8k.com), then `npm run db:migrate:remote`
+and `npm run deploy`.
+
 For a nicer sign-in, put the Worker on your own domain behind Cloudflare Access as well.
 
 ### 2. TV app
