@@ -1,5 +1,5 @@
 import { openJson, pairCode, randomId, sealJson, sha256Hex, timingSafeEqual } from "./crypto";
-import { CATEGORY_KINDS, cleanNames, forDevice, MASK, maskSecrets, mergeSecrets, profileHosts, validateProfile, VERDICTS, type ProfileData, type Source } from "./model";
+import { assertHttpUrl, CATEGORY_KINDS, cleanNames, forDevice, MASK, maskSecrets, mergeSecrets, profileHosts, validateProfile, VERDICTS, type ProfileData, type Source } from "./model";
 import { probe } from "./reachability";
 import { ADMIN_PAGE } from "./admin-page";
 import { preferServer, suggestions } from "./advice";
@@ -207,7 +207,7 @@ async function deviceConfig(req: Request, env: Env) {
   return json({
     paired: true,
     nickname: d.nickname,
-    profile: profile && forDevice(profile),
+    profile: profile && forDevice(await withSorterLinks(env, profile)),
     commands: await takeCommands(env, d.id, now),
     latestApp: await latestApp(env, req),
     // The client id is public (it goes in every Trakt API call); the secret never leaves the Worker.
@@ -609,6 +609,8 @@ interface LineLogin {
   name: string;
   serverUrls: string[];
   password: string;
+  /** The provider's page where this line's subscriber picks and orders channels (set on the Lines page). */
+  sorterUrl?: string;
 }
 
 type Line = Omit<LineRow, "data_enc"> & LineLogin;
@@ -639,7 +641,7 @@ async function saveLine(env: Env, username: string, login: LineLogin) {
     await env.DB.prepare("INSERT INTO lines (username, data_enc, created_at) VALUES (?,?,?)").bind(username, await sealJson(env.CONFIG_KEY, login), Date.now()).run();
     return;
   }
-  const next: LineLogin = { name: old.name || login.name, serverUrls: login.serverUrls.length ? login.serverUrls : old.serverUrls, password: login.password };
+  const next: LineLogin = { name: old.name || login.name, serverUrls: login.serverUrls.length ? login.serverUrls : old.serverUrls, password: login.password, sorterUrl: old.sorterUrl };
   if (next.password === old.password && next.serverUrls.join() === old.serverUrls.join() && next.name === old.name) return;
   const recheck = next.password !== old.password;
   await env.DB.prepare(`UPDATE lines SET data_enc = ?${recheck ? ", checked_at = NULL" : ""} WHERE username = ?`)
@@ -695,8 +697,11 @@ async function adminLines(env: Env, force: boolean) {
     if (stale.length) lines = await allLines(env);
   }
   const usedBy = new Map<string, { id: string; name: string }[]>();
+  // A sorter link typed on a profile before the Lines page had one; shown so saving it there moves it over.
+  const profileSorter = new Map<string, string>();
   for (const pr of profiles) {
     for (const s of xtreamLogins(pr.data.sources)) {
+      if (s.sorterUrl && !profileSorter.has(s.username!)) profileSorter.set(s.username!, s.sorterUrl);
       const list = usedBy.get(s.username!) ?? [];
       if (!list.some((x) => x.id === pr.id)) list.push({ id: pr.id, name: pr.name });
       usedBy.set(s.username!, list);
@@ -706,6 +711,7 @@ async function adminLines(env: Env, force: boolean) {
     username: l.username,
     name: l.name,
     serverUrls: l.serverUrls,
+    sorterUrl: l.sorterUrl ?? profileSorter.get(l.username) ?? null,
     profiles: usedBy.get(l.username) ?? [],
     expire: l.expire,
     daysLeft: l.expire ? daysLeft(l.expire) : null,
@@ -790,6 +796,35 @@ async function adminAddLines(req: Request, env: Env) {
     results.push({ username, ok: true, expire });
   }
   return json({ results });
+}
+
+/** Sets (or, when blank, clears) a line's package sorter link. */
+async function adminLineSorter(req: Request, env: Env) {
+  const b = await body<{ username?: unknown; sorterUrl?: unknown }>(req);
+  const line = await findLine(env, b.username);
+  const url = typeof b.sorterUrl === "string" ? b.sorterUrl.trim() : "";
+  if (url) {
+    try {
+      assertHttpUrl(url);
+    } catch {
+      throw new HttpError(400, "the sorter link must start with http:// or https://");
+    }
+  }
+  const login: LineLogin = { name: line.name, serverUrls: line.serverUrls, password: line.password, sorterUrl: url || undefined };
+  await env.DB.prepare("UPDATE lines SET data_enc = ? WHERE username = ?").bind(await sealJson(env.CONFIG_KEY, login), line.username).run();
+  return json({ ok: true, sorterUrl: url || null });
+}
+
+/** The profile with each Xtream source's sorter link taken from its line on the Lines page, when that has one. */
+async function withSorterLinks(env: Env, profile: ProfileData): Promise<ProfileData> {
+  const sources = await Promise.all(
+    profile.sources.map(async (s) => {
+      if (s.type !== "xtream" || !s.username) return s;
+      const link = (await lineByUsername(env, s.username))?.sorterUrl;
+      return link ? { ...s, sorterUrl: link } : s;
+    }),
+  );
+  return { ...profile, sources };
 }
 
 /** Takes a line off the portal's list. The line itself stays on the panel. */
@@ -903,6 +938,7 @@ export async function handle(req: Request, env: Env): Promise<Response> {
     if (m === "POST" && p === "/api/admin/lines/new") return adminNewLine(req, env);
     if (m === "POST" && p === "/api/admin/lines/add") return adminAddLines(req, env);
     if (m === "POST" && p === "/api/admin/lines/forget") return adminForgetLine(req, env);
+    if (m === "POST" && p === "/api/admin/lines/sorter") return adminLineSorter(req, env);
     if (m === "GET" && (mm = p.match(/^\/api\/admin\/profiles\/([a-f0-9]+)\/categories$/))) return adminProfileCategories(env, mm[1]);
     if (m === "POST" && (mm = p.match(/^\/api\/admin\/profiles\/([a-f0-9]+)\/primary-server$/))) return adminPreferServer(req, env, mm[1]);
     if ((mm = p.match(/^\/api\/admin\/profiles\/([a-f0-9]+)$/))) {

@@ -163,7 +163,7 @@ export function validateProfile(p: unknown): ProfileData {
   return d;
 }
 
-function assertHttpUrl(u: string) {
+export function assertHttpUrl(u: string) {
   const url = new URL(u);
   if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error(`not an http(s) URL: ${u}`);
 }

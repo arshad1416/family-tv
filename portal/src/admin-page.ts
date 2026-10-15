@@ -185,7 +185,7 @@ function sourceForm(s, i, line) {
     '<label>Server URLs (Xtream, one per line, backups after the main one)</label><textarea name="serverUrls" rows="2">' + esc(urls) + "</textarea>" +
     '<label>M3U playlist URL</label><input name="m3uUrl" value="' + esc(s.m3uUrl) + '">' +
     '<label>Guide (XMLTV) URL, optional</label><input name="epgUrl" value="' + esc(s.epgUrl) + '">' +
-    '<label>Package sorter link, optional (the provider page where the subscriber picks and orders channels; the app shows it as a QR code in Settings)</label><input name="sorterUrl" value="' + esc(s.sorterUrl) + '">' +
+    '<p class="muted small">Package sorter link: set it for this line on the Lines page.</p><input type="hidden" name="sorterUrl" value="' + esc(s.sorterUrl) + '">' +
     '<input type="hidden" name="id" value="' + esc(s.id) + '"><input type="hidden" name="copyOf" value="' + esc(s.copyOf) + '">' +
     '<p><button class="b" data-rm>Remove source</button>' + (s.copyOf ? ' <span class="muted small">Added from your lines; saved when you click Save.</span>' : "") + "</p></div>";
 }
@@ -419,7 +419,9 @@ async function renderLines(refresh) {
         l.enabled ? "active" + (l.maxConnections ? " · " + plural(l.maxConnections, "screen") : "") : "";
       const used = l.profiles.length ? l.profiles.map((x) => "<strong>" + esc(x.name) + "</strong>").join(", ") :
         '<span class="muted">not on a profile</span><div><button class="b" data-forget="' + i + '" style="padding:2px 8px;margin-top:4px">Remove from list</button></div>';
-      html += '<tr><td class="wide">' + esc(l.name) + '<div class="muted small">' + esc(l.username) + (l.note && l.note !== l.name ? " · " + esc(l.note) : "") + "</div></td><td>" + used + "</td>" +
+      html += '<tr><td class="wide">' + esc(l.name) + '<div class="muted small">' + esc(l.username) + (l.note && l.note !== l.name ? " · " + esc(l.note) : "") + "</div>" +
+        '<div class="row" style="gap:6px;flex-wrap:nowrap;margin-top:6px"><input data-sorter="' + i + '" placeholder="Package sorter link" title="The provider page where this subscriber picks and orders channels; the app shows it as a QR code in Settings" value="' + esc(l.sorterUrl || "") + '">' +
+        '<button class="b" data-ssave="' + i + '" style="padding:2px 8px">Save</button></div></td><td>' + used + "</td>" +
         "<td>" + esc(l.expire || "") + "</td><td>" + leftText(l) + '</td><td class="wide small">' + status +
         (l.checkedAt ? '<div class="muted">checked ' + ago(l.checkedAt) + "</div>" : "") + "</td>" +
         '<td><div class="row" style="gap:6px;flex-wrap:nowrap"><select style="width:auto" data-m="' + i + '">' + months + "</select>" +
@@ -449,6 +451,16 @@ async function renderLines(refresh) {
     b.disabled = true; $("#lmsg").textContent = "Renewing…";
     try { await api("/api/admin/lines/renew", { method: "POST", body: JSON.stringify({ username: l.username, months: m }) }); renderLines(); }
     catch (e) { b.disabled = false; $("#lmsg").innerHTML = '<span class="err">' + esc(e.message) + "</span>"; }
+  }));
+  document.querySelectorAll("[data-ssave]").forEach((b) => (b.onclick = async () => {
+    const l = data.lines[+b.dataset.ssave];
+    const sorterUrl = document.querySelector('[data-sorter="' + b.dataset.ssave + '"]').value.trim();
+    b.disabled = true;
+    try {
+      await api("/api/admin/lines/sorter", { method: "POST", body: JSON.stringify({ username: l.username, sorterUrl }) });
+      $("#lmsg").innerHTML = '<span class="ok">' + (sorterUrl ? "Sorter link saved for " : "Sorter link cleared for ") + esc(l.name) + ". Its TVs and phones show it within a minute.</span>";
+    } catch (e) { $("#lmsg").innerHTML = '<span class="err">' + esc(e.message) + "</span>"; }
+    b.disabled = false;
   }));
   document.querySelectorAll("[data-forget]").forEach((b) => (b.onclick = async () => {
     const l = data.lines[+b.dataset.forget];
