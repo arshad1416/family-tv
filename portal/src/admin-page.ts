@@ -1,5 +1,5 @@
 // Single-file admin UI, served by the Worker. No build step, no external requests.
-import { DEFAULT_EXTRA_GUIDES } from "./model";
+import { DEFAULT_EXTRA_GUIDES, MASK } from "./model";
 
 export const ADMIN_PAGE = /* html */ `<!doctype html>
 <html lang="en">
@@ -45,6 +45,7 @@ let token = null;
 try { token = localStorage.getItem("ftv_admin"); } catch {}
 let tab = "devices", verdicts = {}, profiles = [];
 const DEFAULT_GUIDES = ${JSON.stringify(DEFAULT_EXTRA_GUIDES)};
+const MASK = ${JSON.stringify(MASK)};
 
 async function api(path, opts = {}) {
   const res = await fetch(path, { ...opts, headers: { "content-type": "application/json", authorization: "Bearer " + token, ...(opts.headers || {}) } });
@@ -183,20 +184,20 @@ function sourceForm(s, i, line) {
     '<label>M3U playlist URL</label><input name="m3uUrl" value="' + esc(s.m3uUrl) + '">' +
     '<label>Guide (XMLTV) URL, optional</label><input name="epgUrl" value="' + esc(s.epgUrl) + '">' +
     '<input type="hidden" name="id" value="' + esc(s.id) + '"><input type="hidden" name="copyOf" value="' + esc(s.copyOf) + '">' +
-    '<p><button class="b" data-rm>Remove source</button>' + (s.copyOf ? ' <span class="muted small">Copied from another profile; saved when you click Save.</span>' : "") + "</p></div>";
+    '<p><button class="b" data-rm>Remove source</button>' + (s.copyOf ? ' <span class="muted small">Added from your lines; saved when you click Save.</span>' : "") + "</p></div>";
 }
 
-// Add a line to the profile: one the portal already knows (the panel's API can't list lines), or a new one.
+// Who uses a line, for pickers and the Lines page.
+const usedByText = (l) => l.profiles.length ? "in " + l.profiles.map((x) => x.name).join(", ") : "not on a profile";
+
+// Add a line to the profile: one from the Lines page, or a new one.
 function addLineCard(draft, lines, panel) {
   if (!lines) return '<div class="card muted small">Loading your lines…</div>';
   const mine = new Set(draft.data.sources.map((s) => (s.username || "").toLowerCase()));
-  const seen = new Set(), active = [], other = [];
+  const active = [], other = [];
   for (const l of lines.lines || []) {
-    const k = (l.username || "").toLowerCase();
-    if (!k || mine.has(k) || seen.has(k)) continue;
-    seen.add(k);
-    const users = lines.lines.filter((x) => (x.username || "").toLowerCase() === k).map((x) => x.profileName);
-    const opt = '<option value="' + esc(l.profileId + "/" + l.sourceId) + '">' + esc(l.sourceName + " · " + l.username + " · " + (l.daysLeft == null ? "status unknown" : l.daysLeft < 0 ? "expired" : plural(l.daysLeft, "day") + " left") + " · in " + users.join(", ")) + "</option>";
+    if (mine.has(l.username.toLowerCase())) continue;
+    const opt = '<option value="' + esc(l.username) + '">' + esc(l.name + " · " + l.username + " · " + (l.daysLeft == null ? "status unknown" : l.daysLeft < 0 ? "expired" : plural(l.daysLeft, "day") + " left") + " · " + usedByText(l)) + "</option>";
     (l.enabled === false || (l.daysLeft != null && l.daysLeft < 0) ? other : active).push(opt);
   }
   let html = '<div class="card"><h3 style="margin-top:0">Add a line</h3>';
@@ -204,7 +205,7 @@ function addLineCard(draft, lines, panel) {
     html += '<div class="row"><select id="pickline" style="flex:1">' + active.join("") + (other.length ? '<optgroup label="Expired or disabled">' + other.join("") + "</optgroup>" : "") + "</select>" +
       '<button class="b" id="useline">Add to this profile</button></div>' +
       '<p class="muted small">Copies that line here with its login and details; nothing changes until you click Save. A line used by two profiles shares its screens.</p>';
-  } else html += '<p class="muted small">No other lines yet. Lines show up here once a profile has their Xtream login.</p>';
+  } else html += '<p class="muted small">No other lines yet. Add the lines you have on the Lines page.</p>';
   if (lines.configured && panel && !panel.error) {
     const months = (panel.months || [1, 3, 6, 12]).map((m) => '<option value="' + m + '">' + plural(m, "month") + "</option>").join("");
     const pkgs = (panel.packages || []).map((x) => '<option value="' + esc(x.id) + '">' + esc(x.name) + "</option>").join("");
@@ -294,10 +295,9 @@ function editProfile(p) {
     $("#back").onclick = () => renderProfiles();
     if ($("#useline")) $("#useline").onclick = () => {
       collect();
-      const [pid, sid] = $("#pickline").value.split("/");
-      const from = (profiles.find((x) => x.id === pid) || { data: { sources: [] } }).data.sources.find((x) => x.id === sid);
-      if (!from) return;
-      draft.data.sources.push({ ...from, id: crypto.randomUUID(), password: from.password, copyOf: pid + "/" + sid });
+      const l = (lines.lines || []).find((x) => x.username === $("#pickline").value);
+      if (!l) return;
+      draft.data.sources.push({ id: crypto.randomUUID(), type: "xtream", name: l.name, serverUrls: l.serverUrls, username: l.username, password: MASK, copyOf: l.username });
       paint();
     };
     if ($("#pncreate")) $("#pncreate").onclick = async () => {
@@ -373,7 +373,7 @@ async function renderLines(refresh) {
   profiles = p.profiles;
   if (!panel.configured) {
     $("#app").innerHTML = '<div class="card"><h3 style="margin-top:0">Connect the 8K panel</h3><p>Add your reseller API key to the portal as the secret <code>IPTV_PANEL_API_KEY</code>, then redeploy it. ' +
-      "This page then shows each profile's line, how long it has left, and lets you renew or create lines.</p></div>";
+      "This page then shows all your lines, how long each has left, and lets you renew or create lines.</p></div>";
     return;
   }
   const months = (panel.months || [1, 3, 6, 12]).map((m) => '<option value="' + m + '">' + plural(m, "month") + "</option>").join("");
@@ -381,44 +381,74 @@ async function renderLines(refresh) {
     "<span><strong>" + esc(panel.reseller.credits) + '</strong> credits</span><span class="muted small">reseller ' + esc(panel.reseller.username) + "</span>") +
     '<button class="b" id="lrefresh" style="margin-left:auto">Check all lines now</button></div>';
   html += '<div class="card"><h3 style="margin-top:0">Lines</h3>';
-  if (!data.lines.length) html += '<p class="muted">No profile has an Xtream login yet. Create a line below or add one in Profiles.</p>';
+  if (!data.lines.length) html += '<p class="muted">No lines yet. Add the lines you already have below, or create a new one.</p>';
   else {
-    html += '<table><tr><th>Profile</th><th class="wide">Line</th><th>Expires</th><th>Left</th><th class="wide">Status</th><th>Renew</th></tr>';
-    for (const l of data.lines) {
+    html += '<table><tr><th class="wide">Line</th><th>Used by</th><th>Expires</th><th>Left</th><th class="wide">Status</th><th>Renew</th></tr>';
+    data.lines.forEach((l, i) => {
       const status = l.error ? '<span class="err">' + esc(l.error) + "</span>" : l.enabled === false ? '<span class="err">disabled on the panel</span>' :
         l.enabled ? "active" + (l.maxConnections ? " · " + plural(l.maxConnections, "screen") : "") : "";
-      html += "<tr><td><strong>" + esc(l.profileName) + '</strong></td><td class="wide">' + esc(l.sourceName) + '<div class="muted small">' + esc(l.username) + "</div></td>" +
+      const used = l.profiles.length ? l.profiles.map((x) => "<strong>" + esc(x.name) + "</strong>").join(", ") :
+        '<span class="muted">not on a profile</span><div><button class="b" data-forget="' + i + '" style="padding:2px 8px;margin-top:4px">Remove from list</button></div>';
+      html += '<tr><td class="wide">' + esc(l.name) + '<div class="muted small">' + esc(l.username) + (l.note && l.note !== l.name ? " · " + esc(l.note) : "") + "</div></td><td>" + used + "</td>" +
         "<td>" + esc(l.expire || "") + "</td><td>" + leftText(l) + '</td><td class="wide small">' + status +
         (l.checkedAt ? '<div class="muted">checked ' + ago(l.checkedAt) + "</div>" : "") + "</td>" +
-        '<td><div class="row" style="gap:6px;flex-wrap:nowrap"><select style="width:auto" data-m="' + esc(l.profileId + "/" + l.sourceId) + '">' + months + "</select>" +
-        '<button class="b" data-renew="' + esc(l.profileId + "/" + l.sourceId) + '">Renew</button></div></td></tr>';
-    }
+        '<td><div class="row" style="gap:6px;flex-wrap:nowrap"><select style="width:auto" data-m="' + i + '">' + months + "</select>" +
+        '<button class="b" data-renew="' + i + '">Renew</button></div></td></tr>';
+    });
     html += "</table>";
   }
   html += '<div id="lmsg" class="small"></div></div>';
-  const popts = profiles.map((x) => '<option value="' + esc(x.id) + '">' + esc(x.name) + "</option>").join("");
+  html += '<div class="card"><h3 style="margin-top:0">Add lines you already have</h3><p class="muted small">The panel has no way to list your lines, so add each one here once. ' +
+    "Paste its playlist (M3U) link from the panel, one per line; you can put a name before it, like <code>Grandma http://…</code>. Each is looked up on the panel before it is added. Nothing is renewed or charged.</p>" +
+    '<textarea id="addlinks" rows="4" placeholder="Living room http://server:port/get.php?username=…&amp;password=…&amp;type=m3u_plus"></textarea>' +
+    '<p><button class="b p" id="addlines">Add lines</button> <span id="amsg" class="small"></span></p></div>';
+  const popts = '<option value="">No profile yet</option>' + profiles.map((x) => '<option value="' + esc(x.id) + '">' + esc(x.name) + "</option>").join("");
   const pkgs = (panel.packages || []).map((x) => '<option value="' + esc(x.id) + '">' + esc(x.name) + "</option>").join("");
-  html += '<div class="card"><h3 style="margin-top:0">New line for a profile</h3><p class="muted small">Creates a line on the panel (uses credits) and adds it to the profile. Its TVs pick it up within a minute.</p><div class="grid">' +
-    '<div><label>Profile</label><select id="nprof">' + (popts || '<option value="">Create a profile first</option>') + "</select></div>" +
+  html += '<div class="card"><h3 style="margin-top:0">New line</h3><p class="muted small">Creates a line on the panel (uses credits). With a profile, it is added there and its TVs pick it up within a minute.</p><div class="grid">' +
+    '<div><label>Profile</label><select id="nprof">' + popts + "</select></div>" +
     '<div><label>Package</label><select id="npkg">' + (pkgs || '<option value="">No packages from the panel</option>') + "</select></div>" +
     '<div><label>Length</label><select id="nmon">' + months + "</select></div>" +
-    '<div><label>Name in the profile</label><input id="nname" value="8K line"></div></div>' +
+    '<div><label>Name</label><input id="nname" value="8K line"></div></div>' +
     '<p><button class="b p" id="ncreate">Create line</button> <span id="nmsg" class="small"></span></p></div>';
   $("#app").innerHTML = html;
   $("#lrefresh").onclick = () => renderLines(true);
   document.querySelectorAll("[data-renew]").forEach((b) => (b.onclick = async () => {
-    const key = b.dataset.renew, [profileId, sourceId] = key.split("/");
-    const l = data.lines.find((x) => x.profileId === profileId && x.sourceId === sourceId);
-    const m = +document.querySelector('[data-m="' + CSS.escape(key) + '"]').value;
-    if (!confirm("Renew " + l.profileName + " (" + l.username + ") for " + plural(m, "month") + "? This uses panel credits.")) return;
+    const l = data.lines[+b.dataset.renew];
+    const m = +document.querySelector('[data-m="' + b.dataset.renew + '"]').value;
+    if (!confirm("Renew " + l.name + " (" + l.username + ") for " + plural(m, "month") + "? This uses panel credits.")) return;
     b.disabled = true; $("#lmsg").textContent = "Renewing…";
-    try { await api("/api/admin/lines/renew", { method: "POST", body: JSON.stringify({ profileId, sourceId, months: m }) }); renderLines(); }
+    try { await api("/api/admin/lines/renew", { method: "POST", body: JSON.stringify({ username: l.username, months: m }) }); renderLines(); }
     catch (e) { b.disabled = false; $("#lmsg").innerHTML = '<span class="err">' + esc(e.message) + "</span>"; }
   }));
+  document.querySelectorAll("[data-forget]").forEach((b) => (b.onclick = async () => {
+    const l = data.lines[+b.dataset.forget];
+    if (!confirm("Remove " + l.name + " (" + l.username + ") from this list? The line stays on the panel; you can add it again later.")) return;
+    try { await api("/api/admin/lines/forget", { method: "POST", body: JSON.stringify({ username: l.username }) }); renderLines(); }
+    catch (e) { $("#lmsg").innerHTML = '<span class="err">' + esc(e.message) + "</span>"; }
+  }));
+  $("#addlines").onclick = async () => {
+    const inputs = $("#addlinks").value.split("\\n").map((x) => x.trim()).filter(Boolean);
+    const rows = inputs.map((x) => {
+      const at = x.search(/https?:\\/\\//);
+      return at < 0 ? { link: x } : { name: x.slice(0, at).trim(), link: x.slice(at).trim() };
+    });
+    if (!rows.length) return;
+    $("#addlines").disabled = true; $("#amsg").textContent = "Looking up " + plural(rows.length, "line") + " on the panel…";
+    try {
+      const r = await api("/api/admin/lines/add", { method: "POST", body: JSON.stringify({ lines: rows }) });
+      const bad = r.results.filter((x) => !x.ok);
+      if (!bad.length) return renderLines();
+      $("#addlines").disabled = false;
+      $("#amsg").innerHTML = (r.results.length - bad.length ? '<span class="ok">' + plural(r.results.length - bad.length, "line") + " added.</span> " : "") +
+        bad.map((x) => '<span class="err">' + esc(x.username || "A link") + ": " + esc(x.error) + "</span>").join("<br>");
+      // Keep only the ones that failed in the box, to fix and try again.
+      $("#addlinks").value = inputs.filter((_, i) => !r.results[i].ok).join("\\n");
+    } catch (e) { $("#addlines").disabled = false; $("#amsg").innerHTML = '<span class="err">' + esc(e.message) + "</span>"; }
+  };
   $("#ncreate").onclick = async () => {
     const profileId = $("#nprof").value, packageId = $("#npkg").value, m = +$("#nmon").value;
-    if (!profileId || !packageId) return;
-    const pname = profiles.find((x) => x.id === profileId).name, pkg = $("#npkg").selectedOptions[0].textContent;
+    if (!packageId) return;
+    const pname = profileId ? profiles.find((x) => x.id === profileId).name : "no profile yet", pkg = $("#npkg").selectedOptions[0].textContent;
     if (!confirm("Create a new " + plural(m, "month") + " line (" + pkg + ") for " + pname + "? This uses panel credits.")) return;
     $("#ncreate").disabled = true; $("#nmsg").textContent = "Creating…";
     try {

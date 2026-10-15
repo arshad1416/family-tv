@@ -98,10 +98,13 @@ passwords on a remote, and when a TV goes black the portal tells you why.
 - **Profiles:** one per household, holding its lines (Xtream or M3U, with backup URLs and a guide URL),
   an optional parental PIN for adult categories, and hidden categories. Saving a profile reloads every
   TV on it.
-- **Lines** (with the 8K reseller panel connected): every profile's Xtream line with its expiry date
-  and days left, red within a week; renew one for 1, 3, 6 or 12 months; your credit balance; and
-  **New line for a profile**, which creates a line in a chosen package and adds it to that profile.
-  Both ask before spending credits. Lines are re-checked when the page opens if older than 6 hours.
+- **Lines** (with the 8K reseller panel connected): every line the portal knows, whether a profile
+  uses it or not, with its expiry date and days left (red within a week) and which profiles use it;
+  renew one for 1, 3, 6 or 12 months; your credit balance; **Add lines you already have** (paste
+  their playlist links; the panel's API can't list lines, so each is added once and looked up on the
+  panel first); and **New line**, which creates a line in a chosen package, for a profile or for
+  later. Renew and New ask before spending credits. Lines are re-checked when the page opens if
+  older than 6 hours. A profile's "Add a line" picker offers all of these lines.
 - **Categories** (in each profile): arrange and show or hide the Live TV, Movies and TV Shows
   categories the profile's TVs report. TVs list them in that order, the rest after.
 - **Suggestions** (in each TV's details): what the last check means for that TV and what to do: Ethernet
