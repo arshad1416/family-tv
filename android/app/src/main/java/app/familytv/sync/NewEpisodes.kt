@@ -20,14 +20,17 @@ import app.familytv.iptv.SeriesTitles
 import app.familytv.portal.Profile
 import app.familytv.ui.MainActivity
 import app.familytv.user.EpisodeWatchEntity
+import app.familytv.user.NewEpisodeList
+import app.familytv.user.ProgressKey
 import app.familytv.user.Pending
 import kotlinx.coroutines.delay
 
 /**
  * Watches favourite shows for new episodes. Every few hours the background check-in asks the
- * provider for each favourite show's episode list; a newer episode than last time marks the show
- * "new" (a row on Home) and posts a notification. The first look at a show only records where it
- * is, so adding a favourite never alerts.
+ * provider for each favourite show's episode list; newer episodes than last time are added to the
+ * show's unwatched list (its counter and a row on Home) and post a notification. Watching them
+ * counts the show back down. The first look at a show only records where it is, so adding a
+ * favourite never alerts.
  */
 class NewEpisodes(private val app: FamilyTvApp) {
     private val dao get() = app.userDb.user()
@@ -58,21 +61,35 @@ class NewEpisodes(private val app: FamilyTvApp) {
             val latest = EpisodeGuide.latest(episodes) ?: continue
             val now = System.currentTimeMillis()
             val old = known[f.sourceId to f.itemId]
-            val added = old?.let { EpisodeGuide.countAfter(episodes, it.latestSeason to it.latestEpisode) } ?: 0
+            val arrived = old?.let { EpisodeGuide.after(episodes, it.latestSeason to it.latestEpisode) }.orEmpty()
+            val listed = old?.let { NewEpisodeList.decode(it.newEpisodes) }.orEmpty()
+            // Watched ones drop off; the provider may also have pulled an episode.
+            val exists = episodes.mapTo(HashSet()) { it.season to it.episode }
+            val pending = (listed + arrived).distinct().filter { it in exists }
+            val keys = pending.map { (s, e) -> ProgressKey.episode(f.sourceId, f.itemId, s, e) }
+            val watched = dao.progressFor(keys).filter { it.watched }.mapTo(HashSet()) { it.season to it.episode }
+            val unwatched = pending.filter { it !in watched }
+            val legacy = old != null && old.newEpisodes.isEmpty() && old.newCount > 0 && arrived.isEmpty()
             dao.upsertEpisodeWatch(
                 EpisodeWatchEntity(
                     f.sourceId, f.itemId, f.name, latest.first, latest.second, now,
-                    newCount = (old?.newCount ?: 0) + added,
-                    newSince = if (added > 0) now else old?.newSince ?: 0,
+                    newCount = if (legacy) old!!.newCount else unwatched.size,
+                    newSince = when {
+                        legacy -> old!!.newSince
+                        unwatched.isEmpty() -> 0
+                        arrived.isNotEmpty() -> now
+                        else -> old?.newSince?.takeIf { it > 0 } ?: now
+                    },
+                    newEpisodes = if (legacy) "" else NewEpisodeList.encode(unwatched),
                 ),
             )
-            if (added > 0) fresh += SeriesTitles.parse(f.name).title to added
+            if (arrived.isNotEmpty()) fresh += SeriesTitles.parse(f.name).title to arrived.size
         }
         if (fresh.isNotEmpty()) notify(fresh.distinctBy { it.first })
     }
 
-    /** Opening a show's page has caught the family up on it. */
-    suspend fun seen(sourceId: String, seriesId: String) = dao.clearNewEpisodes(sourceId, seriesId)
+    /** Opening a show's page clears a count from before episodes were tracked one by one. */
+    suspend fun seen(sourceId: String, seriesId: String) = dao.clearOldNewCount(sourceId, seriesId)
 
     private fun notify(shows: List<Pair<String, Int>>) {
         if (!allowed(app)) return

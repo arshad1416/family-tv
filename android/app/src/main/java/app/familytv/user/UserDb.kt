@@ -91,7 +91,8 @@ data class MediaIdsEntity(
 
 /**
  * The newest episode seen for a favourite show, so the background check can tell when another
- * one arrives. [newCount] and [newSince] stay set until the show's page is opened.
+ * one arrives. [newEpisodes] lists the episodes that arrived since and aren't watched yet; the
+ * show's counter is how many of them are still unwatched.
  */
 @Entity(tableName = "episode_watch", primaryKeys = ["sourceId", "seriesId"])
 data class EpisodeWatchEntity(
@@ -101,10 +102,27 @@ data class EpisodeWatchEntity(
     val latestSeason: Int,
     val latestEpisode: Int,
     val checkedAt: Long,
+    /** [newEpisodes]' size; rows from before that list existed keep their old count until the page is opened. */
     val newCount: Int = 0,
-    /** When the unseen new episodes appeared; 0 when there are none. */
+    /** When the unwatched new episodes appeared; 0 when there are none. */
     val newSince: Long = 0,
+    /** The new episodes not yet watched, as [NewEpisodeList] text ("1:5,1:6"). */
+    @ColumnInfo(defaultValue = "") val newEpisodes: String = "",
 )
+
+/** The new episodes of a show, stored as "season:episode" pairs separated by commas. */
+object NewEpisodeList {
+    fun encode(eps: List<Pair<Int, Int>>): String = eps.joinToString(",") { "${it.first}:${it.second}" }
+
+    fun decode(s: String): List<Pair<Int, Int>> = s.split(',').mapNotNull { p ->
+        val (a, b) = p.split(':').takeIf { it.size == 2 } ?: return@mapNotNull null
+        a.trim().toIntOrNull()?.let { season -> b.trim().toIntOrNull()?.let { season to it } }
+    }
+
+    /** Episodes in [w]'s list the family hasn't watched; rows from before the list keep their old count. */
+    fun unwatched(w: EpisodeWatchEntity, watched: (season: Int, episode: Int) -> Boolean): Int =
+        if (w.newEpisodes.isEmpty()) w.newCount else decode(w.newEpisodes).count { (s, e) -> !watched(s, e) }
+}
 
 @Dao
 interface UserDao {
@@ -131,8 +149,9 @@ interface UserDao {
     @Query("SELECT * FROM episode_watch") suspend fun episodeWatches(): List<EpisodeWatchEntity>
     @Query("SELECT * FROM episode_watch WHERE newSince > 0 ORDER BY newSince DESC") fun newEpisodes(): Flow<List<EpisodeWatchEntity>>
     @Upsert suspend fun upsertEpisodeWatch(w: EpisodeWatchEntity)
-    @Query("UPDATE episode_watch SET newCount = 0, newSince = 0 WHERE sourceId = :sourceId AND seriesId = :seriesId")
-    suspend fun clearNewEpisodes(sourceId: String, seriesId: String)
+    /** Opening the page clears only a count from before the episode list existed. */
+    @Query("UPDATE episode_watch SET newCount = 0, newSince = 0 WHERE sourceId = :sourceId AND seriesId = :seriesId AND newEpisodes = ''")
+    suspend fun clearOldNewCount(sourceId: String, seriesId: String)
     @Query("DELETE FROM episode_watch WHERE sourceId = :sourceId AND seriesId = :seriesId") suspend fun deleteEpisodeWatch(sourceId: String, seriesId: String)
 
     @Query("SELECT * FROM media_ids WHERE kind = :kind AND sourceId = :sourceId AND itemId = :itemId")
@@ -144,9 +163,9 @@ interface UserDao {
 
 @Database(
     entities = [FavouriteEntity::class, ProgressEntity::class, MediaIdsEntity::class, EpisodeWatchEntity::class],
-    version = 2,
+    version = 3,
     exportSchema = true,
-    autoMigrations = [AutoMigration(from = 1, to = 2)],
+    autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3)],
 )
 abstract class UserDb : RoomDatabase() {
     abstract fun user(): UserDao
