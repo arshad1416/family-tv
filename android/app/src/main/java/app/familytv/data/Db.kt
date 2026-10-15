@@ -1,6 +1,8 @@
 package app.familytv.data
 
 import android.content.Context
+import androidx.room.AutoMigration
+import androidx.room.ColumnInfo
 import androidx.room.Dao
 import androidx.room.Database
 import androidx.room.Entity
@@ -102,6 +104,18 @@ data class ProgrammeEntity(
     val stop: Long,
     val title: String,
     val description: String?,
+    // What the guide header shows beyond the title (added in v4; older rows have none).
+    val subTitle: String? = null,
+    val season: Int? = null,
+    val episode: Int? = null,
+    /** Up to three genres, comma separated. */
+    val category: String? = null,
+    val icon: String? = null,
+    val rating: String? = null,
+    val year: Int? = null,
+    @ColumnInfo(defaultValue = "0") val isNew: Boolean = false,
+    /** Up to five actors, comma separated. */
+    val cast: String? = null,
 )
 
 data class NowNext(val epgId: String, val title: String, val start: Long, val stop: Long)
@@ -153,7 +167,7 @@ interface CatalogDao {
     )
     suspend fun programmes(epgIds: List<String>, now: Long, until: Long): List<NowNext>
 
-    @Query("SELECT description FROM programmes WHERE epgId = :epgId AND start = :start LIMIT 1") suspend fun description(epgId: String, start: Long): String?
+    @Query("SELECT * FROM programmes WHERE epgId = :epgId AND start = :start LIMIT 1") suspend fun programme(epgId: String, start: Long): ProgrammeEntity?
 
     @Query("SELECT COUNT(*) FROM channels") suspend fun channelCount(): Int
 
@@ -170,8 +184,9 @@ interface CatalogDao {
 
 @Database(
     entities = [SourceEntity::class, CategoryEntity::class, ChannelEntity::class, MovieEntity::class, SeriesEntity::class, ProgrammeEntity::class],
-    version = 3,
+    version = 4,
     exportSchema = true,
+    autoMigrations = [AutoMigration(from = 3, to = 4)],
 )
 abstract class AppDb : RoomDatabase() {
     abstract fun catalog(): CatalogDao

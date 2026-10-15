@@ -19,6 +19,7 @@ import okhttp3.Request
 import okhttp3.Response
 import java.io.IOException
 import java.io.Reader
+import java.util.Locale
 import java.util.zip.GZIPInputStream
 
 /**
@@ -193,8 +194,13 @@ class Catalog(private val db: AppDb) {
                 dao.clearProgrammesFor(sourceId)
                 val pending = ArrayList<ProgrammeEntity>(BATCH)
                 var kept = 0
-                XmltvParser.parse(parser, now - 2 * HOUR, now + GUIDE_HOURS * HOUR, wanted) { p ->
-                    pending += ProgrammeEntity(epgId = p.channel, start = p.start, stop = p.stop, title = p.title, description = p.description)
+                XmltvParser.parse(parser, now - 2 * HOUR, now + GUIDE_HOURS * HOUR, wanted, Locale.getDefault().language) { p ->
+                    pending += ProgrammeEntity(
+                        epgId = p.channel, start = p.start, stop = p.stop, title = p.title, description = p.description,
+                        subTitle = p.subTitle, season = p.season, episode = p.episode,
+                        category = p.categories.joinToString(", ").ifEmpty { null }, icon = p.icon, rating = p.rating,
+                        year = p.year, isNew = p.isNew, cast = p.cast.joinToString(", ").ifEmpty { null },
+                    )
                     if (pending.size >= BATCH) {
                         val chunk = pending.toList(); pending.clear(); runBlocking { dao.insertProgrammes(chunk) }
                         kept += chunk.size; t.rows(kept, 30_000, "programmes")

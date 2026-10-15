@@ -30,7 +30,10 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -39,14 +42,17 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Icon
 import androidx.tv.material3.Text
+import app.familytv.app
 import app.familytv.data.ChannelEntity
 import app.familytv.data.NowNext
+import app.familytv.data.ProgrammeEntity
 
 private val GUIDE_W = 440.dp
 
@@ -119,6 +125,10 @@ fun RoundIcon(icon: ImageVector, label: String, modifier: Modifier = Modifier, o
 private fun InfoBanner(ch: ChannelEntity, progs: List<NowNext>?, modifier: Modifier, hint: String? = null) {
     val now = System.currentTimeMillis()
     val (cur, next) = progs.nowAndNext(now)
+    // The current programme's episode, genre and description, from the guide.
+    val db = LocalContext.current.app.db
+    var detail by remember { mutableStateOf<ProgrammeEntity?>(null) }
+    LaunchedEffect(cur) { detail = cur?.let { db.catalog().programme(it.epgId, it.start) } }
     Box(
         modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xE6060A14), Color(0xF2060A14)))),
     ) {
@@ -129,6 +139,8 @@ private fun InfoBanner(ch: ChannelEntity, progs: List<NowNext>?, modifier: Modif
             Column(Modifier.weight(1f)) {
                 Text(ch.name, fontSize = 16.sp, color = Tv.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(cur?.title ?: "No guide information", fontSize = 26.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                detail?.let(::programmeFacts)?.let { Text(it, fontSize = 15.sp, color = Tv.Accent, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp)) }
+                detail?.description?.takeIf { it.isNotBlank() }?.let { Text(it, fontSize = 14.sp, color = Tv.Muted, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp)) }
                 if (cur != null) Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("${time(cur.start)} – ${time(cur.stop)}", fontSize = 15.sp, color = Tv.Muted)
                     Spacer(Modifier.width(14.dp))
