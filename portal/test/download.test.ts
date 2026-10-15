@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { handle, latestApp, type Env } from "../src/index";
+import { handle, latestApp, subtitlesApiKey, type Env } from "../src/index";
 
 const apk = new Uint8Array([0x50, 0x4b, 3, 4]);
 const bucket = (has: boolean) =>
@@ -34,5 +34,14 @@ describe("latestApp", () => {
     expect(await latestApp({ APPS: withLatest(null) } as unknown as Env, req)).toBeNull();
     const vars = { APPS: withLatest(null), LATEST_APP_VERSION_CODE: "3", LATEST_APP_URL: "https://x/a.apk" } as unknown as Env;
     expect(await latestApp(vars, req)).toEqual({ versionCode: 3, versionName: null, url: "https://x/a.apk" });
+  });
+});
+
+describe("subtitlesApiKey", () => {
+  it("passes the secret through, trimmed", () =>
+    expect(subtitlesApiKey({ OPENSUBTITLES_API_KEY: " abc123 " } as unknown as Env)).toBe("abc123"));
+  it("is null when the secret is unset or blank", () => {
+    expect(subtitlesApiKey({} as unknown as Env)).toBeNull();
+    expect(subtitlesApiKey({ OPENSUBTITLES_API_KEY: "  " } as unknown as Env)).toBeNull();
   });
 });

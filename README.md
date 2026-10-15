@@ -26,6 +26,19 @@ passwords on a remote, and when a TV goes black the portal tells you why.
   remote). Favourite movies and series follow the Trakt watchlist both ways, and watched marks and
   resume points sync through Trakt scrobbling, so every device on the same Trakt account agrees.
   Channel favourites stay on the device, since Trakt has no live TV.
+- Captions, audio/video tracks and stream info in the player. Live TV: D-pad right opens Options;
+  movies and episodes: press up from the player controls for the CC, audio & video and info buttons;
+  phones and tablets: tap the video. The remote's Info, Captions and Menu keys work too.
+  - **Captions** come from the stream itself first (CEA-608 in live TV, subtitle tracks in movies,
+    HLS subtitle renditions). On/off and the caption language are remembered.
+  - **Online subtitles** for movies and episodes with none of their own come from OpenSubtitles.com,
+    matched by the provider's TMDB/IMDb ids (series id + season + episode for episodes), falling back
+    to title and year. Only shown when the portal has an `OPENSUBTITLES_API_KEY`.
+  - **Audio & video** lists each audio track (language, codec, channels) and video quality
+    (resolution, bitrate, Auto) when there's more than one.
+  - **Stream info** shows what is really playing: codecs, resolution, frame rate (declared and
+    rendered), declared and measured bitrate, HDR, audio channels and sample rate, stream type,
+    dropped frames and buffer, updating every second.
 - **Help → Run a check**, which also runs by itself when playback fails. It works out which of these
   is the problem and tells the viewer in plain words:
 
@@ -70,6 +83,11 @@ openssl rand -base64 32 | npx wrangler secret put CONFIG_KEY
 npm run deploy                               # serves https://familytv.arshadkazi.ca (routes in wrangler.toml) and workers.dev
 ```
 Keep `CONFIG_KEY` safe: losing it means re-entering the line passwords.
+
+Optional, for online subtitles: create an API consumer at opensubtitles.com (Profile → API consumers)
+and `npx wrangler secret put OPENSUBTITLES_API_KEY`. Paired TVs get the key with their config; without
+it the TV only offers the stream's own captions. Without an OpenSubtitles login the key allows a small
+number of downloads a day per IP; the TV says so when the limit is reached.
 For a nicer sign-in, put the Worker on your own domain behind Cloudflare Access as well.
 
 ### 2. TV app

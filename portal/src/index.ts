@@ -15,6 +15,8 @@ export interface Env {
   TRAKT_CLIENT_SECRET?: string;
   /** The Trakt app's Redirect URI (wrangler.toml var); defaults to <this portal>/trakt. */
   TRAKT_REDIRECT_URI?: string;
+  /** Optional secret: OpenSubtitles.com API key, delivered only to paired TVs for online subtitles. */
+  OPENSUBTITLES_API_KEY?: string;
 }
 
 const APK_KEY = "family-tv.apk";
@@ -117,6 +119,12 @@ export async function latestApp(env: Env, req: Request) {
   return code > 0 && env.LATEST_APP_URL ? { versionCode: code, versionName: null, url: env.LATEST_APP_URL } : null;
 }
 
+/** The subtitle key for paired devices; null (online subtitles hidden on the TV) when the secret isn't set. */
+export function subtitlesApiKey(env: Env): string | null {
+  const key = env.OPENSUBTITLES_API_KEY?.trim();
+  return key ? key : null;
+}
+
 async function freshPairCode(env: Env): Promise<string> {
   for (let i = 0; i < 5; i++) {
     const code = pairCode();
@@ -168,6 +176,7 @@ async function deviceConfig(req: Request, env: Env) {
     latestApp: await latestApp(env, req),
     // The client id is public (it goes in every Trakt API call); the secret never leaves the Worker.
     trakt: traktConfigured(env) ? { clientId: env.TRAKT_CLIENT_ID } : null,
+    subtitlesApiKey: subtitlesApiKey(env),
   });
 }
 

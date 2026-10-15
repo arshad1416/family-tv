@@ -33,6 +33,8 @@ data class DeviceConfig(
     val latestApp: LatestApp? = null,
     /** Set when the portal has Trakt credentials; null hides Trakt on the TV. */
     val trakt: TraktPortal? = null,
+    /** OpenSubtitles API key from the portal's Worker secret; null hides online subtitles. */
+    val subtitlesApiKey: String? = null,
 )
 
 /** The Trakt app's public client id. The secret stays in the portal. */
