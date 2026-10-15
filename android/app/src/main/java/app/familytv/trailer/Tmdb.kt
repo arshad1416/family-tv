@@ -13,8 +13,8 @@ import java.io.IOException
 /** What a metadata service knows about one episode, to fill in what the provider left out. */
 data class EpisodeMeta(val still: String?, val overview: String?)
 
-/** What TMDB says about a movie, for the Movies spotlight. */
-data class MovieMeta(val overview: String?, val genres: List<String>, val runtimeMin: Int?)
+/** What TMDB says about a movie (the Movies spotlight, the guide header) or a show (the guide header). */
+data class MovieMeta(val overview: String?, val genres: List<String>, val runtimeMin: Int?, val poster: String? = null)
 
 /** One season from TMDB: what it is about, its YouTube videos and its episodes' stills and overviews. */
 data class SeasonMeta(val overview: String?, val videos: List<Trailers.Video>, val episodes: Map<Int, EpisodeMeta>)
@@ -36,6 +36,8 @@ class Tmdb(private val key: String, private val client: OkHttpClient, private va
             ?.let(TmdbParse::season)
 
     suspend fun movie(id: String, lang: String): MovieMeta? = get("movie/$id", listOf("language" to lang))?.let(TmdbParse::movie)
+
+    suspend fun tv(id: String, lang: String): MovieMeta? = get("tv/$id", listOf("language" to lang))?.let(TmdbParse::movie)
 
     suspend fun searchMovie(title: String, year: Int?): String? =
         get("search/movie", listOfNotNull("query" to title, year?.let { "year" to it.toString() }))?.let(TmdbParse::firstId)
@@ -63,6 +65,7 @@ class Tmdb(private val key: String, private val client: OkHttpClient, private va
     companion object {
         const val BASE_URL = "https://api.themoviedb.org/3"
         const val IMAGE_BASE = "https://image.tmdb.org/t/p/w780"
+        const val POSTER_BASE = "https://image.tmdb.org/t/p/w342"
     }
 }
 
@@ -92,6 +95,7 @@ object TmdbParse {
         overview = o.str("overview"),
         genres = o.array("genres").mapNotNull { it.obj()?.str("name") },
         runtimeMin = o.get("runtime")?.takeIf { it.isJsonPrimitive }?.asInt?.takeIf { it > 0 },
+        poster = o.str("poster_path")?.let { Tmdb.POSTER_BASE + it },
     )
 
     fun firstId(o: JsonObject): String? = o.array("results").firstNotNullOfOrNull { it.obj()?.get("id")?.takeIf { id -> id.isJsonPrimitive }?.asString }

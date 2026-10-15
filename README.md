@@ -15,6 +15,11 @@ passwords on a remote, and when a TV goes black the portal tells you why.
 **On the TV**
 - Live TV with now/next, a 6-hour guide, movies, and series with episodes. Sources are Xtream logins
   or M3U links with an optional XMLTV guide.
+- **Guide details:** the guide header and the player's info banner show everything the XMLTV guide
+  carries: episode (S2 E5) and episode title, genres, rating (the Canadian one first), year, NEW,
+  description, picture and cast. When the guide has no description or picture for the focused
+  programme, it is looked up on TMDB (with the portal's key) or TVmaze and labelled "Details from
+  TMDB/TVmaze". News, sport and the like are never looked up.
 - Several server URLs per Xtream line, so a backup URL is used automatically when the main one fails.
 - Lists stream straight into SQLite in batches of 500, and the guide keeps only the next 48 hours for
   your channels. That keeps memory flat on 1 GB Fire TV Sticks.

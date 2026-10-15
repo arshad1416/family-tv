@@ -41,6 +41,7 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -53,8 +54,11 @@ import app.familytv.data.CategoryEntity
 import app.familytv.data.ChannelEntity
 import app.familytv.data.Kind
 import app.familytv.data.NowNext
+import app.familytv.data.ProgrammeEntity
 import app.familytv.portal.Profile
+import app.familytv.trailer.ShowExtras
 import app.familytv.user.Favourites
+import coil.compose.AsyncImage
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
@@ -145,33 +149,78 @@ fun GuideScreen(vm: MainViewModel, profile: Profile) {
     }
 }
 
-/** The focused programme's details; [picture] (the player's small video window) sits at the left when given. */
+/**
+ * The focused programme's details: title, episode, genre, rating and year, the description and
+ * cast, and its picture. [picture] (the player's small video window) takes the picture's place at
+ * the left when given. Where the guide left the description or picture out, TMDB or TVmaze fills
+ * them in, and the header says so.
+ */
 @Composable
 internal fun GuideHeader(focus: MutableState<GuideFocus?>, now: State<Long>, picture: (@Composable () -> Unit)? = null) {
     val ctx = LocalContext.current
     val f = focus.value
-    // Description is fetched only for the cell that focus rests on.
-    var desc by remember { mutableStateOf<String?>(null) }
+    // Details are read only for the cell that focus rests on.
+    var detail by remember { mutableStateOf<ProgrammeEntity?>(null) }
+    var extras by remember { mutableStateOf<ShowExtras?>(null) }
     LaunchedEffect(f) {
-        desc = null
-        desc = f?.prog?.let { p -> delay(250); ctx.app.db.catalog().description(p.epgId, p.start) }
+        detail = null
+        extras = null
+        val p = f?.prog ?: return@LaunchedEffect
+        delay(250)
+        val row = ctx.app.db.catalog().programme(p.epgId, p.start) ?: return@LaunchedEffect
+        detail = row
+        delay(250)
+        extras = ctx.app.extras.showExtras(row)
     }
-    Row(Modifier.fillMaxWidth().height(if (picture != null) PICTURE_H else 128.dp)) {
-        picture?.let { it(); Spacer(Modifier.width(24.dp)) }
+    val d = detail
+    val desc = d?.description?.takeIf { it.isNotBlank() && (it.length >= 40 || extras?.overview == null) } ?: extras?.overview
+    val image = d?.icon ?: extras?.image
+    Row(Modifier.fillMaxWidth().height(if (picture != null) PICTURE_H else HEADER_H)) {
+        when {
+            picture != null -> { picture(); Spacer(Modifier.width(24.dp)) }
+            image != null -> {
+                AsyncImage(
+                    image, contentDescription = null, contentScale = ContentScale.Fit,
+                    modifier = Modifier.width(HEADER_H * 16 / 9).fillMaxHeight().background(Tv.Panel, RoundedCornerShape(8.dp)),
+                )
+                Spacer(Modifier.width(20.dp))
+            }
+        }
         Column(Modifier.weight(1f)) {
-            Text(f?.prog?.title ?: f?.channel?.name ?: "Guide", fontSize = 28.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(f?.prog?.title ?: f?.channel?.name ?: "Guide", fontSize = 26.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             f?.let {
                 val p = it.prog
                 Text(
                     listOfNotNull("${it.channel.num}  ${it.channel.name}", p?.let { "${time(it.start)} – ${time(it.stop)}  ·  ${(it.stop - it.start) / 60_000} min" }).joinToString("   ·   "),
-                    fontSize = 15.sp, color = Tv.Accent, maxLines = 1, modifier = Modifier.padding(top = 4.dp),
+                    fontSize = 15.sp, color = Tv.Accent, maxLines = 1, modifier = Modifier.padding(top = 2.dp),
                 )
             }
-            desc?.takeIf { it.isNotBlank() }?.let { Text(it, fontSize = 14.sp, color = Tv.Muted, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp)) }
+            d?.let(::programmeFacts)?.let { Text(it, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp)) }
+            desc?.let { Text(it, fontSize = 14.sp, lineHeight = 19.sp, color = Tv.Muted, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp)) }
+            val credit = extras?.takeIf { e -> (e.overview != null && desc == e.overview) || (e.image != null && image == e.image) }?.let { "Details from ${it.source}" }
+            listOfNotNull(d?.cast?.let { "With $it" }, credit).joinToString("   ·   ").ifEmpty { null }?.let {
+                Text(it, fontSize = 12.sp, color = Tv.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
+            }
         }
         Text(time(now.value), fontSize = 20.sp, color = Tv.Muted, modifier = Modifier.padding(start = 24.dp))
     }
 }
+
+private val HEADER_H = 140.dp
+
+/** "S2 E5  ·  Episode title  ·  Drama, Comedy  ·  14+  ·  2019  ·  NEW": what the guide knows beyond the title. */
+internal fun programmeFacts(p: ProgrammeEntity): String? = listOfNotNull(
+    when {
+        p.season != null && p.episode != null -> "S${p.season} E${p.episode}"
+        p.episode != null -> "Episode ${p.episode}"
+        else -> null
+    },
+    p.subTitle?.takeIf { !it.equals(p.title, ignoreCase = true) },
+    p.category,
+    p.rating,
+    p.year?.toString(),
+    if (p.isNew) "NEW" else null,
+).joinToString("  ·  ").ifEmpty { null }
 
 /** Touch guide: the clock and a button that scrolls the grid back to the current half hour. */
 @Composable

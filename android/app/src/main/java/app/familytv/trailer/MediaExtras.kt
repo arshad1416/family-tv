@@ -8,7 +8,9 @@ import android.widget.Toast
 import app.familytv.FamilyTvApp
 import app.familytv.core.Http
 import app.familytv.data.MovieEntity
+import app.familytv.data.ProgrammeEntity
 import app.familytv.data.SeriesEntity
+import app.familytv.iptv.GuideTitles
 import app.familytv.iptv.SeriesTitles
 import app.familytv.portal.Profile
 import kotlinx.coroutines.currentCoroutineContext
@@ -19,6 +21,9 @@ import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.coroutines.AbstractCoroutineContextElement
 import kotlin.coroutines.CoroutineContext
+
+/** Show details the guide left out, and where they came from (the guide header credits it). */
+data class ShowExtras(val overview: String?, val image: String?, val source: String)
 
 /** Season details from TMDB, else TheTVDB, to fill what the provider's get_series_info left out. */
 data class SeasonExtras(val overview: String?, val trailer: String?, val episodes: Map<Int, EpisodeMeta>)
@@ -80,6 +85,42 @@ class MediaExtras(private val app: FamilyTvApp) {
         t.movie(id, languages(null).first())
     }
 
+    /**
+     * Details for a guide programme that came without a description or picture: TMDB (movie, or
+     * show and episode) when the portal set a key, else TVmaze for shows. Only asked for the
+     * programme focus rests on; news, sport and the like are never looked up.
+     */
+    suspend fun showExtras(p: ProgrammeEntity): ShowExtras? {
+        if (!GuideTitles.worthLookingUp(p.title, p.category, p.description, p.icon)) return null
+        val title = GuideTitles.clean(p.title)
+        val movie = p.category?.let { MOVIE.containsMatchIn(it) } == true
+        val s = p.season
+        val e = p.episode
+        return cached("guide/${GuideTitles.key(title)}/${if (movie) "movie/${p.year}" else "$s/$e"}") {
+            val lang = languages(null).first()
+            runCatching {
+                tmdb()?.let { t ->
+                    val found = if (movie) {
+                        t.searchMovie(title, p.year)?.let { id -> t.movie(id, lang) }?.let { ShowExtras(it.overview, it.poster, "TMDB") }
+                    } else {
+                        t.searchTv(title, null)?.let { id ->
+                            val ep = if (s != null && e != null) t.season(id, s, listOf(lang))?.episodes?.get(e) else null
+                            val show = t.tv(id, lang)
+                            ShowExtras(ep?.overview ?: show?.overview, ep?.still ?: show?.poster, "TMDB")
+                        }
+                    }
+                    if (found != null && (found.overview != null || found.image != null)) return@cached found
+                }
+            }
+            if (movie) return@cached null
+            val maze = TvMaze(Http.client)
+            // TVmaze's single search always answers something; only trust it when the name matches.
+            val (id, show) = maze.show(title)?.takeIf { (_, m) -> m.name?.let(GuideTitles::key) == GuideTitles.key(title) } ?: return@cached null
+            val ep = if (s != null && e != null) runCatching { maze.episode(id, s, e) }.getOrNull() else null
+            ShowExtras(ep?.summary ?: show.summary, ep?.image ?: show.image, "TVmaze").takeIf { it.overview != null || it.image != null }
+        }
+    }
+
     /** The show's trailer from TMDB, else TheTVDB (the caller tries the provider's first). */
     suspend fun showTrailer(v: SeriesEntity): String? = cached("show/${v.sourceId}/${v.seriesId}") {
         val langs = languages(v.lang)
@@ -120,6 +161,7 @@ class MediaExtras(private val app: FamilyTvApp) {
     private object Gated : AbstractCoroutineContextElement(Gated), CoroutineContext.Key<Gated>
 
     companion object {
+        private val MOVIE = Regex("(?i)\\b(movie|film)s?\\b")
         const val TTL_MS = 12 * 3_600_000L
     }
 }

@@ -99,6 +99,55 @@ class ParsersTest {
     }
 
     @Test
+    fun xmltvReadsEveryDetailTheHeaderShows() {
+        val xml = """<?xml version="1.0"?><tv>
+            <programme start="20261014180000 +0000" stop="20261014190000 +0000" channel="ctv.ca">
+              <title lang="fr">Les Simpson</title><title lang="en">The Simpsons</title>
+              <sub-title lang="en">Bart the Genius</sub-title>
+              <desc lang="en">Bart swaps tests.</desc>
+              <credits><director>David Silverman</director><actor role="Homer">Dan Castellaneta</actor><actor>Julie Kavner</actor></credits>
+              <date>1990</date>
+              <category lang="en">Comedy</category><category lang="en">Animation</category><category>Comedy</category>
+              <icon src="https://img.example/simpsons.jpg" />
+              <episode-num system="dd_progid">EP000001.0002</episode-num>
+              <episode-num system="xmltv_ns">0.1.0/1</episode-num>
+              <rating system="USA Parental Rating"><value>TV-PG</value></rating>
+              <rating system="Canadian Parental Rating"><value>PG</value></rating>
+              <new />
+            </programme>
+            <programme start="20261014190000 +0000" stop="20261014200000 +0000" channel="ctv.ca">
+              <title>Movie night</title><episode-num system="onscreen">S16 E10</episode-num><previously-shown />
+            </programme>
+        </tv>"""
+        val p = KXmlParser().apply { setInput(xml.reader()) }
+        val out = mutableListOf<app.familytv.iptv.XmltvProgramme>()
+        XmltvParser.parse(p, 0, Long.MAX_VALUE, null, lang = "en") { out += it }
+        val s = out[0]
+        assertEquals("The Simpsons", s.title)
+        assertEquals("Bart the Genius", s.subTitle)
+        assertEquals("Bart swaps tests.", s.description)
+        assertEquals(1 to 2, s.season to s.episode)
+        assertEquals(listOf("Comedy", "Animation"), s.categories)
+        assertEquals("https://img.example/simpsons.jpg", s.icon)
+        assertEquals("PG", s.rating)
+        assertEquals(1990, s.year)
+        assertTrue(s.isNew)
+        assertEquals(listOf("Dan Castellaneta", "Julie Kavner"), s.cast)
+        assertEquals(16 to 10, out[1].season to out[1].episode)
+        assertFalse(out[1].isNew)
+        assertEquals("Movie night", out[1].title)
+    }
+
+    @Test
+    fun episodeNumbersFromEitherForm() {
+        assertEquals(2 to 5, XmltvParser.episodeNumbers("1.4.0/2", null))
+        assertEquals(null to 5, XmltvParser.episodeNumbers(".4.", null))
+        assertEquals(3 to 12, XmltvParser.episodeNumbers(null, "S03E12"))
+        assertEquals(3 to 12, XmltvParser.episodeNumbers("..", "s3 e12"))
+        assertEquals(null to null, XmltvParser.episodeNumbers(null, "Part 2"))
+    }
+
+    @Test
     fun xtreamUrlsEncodeCredentials() {
         assertEquals("http://h:8080/live/a%20b/p%40ss/7.ts", XtreamUrls.live("http://h:8080/", "a b", "p@ss", "7"))
         assertTrue(XtreamUrls.api("http://h", "u", "p&x", "get_series").endsWith("player_api.php?username=u&password=p%26x&action=get_series"))
