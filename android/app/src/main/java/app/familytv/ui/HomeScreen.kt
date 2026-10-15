@@ -47,6 +47,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
@@ -95,6 +96,11 @@ import java.util.Date
 private val ADULT = Regex("(?i)\\b(xxx|adult|18\\+|for adults)\\b")
 private val RAIL = 76.dp
 
+/** One focus style for artwork: a 1.1x zoom plus the outline (Android TV's guideline). */
+const val FOCUS_SCALE = 1.1f
+/** Room around a row of artwork for a focused card's zoom. */
+val FOCUS_ROOM = 12.dp
+
 enum class Page(val label: String, val icon: ImageVector) {
     Home("Home", Icons.Filled.Home),
     Live("Live TV", Icons.Filled.PlayArrow),
@@ -138,6 +144,13 @@ fun pageEntry(): PageEntry = LocalPageEntry.current
 
 @Composable
 private fun PageBody(page: Page, vm: MainViewModel, config: DeviceConfig, profile: Profile, onNavigate: (Page) -> Unit) {
+    // Each page keeps its saveable state (category, scroll, last card) while another is open.
+    val pages = rememberSaveableStateHolder()
+    pages.SaveableStateProvider(page.name) { PageContent(page, vm, config, profile, onNavigate) }
+}
+
+@Composable
+private fun PageContent(page: Page, vm: MainViewModel, config: DeviceConfig, profile: Profile, onNavigate: (Page) -> Unit) {
     when (page) {
         Page.Home -> HomePage(vm, profile, onNavigate)
         // Live TV is the guide grid on every device.
@@ -175,7 +188,8 @@ fun HomeScreen(vm: MainViewModel, config: DeviceConfig) {
                 .restoresFocus(entry),
         ) {
             CompositionLocalProvider(LocalPageEntry provides entry) {
-                Box(Modifier.fillMaxSize().padding(start = 28.dp, end = 36.dp, top = 24.dp)) {
+                // Inside the 5% overscan safe zone (48dp across, 27dp down on a 960x540dp screen).
+                Box(Modifier.fillMaxSize().padding(start = 28.dp, end = 48.dp, top = 28.dp)) {
                     PageBody(page, vm, config, profile) { page = it }
                 }
             }
@@ -431,13 +445,13 @@ private fun HomePage(vm: MainViewModel, profile: Profile, onNavigate: (Page) -> 
     nav.Host(vm, profile) {
         Column {
             if (!touch) HeroHeader(hero)
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(22.dp), contentPadding = PaddingValues(bottom = 40.dp)) {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(bottom = 40.dp)) {
                 if (heroes.isNotEmpty()) item("hero") { HeroCarousel(heroes) }
                 if (newShows.isNotEmpty()) item("new-episodes") {
                     Shelf("New episodes") {
                         itemsIndexed(newShows, key = { _, g -> "new/${g.key}" }) { _, g ->
                             PosterCard(
-                                g.title, g.poster, favourite = true, newBadge = true,
+                                g.title, g.poster, favourite = true, newBadge = true, newCount = g.newCount(newKeys),
                                 onFocus = { hero.value = Hero(g.title, "New episodes", g.plot) },
                             ) { nav.open = g }
                         }
@@ -464,7 +478,7 @@ private fun HomePage(vm: MainViewModel, profile: Profile, onNavigate: (Page) -> 
                                     ) { scope.launch { playMovieNow(ctx, profile, x) } }
                                 }
                                 is SeriesGroup -> PosterCard(
-                                    x.title, x.poster, entryPoint(entry), favourite = true, newBadge = x.hasNew(newKeys),
+                                    x.title, x.poster, entryPoint(entry), favourite = true, newBadge = x.hasNew(newKeys), newCount = x.newCount(newKeys),
                                     onFavourite = { toggleShowFavourite(ctx, x, true) },
                                     onFocus = { hero.value = Hero(x.title, "Favourite series", x.plot) },
                                 ) { openedFromFavourites = true; nav.open = x }
@@ -524,7 +538,7 @@ private fun HomePage(vm: MainViewModel, profile: Profile, onNavigate: (Page) -> 
 @Composable
 private fun HeroHeader(hero: MutableState<Hero?>) {
     val h = hero.value
-    Column(Modifier.fillMaxWidth().height(132.dp)) {
+    Column(Modifier.fillMaxWidth().height(132.dp).padding(start = FOCUS_ROOM)) {
         Text(h?.title ?: "Welcome", fontSize = 30.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
         Spacer(Modifier.height(4.dp))
         Text(h?.subtitle ?: "Pick something to watch", fontSize = 16.sp, color = Tv.Accent, maxLines = 1)
@@ -537,17 +551,18 @@ private fun HeroHeader(hero: MutableState<Hero?>) {
 fun Shelf(title: String, onViewAll: (() -> Unit)? = null, content: LazyListScope.() -> Unit) {
     Column {
         if (onViewAll == null) {
-            Text(title, fontSize = 19.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 10.dp))
+            Text(title, fontSize = 19.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = FOCUS_ROOM))
         } else {
-            Row(Modifier.fillMaxWidth().padding(bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().padding(start = FOCUS_ROOM), verticalAlignment = Alignment.CenterVertically) {
                 Text(title, fontSize = 19.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                 FocusBox(onClick = onViewAll, color = Color.Transparent, modifier = Modifier.heightIn(min = 48.dp), contentAlignment = Alignment.Center) { focused ->
                     Text("View all", fontSize = 15.sp, color = if (focused) Tv.Text else Tv.Accent, modifier = Modifier.padding(horizontal = 12.dp))
                 }
             }
         }
-        // focusRestorer: coming back up/down into a shelf returns to the card you left.
-        LazyRow(Modifier.focusRestorer(), horizontalArrangement = Arrangement.spacedBy(14.dp), contentPadding = PaddingValues(end = 40.dp), content = content)
+        // focusRestorer: coming back up/down into a shelf returns to the card you left. The padding
+        // leaves room for a focused card's zoom, which the row would otherwise clip.
+        LazyRow(Modifier.focusRestorer(), horizontalArrangement = Arrangement.spacedBy(14.dp), contentPadding = PaddingValues(start = FOCUS_ROOM, end = 40.dp, top = FOCUS_ROOM, bottom = FOCUS_ROOM), content = content)
     }
 }
 
@@ -583,7 +598,7 @@ fun ChannelCard(
 /**
  * Artwork tile. [onFavourite] adds hold-OK or Menu (TV) or a heart button (touch) to toggle the
  * favourite; [onMenu], when set, takes over hold-OK, Menu and long press (an [ItemMenu]);
- * [newBadge] marks a show with new episodes; [watched] and [progress] draw the tick and the resume line. [logo] fits a channel
+ * [newBadge] marks a show with new episodes ([newCount] of them, when known); [watched] and [progress] draw the tick and the resume line. [logo] fits a channel
  * logo instead of cropping a poster. [onTrailer] adds a Trailer button (over the poster on touch,
  * beside the name on TV).
  */
@@ -601,20 +616,21 @@ fun PosterCard(
     onTrailer: (() -> Unit)? = null,
     onMenu: (() -> Unit)? = null,
     newBadge: Boolean = false,
+    newCount: Int = 0,
     onFocus: () -> Unit = {},
     onClick: () -> Unit,
 ) {
     val touch = LocalFormFactor.current.touch
     val heart = touch && onFavourite != null
     Column(if (width != null) Modifier.width(width) else Modifier.fillMaxWidth()) {
-        FocusBox(onClick = onClick, onLongClick = onMenu ?: onFavourite, onFocus = onFocus, outline = true, scale = 1.06f, color = Tv.Raised, modifier = modifier.fillMaxWidth().aspectRatio(2f / 3f), contentAlignment = Alignment.Center) {
+        FocusBox(onClick = onClick, onLongClick = onMenu ?: onFavourite, onFocus = onFocus, outline = true, scale = FOCUS_SCALE, color = Tv.Raised, modifier = modifier.fillMaxWidth().aspectRatio(2f / 3f), contentAlignment = Alignment.Center) {
             Text(name, Modifier.padding(8.dp), fontSize = 13.sp, maxLines = 4, color = Tv.Muted)
             if (poster != null) {
                 if (logo) AsyncImage(poster, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize().padding(20.dp))
                 else AsyncImage(poster, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
             }
             MarkBadge(Modifier.align(Alignment.TopStart), watched = watched)
-            if (newBadge) NewBadge(Modifier.align(Alignment.BottomEnd))
+            if (newBadge) NewBadge(Modifier.align(Alignment.BottomEnd), newCount)
             if (heart) FavouriteButton(favourite, onFavourite!!, Modifier.align(Alignment.TopEnd))
             else MarkBadge(Modifier.align(Alignment.TopEnd), favourite = favourite)
             if (progress > 0f) ProgressLine(progress, Modifier.align(Alignment.BottomCenter).padding(8.dp), height = 4.dp)

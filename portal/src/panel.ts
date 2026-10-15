@@ -48,7 +48,9 @@ const str = (v: unknown): string | null => (v == null || v === "" ? null : Strin
 export class Panel {
   constructor(
     private apiKey: string,
-    private fetcher: Fetcher = fetch,
+    // A wrapper, not `fetch` itself: Workers throw "Illegal invocation" (a TypeError) when fetch
+    // is called as a method of another object, as this.fetcher(...) would.
+    private fetcher: Fetcher = (input, init) => fetch(input, init),
     private base = PANEL_API,
   ) {}
 
@@ -59,7 +61,10 @@ export class Panel {
       // The first call after the panel has been idle can take ~30 s.
       res = await this.fetcher(url, { headers: { "User-Agent": "FamilyTV-Portal/1" }, signal: AbortSignal.timeout(45_000) });
     } catch (e) {
-      throw new PanelError(`panel unreachable (${(e as Error).name || "error"})`);
+      const err = e as Error;
+      // The message can quote the URL, which carries the key.
+      const why = `${err.name || "error"}${err.message ? `: ${err.message}` : ""}`.split(this.apiKey).join("…");
+      throw new PanelError(`panel unreachable (${why})`);
     }
     const text = await res.text();
     if (!res.ok) throw new PanelError(`panel answered HTTP ${res.status}`);

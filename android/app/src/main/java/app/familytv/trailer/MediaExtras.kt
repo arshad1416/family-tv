@@ -11,10 +11,14 @@ import app.familytv.data.MovieEntity
 import app.familytv.data.SeriesEntity
 import app.familytv.iptv.SeriesTitles
 import app.familytv.portal.Profile
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withContext
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.coroutines.AbstractCoroutineContextElement
+import kotlin.coroutines.CoroutineContext
 
 /** Season details from TMDB, else TheTVDB, to fill what the provider's get_series_info left out. */
 data class SeasonExtras(val overview: String?, val trailer: String?, val episodes: Map<Int, EpisodeMeta>)
@@ -43,7 +47,10 @@ class MediaExtras(private val app: FamilyTvApp) {
     @Suppress("UNCHECKED_CAST")
     private suspend fun <T> cached(key: String, load: suspend () -> T?): T? {
         cache[key]?.let { (at, v) -> if (System.currentTimeMillis() - at < TTL_MS) return v as T? }
-        val v = gate.withPermit { runCatching { load() }.getOrNull() }
+        // A lookup nested in another (a season needing the show's TMDB id) reuses the outer permit;
+        // taking a second one could deadlock two lookups that each hold one.
+        val v = if (currentCoroutineContext()[Gated] != null) runCatching { load() }.getOrNull()
+        else gate.withPermit { withContext(Gated) { runCatching { load() }.getOrNull() } }
         cache[key] = System.currentTimeMillis() to v
         return v
     }
@@ -61,6 +68,16 @@ class MediaExtras(private val app: FamilyTvApp) {
         info?.trailer
             ?: runCatching { tmdb()?.let { t -> (tmdbId ?: t.searchMovie(title, m.year))?.let { Trailers.pick(t.movieVideos(it, langs), langs) } } }.getOrNull()
             ?: tvdb()?.let { t -> t.movieId(tmdbId, null, title, m.year)?.let { t.movieTrailer(it, langs) } }
+    }
+
+    /**
+     * A movie's overview, genres and running time from TMDB, for the Movies spotlight. Only TMDB is
+     * asked (never the provider, which throttles bursts), and only once focus rests on the poster.
+     */
+    suspend fun movieMeta(m: MovieEntity): MovieMeta? = cached("movie-meta/${m.sourceId}/${m.streamId}") {
+        val t = tmdb() ?: return@cached null
+        val id = m.tmdb ?: t.searchMovie(SeriesTitles.parse(m.name).title, m.year) ?: return@cached null
+        t.movie(id, languages(null).first())
     }
 
     /** The show's trailer from TMDB, else TheTVDB (the caller tries the provider's first). */
@@ -98,6 +115,9 @@ class MediaExtras(private val app: FamilyTvApp) {
     /** Trailer languages to prefer: the copy's own, then the device's, then English. */
     private fun languages(lang: String?): List<String> =
         listOfNotNull(lang?.takeIf { it != SeriesTitles.ORIGINAL }, Locale.getDefault().language, "en").map { it.substringBefore('-') }.distinct()
+
+    /** Marks a coroutine that already holds a [gate] permit. */
+    private object Gated : AbstractCoroutineContextElement(Gated), CoroutineContext.Key<Gated>
 
     companion object {
         const val TTL_MS = 12 * 3_600_000L

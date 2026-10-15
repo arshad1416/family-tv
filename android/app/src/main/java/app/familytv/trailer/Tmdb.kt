@@ -13,6 +13,9 @@ import java.io.IOException
 /** What a metadata service knows about one episode, to fill in what the provider left out. */
 data class EpisodeMeta(val still: String?, val overview: String?)
 
+/** What TMDB says about a movie, for the Movies spotlight. */
+data class MovieMeta(val overview: String?, val genres: List<String>, val runtimeMin: Int?)
+
 /** One season from TMDB: what it is about, its YouTube videos and its episodes' stills and overviews. */
 data class SeasonMeta(val overview: String?, val videos: List<Trailers.Video>, val episodes: Map<Int, EpisodeMeta>)
 
@@ -31,6 +34,8 @@ class Tmdb(private val key: String, private val client: OkHttpClient, private va
     suspend fun season(tvId: String, season: Int, langs: List<String>): SeasonMeta? =
         get("tv/$tvId/season/$season", videoLangs(langs) + ("append_to_response" to "videos") + ("language" to (langs.firstOrNull() ?: "en")))
             ?.let(TmdbParse::season)
+
+    suspend fun movie(id: String, lang: String): MovieMeta? = get("movie/$id", listOf("language" to lang))?.let(TmdbParse::movie)
 
     suspend fun searchMovie(title: String, year: Int?): String? =
         get("search/movie", listOfNotNull("query" to title, year?.let { "year" to it.toString() }))?.let(TmdbParse::firstId)
@@ -81,6 +86,12 @@ object TmdbParse {
             val n = e.get("episode_number")?.takeIf { it.isJsonPrimitive }?.asInt ?: return@mapNotNull null
             n to EpisodeMeta(e.str("still_path")?.let { Tmdb.IMAGE_BASE + it }, e.str("overview"))
         }.toMap(),
+    )
+
+    fun movie(o: JsonObject): MovieMeta = MovieMeta(
+        overview = o.str("overview"),
+        genres = o.array("genres").mapNotNull { it.obj()?.str("name") },
+        runtimeMin = o.get("runtime")?.takeIf { it.isJsonPrimitive }?.asInt?.takeIf { it > 0 },
     )
 
     fun firstId(o: JsonObject): String? = o.array("results").firstNotNullOfOrNull { it.obj()?.get("id")?.takeIf { id -> id.isJsonPrimitive }?.asString }

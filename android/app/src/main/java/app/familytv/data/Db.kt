@@ -139,6 +139,11 @@ interface CatalogDao {
     @Query("SELECT * FROM movies WHERE name LIKE '%' || :q || '%' ORDER BY name LIMIT :limit") suspend fun searchMovies(q: String, limit: Int): List<MovieEntity>
     @Query("SELECT * FROM series WHERE name LIKE '%' || :q || '%' ORDER BY name LIMIT :limit") suspend fun searchSeries(q: String, limit: Int): List<SeriesEntity>
     @Query("SELECT * FROM movies ORDER BY added DESC LIMIT :limit") suspend fun recentMovies(limit: Int): List<MovieEntity>
+    /** Best rated first; providers rate out of 10, so anything above that is junk and left out. */
+    @Query("SELECT * FROM movies WHERE CAST(rating AS REAL) BETWEEN :min AND 10 ORDER BY CAST(rating AS REAL) DESC, added DESC LIMIT :limit")
+    suspend fun topMovies(min: Double, limit: Int): List<MovieEntity>
+    @Query("SELECT * FROM series WHERE CAST(rating AS REAL) BETWEEN :min AND 10 ORDER BY CAST(rating AS REAL) DESC LIMIT :limit")
+    suspend fun topSeries(min: Double, limit: Int): List<SeriesEntity>
     @Query("SELECT * FROM movies WHERE categoryId = :categoryId AND sourceId = :sourceId ORDER BY added DESC") fun movies(sourceId: String, categoryId: String): Flow<List<MovieEntity>>
     @Query("SELECT * FROM series WHERE categoryId = :categoryId AND sourceId = :sourceId ORDER BY name") fun series(sourceId: String, categoryId: String): Flow<List<SeriesEntity>>
 
