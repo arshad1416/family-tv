@@ -64,4 +64,11 @@ class ClassifierTest {
         assertEquals(Verdict.NO_INTERNET, Classifier.overall(f, false))
         assertEquals(Verdict.OK, Classifier.overall(emptyList(), true))
     }
+
+    @Test fun connectCheckTriesIpv4FirstAndSkipsSinkholes() {
+        val sys = listOf("2606:4700:3032::ac43:b39e", "0.0.0.0", "104.21.31.196", "172.67.179.158")
+        assertEquals(listOf("104.21.31.196", "172.67.179.158", "2606:4700:3032::ac43:b39e"), Classifier.connectOrder(sys, null))
+        assertEquals(listOf("198.51.100.7"), Classifier.connectOrder(listOf("0.0.0.0"), listOf("198.51.100.7")))
+        assertEquals(emptyList<String>(), Classifier.connectOrder(null, null))
+    }
 }

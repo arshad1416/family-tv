@@ -103,11 +103,12 @@ class Diagnoser(private val context: Context, private val db: AppDb, private val
         val public = publicDns(u.host)
         var tcpOk: Boolean? = null
         var tcpError: String? = null
-        val target = system?.firstOrNull { !Classifier.isSinkhole(listOf(it)) } ?: public?.firstOrNull()
-        if (target != null) {
+        for (target in Classifier.connectOrder(system, public)) {
             try {
-                Socket().use { it.connect(InetSocketAddress(target, u.port), 5000) }
+                Socket().use { it.connect(InetSocketAddress(target, u.port), 4000) }
                 tcpOk = true
+                tcpError = null
+                break
             } catch (e: Exception) {
                 tcpOk = false
                 tcpError = e.javaClass.simpleName
