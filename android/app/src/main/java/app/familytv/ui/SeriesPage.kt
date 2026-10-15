@@ -202,7 +202,7 @@ fun SeriesPage(profile: Profile, group: SeriesGroup, visible: List<CategoryEntit
     val seasonOverview = providerSeason?.overview ?: extras?.overview
     val seasonTrailer = providerSeason?.trailer ?: extras?.trailer
     val next = remember(episodes, progress) {
-        EpisodeGuide.nextUp(episodes, { progressOf(it)?.watched == true }, { ProgressRules.bar(progressOf(it)) > 0f })
+        EpisodeGuide.nextUp(episodes, { progressOf(it)?.watched == true }, { ProgressRules.started(progressOf(it)) })
     }
     val seasonWatched = inSeason.isNotEmpty() && inSeason.all { progressOf(it)?.watched == true }
     val menus = LocalItemMenus.current
@@ -265,7 +265,7 @@ fun SeriesPage(profile: Profile, group: SeriesGroup, visible: List<CategoryEntit
             item("actions") {
                 LazyRow(Modifier.focusRestorer(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     if (next != null) item("play") {
-                        val resume = ProgressRules.bar(progressOf(next)) > 0f
+                        val resume = ProgressRules.started(progressOf(next))
                         TvButton(
                             "▶  ${if (resume) "Resume" else "Play"} S${next.season} E${next.episode}",
                             { playEpisode(scope, ctx, profile, v, next) },
@@ -504,7 +504,7 @@ private fun EpisodeSheet(e: XtreamParser.Episode, cover: String?, p: ProgressEnt
                 val bar = ProgressRules.bar(p)
                 if (bar > 0f) ProgressLine(bar, Modifier.padding(top = 8.dp).widthIn(max = 260.dp))
                 FlowRow(Modifier.padding(top = 14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    TvButton(if (bar > 0f) "▶  Resume" else "▶  Play", onPlay)
+                    TvButton(if (ProgressRules.started(p)) "▶  Resume" else "▶  Play", onPlay)
                     TvButton(if (p?.watched == true) "Mark unwatched" else "✓  Mark watched", onWatched)
                     e.trailer?.let { TrailerButton(it) }
                     TvButton("Close", onClose)

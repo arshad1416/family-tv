@@ -164,6 +164,15 @@ class ProgressRulesTest {
     }
 
     @Test
+    fun streamWithNoLengthStillShowsResume() {
+        assertTrue(ProgressRules.started(p(0f, positionMs = 90_000)))
+        assertFalse(ProgressRules.started(p(0f, positionMs = 10_000)))
+        assertTrue(ProgressRules.started(p(50f)))
+        assertFalse(ProgressRules.started(p(85f)))
+        assertFalse(ProgressRules.started(null))
+    }
+
+    @Test
     fun startsOverWhenNearlyUntouchedOrFinished() {
         assertNull(ProgressRules.resumeAt(null, 7_200_000L))
         assertNull(ProgressRules.resumeAt(p(0.2f), 7_200_000L)) // 14 s in

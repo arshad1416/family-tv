@@ -30,6 +30,9 @@ object ProgressRules {
     /** A remote resume point only replaces ours when it was saved later. */
     fun remoteIsNewer(remotePausedAt: Long, local: ProgressEntity?): Boolean = local == null || remotePausedAt > local.updatedAt
 
+    /** Part-watched, so Play reads Resume: a progress bar, or a saved spot on a stream with no known length. */
+    fun started(p: ProgressEntity?): Boolean = bar(p) > 0f || (p != null && p.durationMs <= 0 && resumeAt(p, 0) != null)
+
     /** Fraction for the progress line on a poster or episode (0 when there is none to show). */
     fun bar(p: ProgressEntity?): Float = if (p == null || isWatched(p.percent)) 0f else (p.percent / 100f).coerceIn(0f, 1f)
 }
