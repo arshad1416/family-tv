@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { sealJson } from "../src/crypto";
+import { openJson, sealJson } from "../src/crypto";
 import worker, { type Env } from "../src/index";
-import type { ProfileData } from "../src/model";
+import { MASK, type ProfileData } from "../src/model";
 import { daysLeft, loginFromLineUrl, Panel, PanelError, type LineInfo } from "../src/panel";
 import { memoryD1 } from "./d1";
 
@@ -139,6 +139,21 @@ describe("Lines API", () => {
     const src = data.profiles[0].data.sources.find((s: any) => s.username === "new1");
     expect(src).toMatchObject({ type: "xtream", name: "Living room", serverUrls: ["http://line.example"] });
     expect(src.password).not.toBe("pw1"); // masked for the page
+    // The profile page adds the returned source to its unsaved copy; saving that keeps the line.
+    expect(r.data.source).toMatchObject({ id: r.data.sourceId, username: "new1", password: MASK });
+  });
+
+  it("copies a line picked on the profile page, password included, only when the profile is saved", async () => {
+    const env = await setup();
+    const picked = { id: "n1", type: "xtream", name: "Main", serverUrls: ["http://line.example"], username: "aiyaz", password: MASK, copyOf: "p1/s1" };
+    const r = await call(env, "/api/admin/profiles", { method: "POST", body: JSON.stringify({ name: "Grandma", data: { sources: [picked] } }) });
+    expect(r.status).toBe(200);
+    const row = await env.DB.prepare("SELECT data_enc FROM profiles WHERE id = ?").bind(r.data.id).first<{ data_enc: string }>();
+    const stored = await openJson<ProfileData>(KEY, row!.data_enc);
+    expect(stored.sources[0]).toEqual({ id: "n1", type: "xtream", name: "Main", serverUrls: ["http://line.example"], username: "aiyaz", password: "secret" });
+    // A line removed from its profile in the meantime can't be copied.
+    const gone = await call(env, "/api/admin/profiles", { method: "POST", body: JSON.stringify({ name: "X", data: { sources: [{ ...picked, copyOf: "p1/nope" }] } }) });
+    expect(gone.status).toBe(409);
   });
 
   it("says the panel isn't set up without a key", async () => {

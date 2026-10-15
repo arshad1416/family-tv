@@ -9,6 +9,11 @@ export interface Source {
   /** M3U: playlist URL; epgUrl optional for both types. */
   m3uUrl?: string;
   epgUrl?: string;
+  /**
+   * Only on the way in from the admin page: "profileId/sourceId" of the line this source was
+   * copied from, so its password (never sent to the page) is taken from there on save.
+   */
+  copyOf?: string;
 }
 
 export const CATEGORY_KINDS = ["live", "movie", "series"] as const;
@@ -91,14 +96,18 @@ export function maskSecrets(p: ProfileData): ProfileData {
   };
 }
 
-export function mergeSecrets(incoming: ProfileData, existing: ProfileData | null): ProfileData {
+/**
+ * Puts stored secrets back where the page sent MASK. A source copied from another profile's line
+ * ([Source.copyOf]) gets that line's password from [lineAt]; copyOf itself is never stored.
+ */
+export function mergeSecrets(incoming: ProfileData, existing: ProfileData | null, lineAt?: (key: string) => Source | undefined): ProfileData {
   const old = new Map((existing?.sources ?? []).map((s) => [s.id, s]));
   return {
     ...incoming,
     parentalPin: incoming.parentalPin === MASK ? existing?.parentalPin : incoming.parentalPin,
-    sources: incoming.sources.map((s) => ({
+    sources: incoming.sources.map(({ copyOf, ...s }) => ({
       ...s,
-      password: s.password === MASK ? old.get(s.id)?.password : s.password,
+      password: s.password === MASK ? (old.get(s.id)?.password ?? (copyOf ? lineAt?.(copyOf)?.password : undefined)) : s.password,
     })),
   };
 }

@@ -1,5 +1,5 @@
 import { openJson, pairCode, randomId, sealJson, sha256Hex, timingSafeEqual } from "./crypto";
-import { CATEGORY_KINDS, cleanNames, forDevice, maskSecrets, mergeSecrets, profileHosts, validateProfile, VERDICTS, type ProfileData } from "./model";
+import { CATEGORY_KINDS, cleanNames, forDevice, MASK, maskSecrets, mergeSecrets, profileHosts, validateProfile, VERDICTS, type ProfileData, type Source } from "./model";
 import { probe } from "./reachability";
 import { ADMIN_PAGE } from "./admin-page";
 import { preferServer, suggestions } from "./advice";
@@ -524,10 +524,18 @@ async function adminSaveProfile(req: Request, env: Env, id: string | null) {
     throw new HttpError(400, (e as Error).message);
   }
   const now = Date.now();
+  // Lines picked from other profiles on the page: their passwords come from where they are stored.
+  const copies = data.sources.filter((s) => s.copyOf);
+  let lineAt: ((key: string) => Source | undefined) | undefined;
+  if (copies.length) {
+    const lines = new Map((await allProfiles(env)).flatMap((pr) => pr.data.sources.map((s) => [pr.id + "/" + s.id, s] as const)));
+    for (const s of copies) if (!lines.has(s.copyOf!)) throw new HttpError(409, `${s.name}: the line it was copied from is gone; pick it again`);
+    lineAt = (key) => lines.get(key);
+  }
   if (id) {
     const existing = await loadProfile(env, id);
     if (!existing) throw new HttpError(404, "profile not found");
-    data = mergeSecrets(data, existing);
+    data = mergeSecrets(data, existing, lineAt);
     await env.DB.prepare("UPDATE profiles SET name = ?, data_enc = ?, updated_at = ? WHERE id = ?")
       .bind(b.name.trim(), await sealJson(env.CONFIG_KEY, data), now, id)
       .run();
@@ -536,7 +544,7 @@ async function adminSaveProfile(req: Request, env: Env, id: string | null) {
     for (const d of results) await queueCommand(env, d.id, "refresh", null);
   } else {
     id = randomId(8);
-    data = mergeSecrets(data, null);
+    data = mergeSecrets(data, null, lineAt);
     await env.DB.prepare("INSERT INTO profiles (id, name, data_enc, created_at, updated_at) VALUES (?,?,?,?,?)")
       .bind(id, b.name.trim(), await sealJson(env.CONFIG_KEY, data), now, now)
       .run();
@@ -708,12 +716,14 @@ async function adminNewLine(req: Request, env: Env) {
   if (!login) return json({ ok: false, url: created.url, error: "Line created, but its link wasn't a normal Xtream link. Add it to the profile by hand." });
   const sourceId = crypto.randomUUID();
   const name = typeof b.name === "string" && b.name.trim() ? b.name.trim().slice(0, 60) : "8K line";
-  profile.sources.push({ id: sourceId, type: "xtream", name, serverUrls: [login.serverUrl], username: login.username, password: login.password });
+  const source: Source = { id: sourceId, type: "xtream", name, serverUrls: [login.serverUrl], username: login.username, password: login.password };
+  profile.sources.push(source);
   await env.DB.prepare("UPDATE profiles SET data_enc = ?, updated_at = ? WHERE id = ?").bind(await sealJson(env.CONFIG_KEY, profile), Date.now(), profileId).run();
   const { results } = await env.DB.prepare("SELECT id FROM devices WHERE profile_id = ?").bind(profileId).all<{ id: string }>();
   for (const d of results) await queueCommand(env, d.id, "refresh", null);
   await checkLine(env, p, profileId, sourceId, login.username, login.password);
-  return json({ ok: true, sourceId, username: login.username });
+  // The profile page adds this to its unsaved copy, so a later Save there keeps the line.
+  return json({ ok: true, sourceId, username: login.username, source: { ...source, password: MASK } });
 }
 
 async function appDownload(env: Env, method: string, key = APK_KEY): Promise<Response> {
