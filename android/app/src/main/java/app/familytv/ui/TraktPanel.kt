@@ -91,16 +91,22 @@ fun TraktPanel(modifier: Modifier = Modifier) {
     }
 }
 
-/** The sign-in code, where to enter it, and a QR of that address, with a countdown. */
+/**
+ * The sign-in code, where to enter it, and a QR with a countdown. The QR opens the activate page
+ * with the code already filled in (Trakt keeps /activate/CODE through its sign-in page), so a
+ * phone scan only needs Approve.
+ */
 @Composable
 private fun LinkCode(s: Trakt.State.Linking, touch: Boolean, actions: @Composable () -> Unit) {
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(s) { while (true) { now = System.currentTimeMillis(); delay(1_000) } }
     val left = ((s.expiresAt - now) / 1000).coerceAtLeast(0)
-    val qr = remember(s.url) { qrImage(s.url, 300) }
+    val qrUrl = s.url.trimEnd('/') + "/" + s.userCode
+    val qr = remember(qrUrl) { qrImage(qrUrl, 300) }
     val words: @Composable () -> Unit = {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(if (touch) "Open this address in a browser:" else "On your phone or computer, go to", fontSize = 15.sp)
+            Text("Scan the QR code with your phone, or", fontSize = 15.sp, color = Tv.Muted)
+            Text(if (touch) "open this address in a browser:" else "on your phone or computer, go to", fontSize = 15.sp)
             Text(s.url.removePrefix("https://"), fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Tv.Accent)
             Text("and enter this code:", fontSize = 15.sp)
             Text(s.userCode, fontSize = 34.sp, fontWeight = FontWeight.Bold, letterSpacing = 4.sp)
@@ -111,12 +117,12 @@ private fun LinkCode(s: Trakt.State.Linking, touch: Boolean, actions: @Composabl
     if (touch) {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             words()
-            Image(qr, contentDescription = "QR code for ${s.url}", modifier = Modifier.size(160.dp))
+            Image(qr, contentDescription = "QR code for $qrUrl", modifier = Modifier.size(160.dp))
         }
     } else {
         Row(horizontalArrangement = Arrangement.spacedBy(24.dp), verticalAlignment = Alignment.CenterVertically) {
             words()
-            Image(qr, contentDescription = "QR code for ${s.url}", modifier = Modifier.size(160.dp))
+            Image(qr, contentDescription = "QR code for $qrUrl", modifier = Modifier.size(160.dp))
         }
     }
 }
