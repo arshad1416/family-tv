@@ -25,7 +25,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.Icon
+import app.familytv.FamilyTvApp
 import app.familytv.app
+import app.familytv.iptv.SeriesTitles
+import app.familytv.user.Pending
+import app.familytv.user.SeriesLanguages
 import app.familytv.data.CategoryEntity
 import app.familytv.data.ChannelEntity
 import app.familytv.data.Kind
@@ -70,14 +74,15 @@ fun toggleFavourite(ctx: Context, kind: String, sourceId: String, itemId: String
     val app = ctx.app
     app.scope.launch {
         val on = app.favourites.toggle(kind, sourceId, itemId, name)
-        val text = when {
-            !on -> "Removed from Favourites"
-            kind == Kind.LIVE && app.trakt.signedIn -> "Added to Favourites on this device (Trakt has no live channels)"
-            kind != Kind.LIVE && app.trakt.signedIn -> "Added to Favourites and your Trakt watchlist"
-            else -> "Added to Favourites"
-        }
-        withContext(Dispatchers.Main) { Toast.makeText(ctx.applicationContext, text, Toast.LENGTH_SHORT).show() }
+        withContext(Dispatchers.Main) { Toast.makeText(ctx.applicationContext, favouriteMessage(app, kind, on), Toast.LENGTH_SHORT).show() }
     }
+}
+
+private fun favouriteMessage(app: FamilyTvApp, kind: String, on: Boolean) = when {
+    !on -> "Removed from Favourites"
+    kind == Kind.LIVE && app.trakt.signedIn -> "Added to Favourites on this device (Trakt has no live channels)"
+    kind != Kind.LIVE && app.trakt.signedIn -> "Added to Favourites and your Trakt watchlist"
+    else -> "Added to Favourites"
 }
 
 // Favourites resolved to today's catalog rows, so they play like any other row. Ones the
@@ -143,5 +148,53 @@ fun MarkBadge(modifier: Modifier = Modifier, favourite: Boolean = false, watched
             tint = if (watched) Tv.Bg else Tv.Accent,
             modifier = Modifier.size(size * 0.65f),
         )
+    }
+}
+
+// ---- shows (every language copy of a series counts as one favourite) ----
+
+/** Every favourite series resolved to its catalog row, wherever it is listed (for hearts on grouped shows). */
+@Composable
+fun rememberFavouriteShowRows(favs: List<FavouriteEntity> = rememberFavourites()): List<SeriesEntity> {
+    val dao = LocalContext.current.app.db.catalog()
+    var rows by remember { mutableStateOf(emptyList<SeriesEntity>()) }
+    LaunchedEffect(favs) { rows = favs.filter { it.kind == Kind.SERIES }.mapNotNull { dao.seriesItem(it.sourceId, it.itemId) } }
+    return rows
+}
+
+/** Whether a grouped show is a favourite: any copy of it is (same row, same TMDB id or same title). */
+class ShowFavourites(private val rows: List<SeriesEntity>) {
+    private val keys = rows.mapTo(HashSet()) { it.key }
+
+    fun has(group: SeriesGroup): Boolean = group.copies.any { c -> c.key in keys || rows.any { f -> sameShow(f, c) } }
+
+    companion object {
+        fun sameShow(a: SeriesEntity, b: SeriesEntity) = SeriesTitles.sameShow(a.tmdb, a.groupKey, b.tmdb, b.groupKey)
+    }
+}
+
+/**
+ * Favourites a show as one: adding favourites the copy in the family's language ([preferred],
+ * or the one [SeriesLanguages] picks), so Trakt matches that copy's TMDB id; removing removes
+ * every favourited copy of it.
+ */
+fun toggleShowFavourite(ctx: Context, group: SeriesGroup, isFavourite: Boolean, preferred: SeriesEntity? = null) {
+    val app = ctx.app
+    app.scope.launch {
+        val copies = app.db.allCopies(group)
+        if (isFavourite) {
+            val dao = app.db.catalog()
+            val favs = app.userDb.user().allFavouriteRows().filter { it.kind == Kind.SERIES && it.pending != Pending.REMOVE }
+            for (f in favs) {
+                val row = dao.seriesItem(f.sourceId, f.itemId)
+                val match = copies.any { c -> c.sourceId == f.sourceId && c.seriesId == f.itemId } ||
+                    (row != null && copies.any { ShowFavourites.sameShow(row, it) })
+                if (match) app.favourites.toggle(Kind.SERIES, f.sourceId, f.itemId, f.name)
+            }
+        } else {
+            val pick = preferred ?: copies.getOrNull(SeriesLanguages(ctx).choose(copies)) ?: group.first
+            app.favourites.toggle(Kind.SERIES, pick.sourceId, pick.seriesId, pick.name)
+        }
+        withContext(Dispatchers.Main) { Toast.makeText(ctx.applicationContext, favouriteMessage(app, Kind.SERIES, !isFavourite), Toast.LENGTH_SHORT).show() }
     }
 }

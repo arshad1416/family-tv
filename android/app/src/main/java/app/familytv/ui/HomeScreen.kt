@@ -77,7 +77,6 @@ import app.familytv.data.ChannelEntity
 import app.familytv.data.Kind
 import app.familytv.data.MovieEntity
 import app.familytv.data.NowNext
-import app.familytv.data.SeriesEntity
 import app.familytv.iptv.Streams
 import app.familytv.portal.DeviceConfig
 import app.familytv.portal.Profile
@@ -377,7 +376,8 @@ private fun HomePage(vm: MainViewModel, profile: Profile, onNavigate: (Page) -> 
     LaunchedEffect(movieKeys) { recent = dao.recentMovies(300).filter { (it.sourceId to it.categoryId) in movieKeys }.take(30) }
     val seriesCats = categories(vm, profile, Kind.SERIES)
     val seriesCat = seriesCats.firstOrNull()
-    val series by remember(seriesCat) { seriesCat?.let { dao.series(it.sourceId, it.categoryId) } ?: flowOf(emptyList()) }.collectAsState(initial = emptyList())
+    val seriesRows by remember(seriesCat) { seriesCat?.let { dao.series(it.sourceId, it.categoryId) } ?: flowOf(emptyList()) }.collectAsState(initial = emptyList())
+    val series = remember(seriesRows) { groupSeries(seriesRows) }
 
     // Favourites of every kind, newest first, as one row.
     val favs = rememberFavourites()
@@ -385,12 +385,14 @@ private fun HomePage(vm: MainViewModel, profile: Profile, onNavigate: (Page) -> 
     val favChannels = rememberFavouriteChannels(favs, liveCats)
     val favMovies = rememberFavouriteMovies(favs, movieCats)
     val favSeries = rememberFavouriteSeries(favs, seriesCats)
+    val showFavs = ShowFavourites(rememberFavouriteShowRows(favs))
     val favRow: List<Pair<String, Any>> = remember(favs, favChannels, favMovies, favSeries) {
-        val byKey = HashMap<String, Any>()
-        favChannels.forEach { byKey[Favourites.key(Kind.LIVE, it.sourceId, it.streamId)] = it }
-        favMovies.forEach { byKey[Favourites.key(Kind.MOVIE, it.sourceId, it.streamId)] = it }
-        favSeries.forEach { byKey[Favourites.key(Kind.SERIES, it.sourceId, it.seriesId)] = it }
-        favs.mapNotNull { f -> Favourites.key(f.kind, f.sourceId, f.itemId).let { k -> byKey[k]?.let { k to it } } }
+        val byKey = HashMap<String, Pair<String, Any>>()
+        favChannels.forEach { val k = Favourites.key(Kind.LIVE, it.sourceId, it.streamId); byKey[k] = k to it }
+        favMovies.forEach { val k = Favourites.key(Kind.MOVIE, it.sourceId, it.streamId); byKey[k] = k to it }
+        // Copies of one show in several languages are one entry.
+        groupSeries(favSeries).forEach { g -> g.copies.forEach { byKey[Favourites.key(Kind.SERIES, it.sourceId, it.seriesId)] = "series/${g.key}" to g } }
+        favs.mapNotNull { f -> byKey[Favourites.key(f.kind, f.sourceId, f.itemId)] }.distinctBy { it.first }
     }
     val progress = rememberProgress()
     var openedFromFavourites by remember { mutableStateOf(false) }
@@ -412,7 +414,7 @@ private fun HomePage(vm: MainViewModel, profile: Profile, onNavigate: (Page) -> 
         }
     }
     fun viewAll(p: Page): (() -> Unit)? = if (touch) ({ onNavigate(p) }) else null
-    nav.Host(profile) {
+    nav.Host(vm, profile) {
         Column {
             if (!touch) HeroHeader(hero)
             LazyColumn(verticalArrangement = Arrangement.spacedBy(22.dp), contentPadding = PaddingValues(bottom = 40.dp)) {
@@ -420,7 +422,7 @@ private fun HomePage(vm: MainViewModel, profile: Profile, onNavigate: (Page) -> 
                 if (favRow.isNotEmpty()) item("favourites") {
                     Shelf("Favourites") {
                         itemsIndexed(favRow, key = { _, (k, _) -> k }) { i, (_, x) ->
-                            val entry = if (firstRow < 0) openedFromFavourites && x is SeriesEntity && nav.back == x.key else firstRow == 3 && i == 0
+                            val entry = if (firstRow < 0) openedFromFavourites && x is SeriesGroup && nav.back == x.key else firstRow == 3 && i == 0
                             when (x) {
                                 is ChannelEntity -> PosterCard(
                                     x.name, x.logo, entryPoint(entry), logo = true, favourite = true,
@@ -435,10 +437,10 @@ private fun HomePage(vm: MainViewModel, profile: Profile, onNavigate: (Page) -> 
                                         onFocus = { hero.value = Hero(x.name, "Favourite movie", null) },
                                     ) { scope.launch { playMovieNow(ctx, profile, x) } }
                                 }
-                                is SeriesEntity -> PosterCard(
-                                    x.name, x.poster, entryPoint(entry), favourite = true,
-                                    onFavourite = { toggleFavourite(ctx, Kind.SERIES, x.sourceId, x.seriesId, x.name) },
-                                    onFocus = { hero.value = Hero(x.name, "Favourite series", x.plot) },
+                                is SeriesGroup -> PosterCard(
+                                    x.title, x.poster, entryPoint(entry), favourite = true,
+                                    onFavourite = { toggleShowFavourite(ctx, x, true) },
+                                    onFocus = { hero.value = Hero(x.title, "Favourite series", x.plot) },
                                 ) { openedFromFavourites = true; nav.open = x }
                             }
                         }
@@ -474,12 +476,13 @@ private fun HomePage(vm: MainViewModel, profile: Profile, onNavigate: (Page) -> 
                 }
                 if (series.isNotEmpty()) item("series") {
                     Shelf("Series", viewAll(Page.Series)) {
-                        itemsIndexed(series.take(30), key = { _, s -> "${s.sourceId}/${s.seriesId}" }) { i, s ->
+                        itemsIndexed(series.take(30), key = { _, s -> s.key }) { i, s ->
+                            val on = showFavs.has(s)
                             PosterCard(
-                                s.name, s.poster, entryPoint(if (firstRow < 0) !openedFromFavourites && nav.back == s.key else firstRow == 2 && i == 0),
-                                favourite = Favourites.key(Kind.SERIES, s.sourceId, s.seriesId) in favKeys,
-                                onFavourite = { toggleFavourite(ctx, Kind.SERIES, s.sourceId, s.seriesId, s.name) },
-                                onFocus = { hero.value = Hero(s.name, "Series", s.plot) },
+                                s.title, s.poster, entryPoint(if (firstRow < 0) !openedFromFavourites && nav.back == s.key else firstRow == 2 && i == 0),
+                                favourite = on,
+                                onFavourite = { toggleShowFavourite(ctx, s, on) },
+                                onFocus = { hero.value = Hero(s.title, "Series", s.plot) },
                             ) { openedFromFavourites = false; nav.open = s }
                         }
                     }

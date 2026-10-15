@@ -87,11 +87,14 @@ fun SearchScreen(vm: MainViewModel, profile: Profile) {
         )
     }
     val progs = rememberProgrammes(results.channels)
-    val favKeys = rememberFavouriteKeys()
+    val favs = rememberFavourites()
+    val favKeys = rememberFavouriteKeys(favs)
+    val showFavs = ShowFavourites(rememberFavouriteShowRows(favs))
+    val shows = remember(results.series) { groupSeries(results.series) }
     val progress = rememberProgress()
 
     val touch = LocalFormFactor.current.touch
-    nav.Host(profile) {
+    nav.Host(vm, profile) {
         Column {
             PageTitle("Search")
             BasicTextField(
@@ -121,7 +124,7 @@ fun SearchScreen(vm: MainViewModel, profile: Profile) {
             )
             Spacer(Modifier.height(12.dp))
             val r = results
-            if (q.length >= 2 && r == Results()) Text("No matches for \"$q\".", fontSize = 17.sp, color = Tv.Muted)
+            if (q.length >= 2 && r.channels.isEmpty() && r.movies.isEmpty() && shows.isEmpty()) Text("No matches for \"$q\".", fontSize = 17.sp, color = Tv.Muted)
             LazyColumn(verticalArrangement = Arrangement.spacedBy(22.dp), contentPadding = PaddingValues(bottom = 40.dp)) {
                 if (r.channels.isNotEmpty()) item("ch") {
                     Shelf("Channels") {
@@ -147,14 +150,15 @@ fun SearchScreen(vm: MainViewModel, profile: Profile) {
                         }
                     }
                 }
-                if (r.series.isNotEmpty()) item("se") {
+                if (shows.isNotEmpty()) item("se") {
                     Shelf("Series") {
-                        itemsIndexed(r.series, key = { _, s -> s.key }) { _, s ->
+                        itemsIndexed(shows, key = { _, g -> g.key }) { _, g ->
+                            val on = showFavs.has(g)
                             PosterCard(
-                                s.name, s.poster, entryPoint(nav.back == s.key),
-                                favourite = Favourites.key(Kind.SERIES, s.sourceId, s.seriesId) in favKeys,
-                                onFavourite = { toggleFavourite(ctx, Kind.SERIES, s.sourceId, s.seriesId, s.name) },
-                            ) { nav.open = s }
+                                g.title, g.poster, entryPoint(nav.back == g.key),
+                                favourite = on,
+                                onFavourite = { toggleShowFavourite(ctx, g, on) },
+                            ) { nav.open = g }
                         }
                     }
                 }
