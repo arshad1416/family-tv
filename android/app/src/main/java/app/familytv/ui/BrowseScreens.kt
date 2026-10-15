@@ -395,7 +395,7 @@ private fun PosterGrid(
 
 /** What an empty Favourites category says, and how to fill it. */
 @Composable
-private fun FavouritesHint(text: String) {
+internal fun FavouritesHint(text: String) {
     Text(text, fontSize = 16.sp, color = Tv.Muted, modifier = Modifier.padding(bottom = 16.dp).widthIn(max = 560.dp))
 }
 

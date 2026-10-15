@@ -228,8 +228,8 @@ private fun Rail(page: Page, requesters: Map<Page, FocusRequester>, nickname: St
 
 // ---- Phone and tablet ----
 
-/** The bottom tabs on a phone and the side rail on a tablet; Search and Settings live in the header. */
-private val TOUCH_TABS = listOf(Page.Home, Page.Live, Page.Guide, Page.Movies, Page.Series)
+/** The bottom tabs on a phone and the side rail on a tablet; Live TV is the guide grid there, and Settings lives in the header. */
+private val TOUCH_TABS = listOf(Page.Home, Page.Live, Page.Movies, Page.Series, Page.Search)
 private val TOUCH_RAIL = 88.dp
 
 /**
@@ -248,7 +248,7 @@ private fun TouchHome(vm: MainViewModel, config: DeviceConfig, form: FormFactor)
             TouchHeader(page, config.nickname, Modifier.padding(horizontal = if (phone) 16.dp else 24.dp)) { page = it }
             CompositionLocalProvider(LocalPageEntry provides entry) {
                 Box(Modifier.weight(1f).fillMaxWidth().padding(horizontal = if (phone) 16.dp else 24.dp)) {
-                    PageBody(page, vm, config, profile) { page = it }
+                    PageBody(if (page == Page.Live) Page.Guide else page, vm, config, profile) { page = if (it == Page.Guide) Page.Live else it }
                 }
             }
         }
@@ -268,7 +268,7 @@ private fun TouchHome(vm: MainViewModel, config: DeviceConfig, form: FormFactor)
 
 @Composable
 private fun TouchHeader(page: Page, nickname: String?, modifier: Modifier, onSelect: (Page) -> Unit) {
-    val context = if (page == Page.Guide) {
+    val context = if (page == Page.Live) {
         DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date())
     } else {
         nickname ?: "Family TV"
@@ -278,7 +278,6 @@ private fun TouchHeader(page: Page, nickname: String?, modifier: Modifier, onSel
             Text(context, fontSize = 13.sp, color = Tv.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(page.label, fontSize = 28.sp, fontWeight = FontWeight.Bold, maxLines = 1)
         }
-        HeaderIcon(Page.Search, page == Page.Search) { onSelect(Page.Search) }
         HeaderIcon(Page.Settings, page == Page.Settings) { onSelect(Page.Settings) }
     }
 }
