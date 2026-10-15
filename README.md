@@ -38,6 +38,11 @@ passwords on a remote, and when a TV goes black the portal tells you why.
   section ends with *Adult Content*, the only place adult categories appear (Live TV, Movies, Series,
   search and Home never show them). It asks for the profile's parental PIN every time it opens, and
   opens straight away when the profile has no PIN.
+  *Sports* gathers the live channels of every sports category (general sports, PPV and league lists)
+  and sorts them by sport: hockey, football (NFL & CFL), soccer, basketball, baseball, cricket,
+  tennis, golf, motorsport, fighting, rugby and more. A channel goes by the sport its own name names,
+  else its category's; channels from general sports categories that name none go under More sports.
+  Hidden and adult categories stay out, and the profile's category order is kept.
 - **Movies and Series** open on *Highlights*: shelves of recently added, favourite and top-rated
   movies (and, for series, shows with new episodes). The provider's categories follow, each as a
   poster grid. On a TV a spotlight across the top shows the focused poster's artwork, year, rating
