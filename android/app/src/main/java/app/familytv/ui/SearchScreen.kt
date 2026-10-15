@@ -126,7 +126,7 @@ fun SearchScreen(vm: MainViewModel, profile: Profile) {
             Spacer(Modifier.height(12.dp))
             val r = results
             if (q.length >= 2 && r.channels.isEmpty() && r.movies.isEmpty() && shows.isEmpty()) Text("No matches for \"$q\".", fontSize = 17.sp, color = Tv.Muted)
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(22.dp), contentPadding = PaddingValues(bottom = 40.dp)) {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(bottom = 40.dp)) {
                 if (r.channels.isNotEmpty()) item("ch") {
                     Shelf("Channels") {
                         itemsIndexed(r.channels, key = { _, c -> "${c.sourceId}/${c.streamId}" }) { _, c ->

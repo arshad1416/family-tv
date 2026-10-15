@@ -141,11 +141,11 @@ fun FavouriteButton(on: Boolean, onClick: () -> Unit, modifier: Modifier = Modif
     }
 }
 
-/** "NEW" on a favourite show's poster while it has episodes the family hasn't opened yet. */
+/** "NEW" (or "3 NEW") on a favourite show's poster while it has episodes the family hasn't opened yet. */
 @Composable
-fun NewBadge(modifier: Modifier = Modifier) {
+fun NewBadge(modifier: Modifier = Modifier, count: Int = 0) {
     Box(modifier.padding(6.dp).background(Tv.Accent, RoundedCornerShape(6.dp)).padding(horizontal = 7.dp, vertical = 2.dp)) {
-        Text("NEW", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Tv.Bg)
+        Text(if (count > 1) "$count NEW" else "NEW", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Tv.Bg)
     }
 }
 
@@ -174,28 +174,31 @@ fun rememberFavouriteShowRows(favs: List<FavouriteEntity> = rememberFavourites()
     return rows
 }
 
-/** "sourceId/seriesId" of every show with episodes added since the family last opened it. */
+/** How many new episodes each show has ("sourceId/seriesId"), newest first, since the family last opened it. */
 @Composable
-fun rememberNewEpisodeKeys(): Set<String> {
+fun rememberNewEpisodeKeys(): Map<String, Int> {
     val ctx = LocalContext.current
     val rows by remember { ctx.app.userDb.user().newEpisodes() }.collectAsState(initial = emptyList())
-    return remember(rows) { rows.mapTo(LinkedHashSet()) { "${it.sourceId}/${it.seriesId}" } }
+    return remember(rows) { rows.associateTo(LinkedHashMap()) { "${it.sourceId}/${it.seriesId}" to it.newCount } }
 }
 
 /** Those shows as posters, newest first, minus any in hidden or locked categories. */
 @Composable
-fun rememberNewEpisodeShows(keys: Set<String>, visible: List<CategoryEntity>): List<SeriesGroup> {
+fun rememberNewEpisodeShows(keys: Map<String, Int>, visible: List<CategoryEntity>): List<SeriesGroup> {
     val dao = LocalContext.current.app.db.catalog()
     var shows by remember { mutableStateOf(emptyList<SeriesGroup>()) }
     LaunchedEffect(keys, visible) {
         val ok = visible.mapTo(HashSet()) { it.sourceId to it.categoryId }
-        val rows = keys.mapNotNull { k -> k.split('/', limit = 2).let { (s, id) -> dao.seriesItem(s, id) } }.filter { (it.sourceId to it.categoryId) in ok }
+        val rows = keys.keys.mapNotNull { k -> k.split('/', limit = 2).let { (s, id) -> dao.seriesItem(s, id) } }.filter { (it.sourceId to it.categoryId) in ok }
         shows = groupSeries(rows)
     }
     return shows
 }
 
-fun SeriesGroup.hasNew(keys: Set<String>) = keys.isNotEmpty() && copies.any { it.key in keys }
+fun SeriesGroup.hasNew(keys: Map<String, Int>) = keys.isNotEmpty() && copies.any { it.key in keys }
+
+/** New episodes on any copy of the show (copies in other languages count the same episodes once). */
+fun SeriesGroup.newCount(keys: Map<String, Int>) = if (keys.isEmpty()) 0 else copies.maxOf { keys[it.key] ?: 0 }
 
 /** Whether a grouped show is a favourite: any copy of it is (same row, same TMDB id or same title). */
 class ShowFavourites(private val rows: List<SeriesEntity>) {

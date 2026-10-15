@@ -3,17 +3,14 @@ package app.familytv.ui
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyGridState
@@ -21,7 +18,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -30,15 +27,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.focusRestorer
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Text
@@ -46,28 +42,34 @@ import app.familytv.app
 import app.familytv.data.CategoryEntity
 import app.familytv.data.Kind
 import app.familytv.data.MovieEntity
+import app.familytv.data.SeriesEntity
 import app.familytv.portal.Profile
-import app.familytv.sync.PlaybackStatus
 import app.familytv.trakt.ProgressRules
 import app.familytv.user.Favourites
+import app.familytv.user.ProgressEntity
 import app.familytv.user.ProgressKey
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 
-/** Remembers the selected category, falling back to the first real one (not Favourites) when it disappears. */
+/**
+ * The selected category, kept while another page is open. Falls back to the first entry that isn't
+ * Favourites (Highlights, on Movies and Series) when it disappears.
+ */
 @Composable
 private fun selectedCategory(cats: List<CategoryEntity>): Pair<CategoryEntity?, (CategoryEntity) -> Unit> {
-    var cat by remember { mutableStateOf<CategoryEntity?>(null) }
-    LaunchedEffect(cats) { if (cat == null || cat !in cats) cat = cats.firstOrNull { !it.isFavourites } ?: cats.firstOrNull() }
-    return cat to { c: CategoryEntity -> cat = c }
+    var id by rememberSaveable { mutableStateOf<String?>(null) }
+    val cat = cats.firstOrNull { it.chipKey == id } ?: cats.firstOrNull { !it.isFavourites } ?: cats.firstOrNull()
+    return cat to { c: CategoryEntity -> id = c.chipKey }
 }
+
+private val CategoryEntity.chipKey get() = "$sourceId/$categoryId"
 
 /** Category shortcuts across the top of Movies, Series and the Guide. */
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
-fun CategoryChips(cats: List<CategoryEntity>, selected: CategoryEntity?, onSelect: (CategoryEntity) -> Unit) {
-    LazyRow(Modifier.fillMaxWidth().focusRestorer(), horizontalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(end = 40.dp)) {
-        items(cats, key = { "${it.sourceId}/${it.categoryId}" }) { c ->
+fun CategoryChips(cats: List<CategoryEntity>, selected: CategoryEntity?, start: Dp = 0.dp, onSelect: (CategoryEntity) -> Unit) {
+    LazyRow(Modifier.fillMaxWidth().focusRestorer(), horizontalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(start = start, end = 40.dp)) {
+        items(cats, key = { it.chipKey }) { c ->
             val minH = if (LocalFormFactor.current.touch) 48.dp else 0.dp
             FocusBox(onClick = { onSelect(c) }, selected = c == selected, color = Tv.Panel, shape = RoundedCornerShape(20.dp), modifier = Modifier.heightIn(min = minH), contentAlignment = Alignment.CenterStart) { focused ->
                 Text(
@@ -82,123 +84,193 @@ fun CategoryChips(cats: List<CategoryEntity>, selected: CategoryEntity?, onSelec
 @Composable
 fun MoviesScreen(vm: MainViewModel, profile: Profile) {
     val ctx = LocalContext.current
-    val menus = LocalItemMenus.current
-    val scope = rememberCoroutineScope()
+    val tv = !LocalFormFactor.current.touch
     val visible = categories(vm, profile, Kind.MOVIE)
-    val cats = remember(visible) { if (visible.isEmpty()) visible else listOf(favouritesCategory(Kind.MOVIE)) + visible }
+    val cats = remember(visible) { if (visible.isEmpty()) visible else listOf(highlightsCategory(Kind.MOVIE), favouritesCategory(Kind.MOVIE)) + visible }
     val (cat, select) = selectedCategory(cats)
     val favs = rememberFavourites()
     val favKeys = rememberFavouriteKeys(favs)
     val favMovies = rememberFavouriteMovies(favs, visible)
     val progress = rememberProgress()
+    val shelves = rememberMovieShelves(visible, favMovies)
+    // The card to come back to (after switching pages, or the rail), and the one the spotlight shows.
+    var lastCard by rememberSaveable { mutableStateOf<String?>(null) }
+    var focused by remember { mutableStateOf<MovieEntity?>(null) }
     val inCategory by remember(cat) {
-        cat?.takeUnless { it.isFavourites }?.let { ctx.app.db.catalog().movies(it.sourceId, it.categoryId) } ?: flowOf(emptyList())
+        cat?.takeUnless { it.isVirtual }?.let { ctx.app.db.catalog().movies(it.sourceId, it.categoryId) } ?: flowOf(emptyList())
     }.collectAsState(initial = emptyList())
-    val showingFavourites = cat?.isFavourites == true
-    val movies = if (showingFavourites) favMovies else inCategory
     if (cats.isEmpty()) return EmptyState("No movies on this line.")
+    val card: @Composable (MovieEntity, Modifier, String, Dp?) -> Unit = { m, modifier, key, width ->
+        MovieCard(m, modifier, width, profile, favKeys, progress) { lastCard = key; focused = m }
+    }
     Column {
-        PageTitle("Movies")
-        CategoryChips(cats, cat, select)
-        Spacer(Modifier.height(18.dp))
-        if (showingFavourites && movies.isEmpty()) FavouritesHint(vodHint(LocalFormFactor.current, "a movie"))
-        PosterGrid(
-            movies.map { m ->
-                val p = progress[ProgressKey.movie(m.sourceId, m.streamId)]
-                val fav = Favourites.key(Kind.MOVIE, m.sourceId, m.streamId) in favKeys
-                GridItem(
-                    "${m.sourceId}/${m.streamId}", m.name, m.poster,
-                    favourite = fav,
-                    watched = p?.watched == true, progress = ProgressRules.bar(p),
-                    onFavourite = { toggleFavourite(ctx, Kind.MOVIE, m.sourceId, m.streamId, m.name) },
-                    movie = m,
-                    onMenu = { menus.open = movieMenu(ctx, m, fav, p?.watched == true) },
-                )
-            },
-            back = null, profile = profile,
-        ) { idx ->
-            scope.launch { playMovieNow(ctx, profile, movies[idx]) }
+        if (tv) MovieSpotlight(focused, focused?.let { progress[ProgressKey.movie(it.sourceId, it.streamId)] }) else PageTitle("Movies")
+        CategoryChips(cats, cat, FOCUS_ROOM, select)
+        Spacer(Modifier.height(8.dp))
+        when {
+            cat?.isHighlights == true -> Shelves(shelves, { "${it.sourceId}/${it.streamId}" }, lastCard, "Recently added and top rated movies show up here once the line has loaded.") { m, mod, k ->
+                card(m, mod, k, 140.dp)
+            }
+            cat?.isFavourites == true && favMovies.isEmpty() -> FavouritesHint(vodHint(LocalFormFactor.current, "a movie"))
+            else -> PosterGrid(if (cat?.isFavourites == true) favMovies else inCategory, { "${it.sourceId}/${it.streamId}" }, lastCard) { m, mod, k -> card(m, mod, k, null) }
         }
+    }
+}
+
+/** A movie poster: OK plays it, hold OK (or Menu) opens its menu, and it carries the Trailer button. */
+@Composable
+private fun MovieCard(m: MovieEntity, modifier: Modifier, width: Dp?, profile: Profile, favKeys: Set<String>, progress: Map<String, ProgressEntity>, onFocus: () -> Unit) {
+    val ctx = LocalContext.current
+    val menus = LocalItemMenus.current
+    val scope = rememberCoroutineScope()
+    val p = progress[ProgressKey.movie(m.sourceId, m.streamId)]
+    val fav = Favourites.key(Kind.MOVIE, m.sourceId, m.streamId) in favKeys
+    PosterCard(
+        m.name, m.poster, modifier, width = width,
+        favourite = fav,
+        onFavourite = { toggleFavourite(ctx, Kind.MOVIE, m.sourceId, m.streamId, m.name) },
+        watched = p?.watched == true, progress = ProgressRules.bar(p),
+        onTrailer = movieTrailerAction(profile, m),
+        onMenu = { menus.open = movieMenu(ctx, m, fav, p?.watched == true) },
+        onFocus = onFocus,
+    ) { scope.launch { playMovieNow(ctx, profile, m) } }
+}
+
+/** Movies' Highlights: recently added, favourites and top rated, from the categories this profile shows. */
+@Composable
+private fun rememberMovieShelves(visible: List<CategoryEntity>, favMovies: List<MovieEntity>): List<Pair<String, List<MovieEntity>>> {
+    val dao = LocalContext.current.app.db.catalog()
+    var recent by remember { mutableStateOf(emptyList<MovieEntity>()) }
+    var top by remember { mutableStateOf(emptyList<MovieEntity>()) }
+    LaunchedEffect(visible) {
+        val ok = visible.mapTo(HashSet()) { it.sourceId to it.categoryId }
+        recent = dao.recentMovies(300).filter { (it.sourceId to it.categoryId) in ok }.take(SHELF_SIZE)
+        top = dao.topMovies(TOP_RATING, 300).filter { (it.sourceId to it.categoryId) in ok }.take(SHELF_SIZE)
+    }
+    return remember(recent, favMovies, top) {
+        listOf("Recently added" to recent, "Favourites" to favMovies, "Top rated" to top).filter { it.second.isNotEmpty() }
     }
 }
 
 @Composable
 fun SeriesScreen(vm: MainViewModel, profile: Profile) {
     val ctx = LocalContext.current
+    val tv = !LocalFormFactor.current.touch
     val visible = categories(vm, profile, Kind.SERIES)
-    val cats = remember(visible) { if (visible.isEmpty()) visible else listOf(favouritesCategory(Kind.SERIES)) + visible }
+    val cats = remember(visible) { if (visible.isEmpty()) visible else listOf(highlightsCategory(Kind.SERIES), favouritesCategory(Kind.SERIES)) + visible }
     val (cat, select) = selectedCategory(cats)
     val nav = rememberSeriesNav()
+    // Hoisted, so the grid or shelves come back where they were when a show's page closes.
     val grid = rememberLazyGridState()
+    val list = rememberLazyListState()
     val favs = rememberFavourites()
     val favSeries = rememberFavouriteSeries(favs, visible)
     val showFavs = ShowFavourites(rememberFavouriteShowRows(favs))
     val newKeys = rememberNewEpisodeKeys()
+    val newShows = rememberNewEpisodeShows(newKeys, visible)
+    val shelves = rememberSeriesShelves(visible, newShows, favSeries)
+    var lastCard by rememberSaveable { mutableStateOf<String?>(null) }
+    var focused by remember { mutableStateOf<SeriesGroup?>(null) }
     val inCategory by remember(cat) {
-        cat?.takeUnless { it.isFavourites }?.let { ctx.app.db.catalog().series(it.sourceId, it.categoryId) } ?: flowOf(emptyList())
+        cat?.takeUnless { it.isVirtual }?.let { ctx.app.db.catalog().series(it.sourceId, it.categoryId) } ?: flowOf(emptyList())
     }.collectAsState(initial = emptyList())
     val showingFavourites = cat?.isFavourites == true
     // One poster per show, however many languages the provider lists it in.
     val series = remember(showingFavourites, favSeries, inCategory) { groupSeries(if (showingFavourites) favSeries else inCategory) }
     if (cats.isEmpty()) return EmptyState("No series on this line.")
+    val card: @Composable (SeriesGroup, Modifier, String, Dp?) -> Unit = { g, modifier, key, width ->
+        val on = showFavs.has(g)
+        PosterCard(
+            g.title, g.poster, modifier, width = width,
+            favourite = on, onFavourite = { toggleShowFavourite(ctx, g, on) },
+            newBadge = g.hasNew(newKeys), newCount = g.newCount(newKeys),
+            onFocus = { lastCard = key; focused = g },
+        ) { nav.open = g }
+    }
     nav.Host(vm, profile) {
         Column {
-            PageTitle("Series")
-            CategoryChips(cats, cat, select)
-            Spacer(Modifier.height(18.dp))
-            if (showingFavourites && series.isEmpty()) FavouritesHint(vodHint(LocalFormFactor.current, "a series"))
-            PosterGrid(
-                series.map { g ->
-                    val on = showFavs.has(g)
-                    GridItem(g.key, g.title, g.poster, favourite = on, onFavourite = { toggleShowFavourite(ctx, g, on) }, isNew = g.hasNew(newKeys))
-                },
-                back = nav.back, state = grid,
-            ) { idx -> nav.open = series[idx] }
+            if (tv) SeriesSpotlight(focused, focused?.newCount(newKeys) ?: 0) else PageTitle("Series")
+            CategoryChips(cats, cat, FOCUS_ROOM, select)
+            Spacer(Modifier.height(8.dp))
+            when {
+                cat?.isHighlights == true -> Shelves(shelves, SeriesGroup::key, lastCard, "Top rated shows and ones with new episodes show up here once the line has loaded.", list) { g, mod, k ->
+                    card(g, mod, k, 140.dp)
+                }
+                showingFavourites && series.isEmpty() -> FavouritesHint(vodHint(LocalFormFactor.current, "a series"))
+                else -> PosterGrid(series, SeriesGroup::key, lastCard, grid) { g, mod, k -> card(g, mod, k, null) }
+            }
         }
     }
 }
 
-/** One poster in a [PosterGrid]. */
-private class GridItem(
-    val key: String,
-    val name: String,
-    val poster: String?,
-    val favourite: Boolean = false,
-    val watched: Boolean = false,
-    val progress: Float = 0f,
-    val onFavourite: (() -> Unit)? = null,
-    /** Set for movies: the card gets a Trailer button (looked up when pressed). */
-    val movie: MovieEntity? = null,
-    val onMenu: (() -> Unit)? = null,
-    val isNew: Boolean = false,
-)
-
+/** Series' Highlights: shows with new episodes, favourites and top rated. */
 @Composable
-private fun PosterGrid(
-    items: List<GridItem>,
-    back: String?,
-    state: LazyGridState = rememberLazyGridState(),
-    profile: Profile? = null,
-    onClick: (Int) -> Unit,
+private fun rememberSeriesShelves(visible: List<CategoryEntity>, newShows: List<SeriesGroup>, favSeries: List<SeriesEntity>): List<Pair<String, List<SeriesGroup>>> {
+    val dao = LocalContext.current.app.db.catalog()
+    var top by remember { mutableStateOf(emptyList<SeriesGroup>()) }
+    LaunchedEffect(visible) {
+        val ok = visible.mapTo(HashSet()) { it.sourceId to it.categoryId }
+        top = groupSeries(dao.topSeries(TOP_RATING, 400).filter { (it.sourceId to it.categoryId) in ok }).take(SHELF_SIZE)
+    }
+    return remember(newShows, favSeries, top) {
+        listOf("New episodes" to newShows, "Favourites" to groupSeries(favSeries), "Top rated" to top).filter { it.second.isNotEmpty() }
+    }
+}
+
+private const val SHELF_SIZE = 30
+
+/**
+ * Rows of posters under a title each. The page's entry point is the card last focused ([entry],
+ * a "shelf/key" pair, so the same title on two shelves stays two cards), else the first one.
+ */
+@Composable
+private fun <T> Shelves(
+    shelves: List<Pair<String, List<T>>>,
+    key: (T) -> String,
+    entry: String?,
+    empty: String,
+    state: LazyListState = rememberLazyListState(),
+    card: @Composable (T, Modifier, String) -> Unit,
 ) {
-    val hasBack = back != null && items.any { it.key == back }
+    if (shelves.isEmpty()) return FavouritesHint(empty)
+    val target = entry?.takeIf { e -> shelves.any { (t, l) -> l.any { "$t/${key(it)}" == e } } }
+        ?: shelves.first().let { (t, l) -> "$t/${key(l.first())}" }
+    LazyColumn(state = state, verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(bottom = 40.dp)) {
+        items(shelves, key = { it.first }) { (title, row) ->
+            Shelf(title) {
+                items(row, key = { "$title/${key(it)}" }) { x ->
+                    val k = "$title/${key(x)}"
+                    card(x, entryPoint(k == target), k)
+                }
+            }
+        }
+    }
+}
+
+/** One category as a grid of posters; the entry point is the card last focused ([entry]) when it's here, else the first. */
+@Composable
+private fun <T> PosterGrid(
+    items: List<T>,
+    key: (T) -> String,
+    entry: String?,
+    state: LazyGridState = rememberLazyGridState(),
+    card: @Composable (T, Modifier, String) -> Unit,
+) {
+    val hasEntry = entry != null && items.any { key(it) == entry }
     // Three posters across a phone, more on wider screens.
     val cell = when (LocalFormFactor.current) { FormFactor.Phone -> 100.dp; FormFactor.Tablet -> 130.dp; FormFactor.Tv -> 150.dp }
     val gap = if (LocalFormFactor.current == FormFactor.Phone) 12.dp else 18.dp
     LazyVerticalGrid(
         columns = GridCells.Adaptive(cell),
         state = state,
-        contentPadding = PaddingValues(top = 6.dp, bottom = 32.dp, end = 8.dp),
+        // Room for a focused poster's zoom, which the grid would otherwise clip.
+        contentPadding = PaddingValues(start = FOCUS_ROOM, top = FOCUS_ROOM, bottom = 32.dp, end = FOCUS_ROOM),
         horizontalArrangement = Arrangement.spacedBy(gap),
         verticalArrangement = Arrangement.spacedBy(gap),
     ) {
-        itemsIndexed(items, key = { _, it -> it.key }) { i, it ->
-            PosterCard(
-                it.name, it.poster, entryPoint(if (hasBack) it.key == back else i == 0), width = null,
-                favourite = it.favourite, onFavourite = it.onFavourite, watched = it.watched, progress = it.progress,
-                onTrailer = if (it.movie != null && profile != null) movieTrailerAction(profile, it.movie) else null,
-                onMenu = it.onMenu, newBadge = it.isNew,
-            ) { onClick(i) }
+        itemsIndexed(items, key = { _, it -> key(it) }) { i, it ->
+            val k = key(it)
+            card(it, entryPoint(if (hasEntry) k == entry else i == 0), k)
         }
     }
 }

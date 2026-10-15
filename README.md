@@ -22,12 +22,18 @@ passwords on a remote, and when a TV goes black the portal tells you why.
 - **Favourites:** hold OK (or press Menu) on any channel, movie or series to add or remove it; on a
   phone or tablet tap the heart. Live TV, Movies and Series each get a *Favourites* category at the
   top, and Home a *Favourites* row. Favourites survive channel reloads.
+- **Movies and Series** open on *Highlights*: shelves of recently added, favourite and top-rated
+  movies (and, for series, shows with new episodes). The provider's categories follow, each as a
+  poster grid. On a TV a spotlight across the top shows the focused poster's artwork, year, rating
+  and plot (for movies, the plot, genres and running time come from TMDB once focus rests, when the
+  portal has a TMDB key). Each page remembers its category, scroll and last card when you switch
+  pages.
 - **Watched marks:** hold OK (or Menu, or a long press on touch) on a movie to mark it watched or
   unwatched. On a show's page, the season button marks the whole season, and holding OK on an
   episode marks it, or every episode up to it. Marking clears the resume point.
 - **New episodes:** every 6 hours the background check-in looks at favourite shows (up to 60, one at a
-  time). A new episode puts the show in a *New episodes* row on Home with a NEW badge until its page
-  is opened, and posts a notification (on Android 13+ the app asks once for permission).
+  time). A new episode puts the show in a *New episodes* row on Home with a NEW badge (with
+  the count, like "3 NEW") until its page is opened, and posts a notification (on Android 13+ the app asks once for permission).
 - **Trakt (optional):** connect a Trakt account in Settings with a code and a QR (no typing on the
   remote). Favourite movies and series follow the Trakt watchlist both ways, and watched marks and
   resume points sync through Trakt scrobbling and history, so every device on the same Trakt account
