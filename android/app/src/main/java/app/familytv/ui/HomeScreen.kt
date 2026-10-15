@@ -642,11 +642,17 @@ fun categories(vm: MainViewModel, profile: Profile, kind: String): List<Category
     return remember(all, unlocked, profile) { visibleCategories(all, profile, unlocked) }
 }
 
-/** [all] minus the profile's hidden categories and, unless [unlocked], adult ones; with no profile, adult ones stay hidden. */
+/**
+ * [all] (one kind) minus the profile's hidden categories and, unless [unlocked], adult ones; with no
+ * profile, adult ones stay hidden. Categories named in the profile's order come first, in that order.
+ */
 fun visibleCategories(all: List<CategoryEntity>, profile: Profile?, unlocked: Boolean): List<CategoryEntity> {
     val hidden = profile?.hiddenCategories.orEmpty().map { it.lowercase() }.toSet()
     val adultOk = unlocked || (profile != null && profile.parentalPin.isNullOrEmpty())
-    return all.filter { c -> c.name.lowercase() !in hidden && (adultOk || !ADULT.containsMatchIn(c.name)) }
+    val shown = all.filter { c -> c.name.lowercase() !in hidden && (adultOk || !ADULT.containsMatchIn(c.name)) }
+    val order = profile?.categoryOrder?.get(all.firstOrNull()?.kind)?.withIndex()?.associate { (i, n) -> n.lowercase() to i }
+    // sortedBy is stable, so unnamed categories keep the provider's order after the named ones.
+    return if (order.isNullOrEmpty()) shown else shown.sortedBy { order[it.name.lowercase()] ?: Int.MAX_VALUE }
 }
 
 /** Programmes overlapping [from, from + hours) for these channels, grouped by EPG id. */

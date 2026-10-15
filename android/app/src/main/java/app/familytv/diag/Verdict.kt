@@ -26,6 +26,8 @@ data class HostFacts(
     val portalReachable: Boolean?, // can Cloudflare's edge reach the same server?
     val httpStatus: Int? = null,
     val httpBodyLooksLikeHtml: Boolean = false,
+    /** Time to open a TCP connection, so the portal can tell a fast server from a slow one. */
+    val connectMs: Long? = null,
 )
 
 data class AccountFacts(

@@ -18,6 +18,8 @@ data class Profile(
     val sources: List<Source> = emptyList(),
     val parentalPin: String? = null,
     val hiddenCategories: List<String>? = null,
+    /** Category names per kind ("live", "movie", "series") in the order to list them; others follow in the provider's order. */
+    val categoryOrder: Map<String, List<String>>? = null,
 )
 
 data class Command(val id: String, val type: String, val payload: Map<String, Any?>?)

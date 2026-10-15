@@ -72,6 +72,11 @@ class PortalClient(context: Context, private val baseUrl: String = BuildConfig.P
         post("/api/device/diagnostics", mapOf("verdict" to verdict, "report" to report), Map::class.java)
     }
 
+    /** This TV's category names per kind, so the portal can arrange them for the profile. */
+    suspend fun uploadCategories(names: Map<String, List<String>>) {
+        post("/api/device/categories", names, Map::class.java)
+    }
+
     suspend fun reachability(urls: List<String>): List<ReachResult> =
         post("/api/device/reachability", mapOf("urls" to urls), ReachResponse::class.java).results
 

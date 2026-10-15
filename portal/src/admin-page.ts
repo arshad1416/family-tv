@@ -28,10 +28,13 @@ label{display:block;font-size:13px;color:var(--muted);margin:8px 0 3px}
 .verdict.s0{border-color:var(--ok)}.verdict.s1,.verdict.s2{border-color:var(--warn)}.verdict.s3{border-color:var(--bad)}
 pre{white-space:pre-wrap;word-break:break-word;font-size:12px;background:var(--bg);padding:8px;border-radius:6px;max-height:300px;overflow:auto}
 .err{color:var(--bad)}
+table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:7px 6px;border-top:1px solid var(--line);vertical-align:middle}th{font-size:13px;color:var(--muted);font-weight:500;border-top:0}
+.ok{color:var(--ok)}.warn{color:var(--warn)}
+@media (max-width:700px){.wide{display:none}}
 </style>
 </head>
 <body>
-<header><h1>Family TV</h1><nav><button data-tab="devices" class="on">Devices</button><button data-tab="profiles">Profiles</button></nav></header>
+<header><h1>Family TV</h1><nav><button data-tab="devices" class="on">Devices</button><button data-tab="profiles">Profiles</button><button data-tab="lines">Lines</button></nav></header>
 <main id="app"></main>
 <script>
 const $ = (s, el = document) => el.querySelector(s);
@@ -104,7 +107,7 @@ async function renderDevices() {
 async function openDevice(id, dev) {
   const box = $("#d-" + id);
   if (box.innerHTML) { box.innerHTML = ""; return; }
-  const { diagnostics, commands } = await api("/api/admin/devices/" + id);
+  const { diagnostics, commands, suggestions } = await api("/api/admin/devices/" + id);
   const popts = profiles.map((x) => '<option value="' + esc(x.id) + '"' + (x.id === dev.profile_id ? " selected" : "") + ">" + esc(x.name) + "</option>").join("");
   let html = '<div class="row" style="margin-top:10px">' +
     '<button class="b p" data-cmd="diagnose">Run check</button><button class="b" data-cmd="refresh">Reload channels</button>' +
@@ -112,6 +115,10 @@ async function openDevice(id, dev) {
     '<button class="b" data-cmd="message">Show a message</button><button class="b" data-cmd="update">Update app</button>' +
     '<select id="mv-' + esc(id) + '" style="width:auto">' + popts + '</select><button class="b" data-move>Change profile</button>' +
     '<button class="b" data-del style="margin-left:auto">Remove TV</button></div><div class="small muted" id="cm-' + esc(id) + '"></div>';
+  if (suggestions && suggestions.length) {
+    html += "<h4>Suggestions from the last check</h4>" + suggestions.map((s, i) => '<div class="verdict s' + s.severity + '"><strong>' + esc(s.title) + "</strong><div>" + esc(s.detail) + "</div>" +
+      (s.action ? '<p style="margin:6px 0 0"><button class="b" data-fix="' + i + '">' + esc(s.action.label) + "</button></p>" : "") + "</div>").join("");
+  }
   html += "<h4>Checks</h4>";
   if (!diagnostics.length) html += '<p class="muted small">No checks yet. Press Run check; the TV answers within a minute while it is on.</p>';
   for (const r of diagnostics) {
@@ -128,6 +135,13 @@ async function openDevice(id, dev) {
     if (b.dataset.cmd === "restart" && !confirm("Restart the app on this TV?")) return;
     try { await api("/api/admin/devices/" + id + "/commands", { method: "POST", body: JSON.stringify({ type: b.dataset.cmd, payload }) });
       $("#cm-" + id).textContent = "Sent. The TV picks it up within a minute if it is on."; } catch (e) { $("#cm-" + id).textContent = e.message; }
+  }));
+  box.querySelectorAll("[data-fix]").forEach((b) => (b.onclick = async () => {
+    const a = suggestions[+b.dataset.fix].action;
+    if (!confirm(a.label + " for every TV on this profile?")) return;
+    try { await api("/api/admin/profiles/" + dev.profile_id + "/primary-server", { method: "POST", body: JSON.stringify({ sourceId: a.sourceId, url: a.url }) });
+      b.replaceWith(Object.assign(document.createElement("span"), { className: "small ok", textContent: "Done. The TVs reload within a minute." })); }
+    catch (e) { $("#cm-" + id).textContent = e.message; }
   }));
   box.querySelector("[data-move]").onclick = async () => { await api("/api/admin/devices/" + id, { method: "PATCH", body: JSON.stringify({ profileId: $("#mv-" + id).value }) }); render(); };
   box.querySelector("[data-del]").onclick = async () => { if (confirm("Remove this TV? It will show a new pairing code.")) { await api("/api/admin/devices/" + id, { method: "DELETE" }); render(); } };
@@ -158,17 +172,55 @@ async function renderProfiles(editId) {
   document.querySelectorAll("[data-edit]").forEach((b) => (b.onclick = () => renderProfiles(b.dataset.edit)));
 }
 
+// Category order and visibility, per kind. Rows are what the profile's TVs reported, saved order first.
+const KINDS = [["live", "Live TV"], ["movie", "Movies"], ["series", "TV Shows"]];
+let catKind = "live";
+function categoryRows(draft, reported) {
+  const saved = (draft.data.categoryOrder || {})[catKind] || [];
+  const seen = new Set(), rows = [];
+  for (const n of [...saved, ...((reported[catKind] || {}).names || [])]) { const k = n.toLowerCase(); if (!seen.has(k)) { seen.add(k); rows.push(n); } }
+  return rows;
+}
+function categoriesCard(draft, reported) {
+  if (!draft.id) return '<div class="card muted small">Save the profile and open Family TV on one of its TVs; its categories then show up here to arrange.</div>';
+  const rows = categoryRows(draft, reported);
+  const hidden = new Set((draft.data.hiddenCategories || []).map((n) => n.toLowerCase()));
+  let html = '<div class="card"><h3 style="margin-top:0">Categories</h3><div class="row" style="margin-bottom:8px">' +
+    KINDS.map(([k, label]) => '<button class="b' + (k === catKind ? " p" : "") + '" data-kind="' + k + '">' + label + "</button>").join("") +
+    '<span class="muted small">Order, show or hide what the TVs on this profile list. Saved with the profile.</span></div>';
+  if (!rows.length) html += '<p class="muted small">No categories reported yet. Open Family TV on a TV with this profile and come back in a minute.</p>';
+  html += rows.map((n, i) => '<div class="row" style="gap:6px;padding:4px 0;border-top:1px solid var(--line)">' +
+    '<input type="checkbox" style="width:auto" data-show="' + i + '"' + (hidden.has(n.toLowerCase()) ? "" : " checked") + ">" +
+    '<span style="flex:1">' + esc(n) + "</span>" +
+    '<button class="b" data-top="' + i + '" title="Move to top">Top</button><button class="b" data-up="' + i + '" title="Move up">▲</button><button class="b" data-down="' + i + '" title="Move down">▼</button></div>').join("");
+  return html + "</div>";
+}
+
 function editProfile(p) {
   const draft = JSON.parse(JSON.stringify(p));
+  let reported = {};
+  if (draft.id) api("/api/admin/profiles/" + draft.id + "/categories").then((r) => { reported = r.reported; collect(); paint(); }).catch(() => {});
+  const moveCat = (i, to) => {
+    collect();
+    const rows = categoryRows(draft, reported);
+    const [n] = rows.splice(i, 1);
+    rows.splice(Math.max(0, Math.min(rows.length, to)), 0, n);
+    draft.data.categoryOrder = { ...(draft.data.categoryOrder || {}), [catKind]: rows };
+    paint();
+  };
   const paint = () => {
     $("#app").innerHTML = '<div class="card"><label>Profile name</label><input id="pname" value="' + esc(draft.name) + '">' +
       '<label>Parental PIN (optional, locks adult categories)</label><input id="ppin" type="password" value="' + esc(draft.data.parentalPin) + '"></div>' +
-      draft.data.sources.map(sourceForm).join("") +
+      draft.data.sources.map(sourceForm).join("") + categoriesCard(draft, reported) +
       '<div class="row"><button class="b" id="adds">Add source</button><button class="b p" id="save">Save</button>' +
       (draft.id ? '<button class="b" id="delp">Delete profile</button>' : "") + '<button class="b" id="back">Back</button><span id="perr" class="err"></span></div>';
     $("#adds").onclick = () => { collect(); draft.data.sources.push({ id: crypto.randomUUID(), type: "xtream", name: "Line " + (draft.data.sources.length + 1) }); paint(); };
     document.querySelectorAll("[data-rm]").forEach((b) => (b.onclick = () => { collect(); draft.data.sources.splice(+b.closest("[data-src]").dataset.src, 1); paint(); }));
     $("#back").onclick = () => renderProfiles();
+    document.querySelectorAll("[data-kind]").forEach((b) => (b.onclick = () => { collect(); catKind = b.dataset.kind; paint(); }));
+    document.querySelectorAll("[data-top]").forEach((b) => (b.onclick = () => moveCat(+b.dataset.top, 0)));
+    document.querySelectorAll("[data-up]").forEach((b) => (b.onclick = () => moveCat(+b.dataset.up, +b.dataset.up - 1)));
+    document.querySelectorAll("[data-down]").forEach((b) => (b.onclick = () => moveCat(+b.dataset.down, +b.dataset.down + 1)));
     if ($("#delp")) $("#delp").onclick = async () => { if (confirm("Delete this profile? TVs on it stop playing until moved.")) { await api("/api/admin/profiles/" + draft.id, { method: "DELETE" }); renderProfiles(); } };
     $("#save").onclick = async () => {
       collect();
@@ -181,6 +233,14 @@ function editProfile(p) {
   const collect = () => {
     draft.name = $("#pname").value;
     draft.data.parentalPin = $("#ppin").value || undefined;
+    // Hidden names of the kind on screen are re-read from the checkboxes; other kinds' stay as they were.
+    const rows = categoryRows(draft, reported);
+    if (document.querySelector("[data-show]")) {
+      const onScreen = new Set(rows.map((n) => n.toLowerCase()));
+      const kept = (draft.data.hiddenCategories || []).filter((n) => !onScreen.has(n.toLowerCase()));
+      document.querySelectorAll("[data-show]").forEach((c) => { if (!c.checked) kept.push(rows[+c.dataset.show]); });
+      draft.data.hiddenCategories = kept;
+    }
     document.querySelectorAll("[data-src]").forEach((el) => {
       const g = (n) => el.querySelector('[name="' + n + '"]').value.trim();
       const s = draft.data.sources[+el.dataset.src];
@@ -191,12 +251,84 @@ function editProfile(p) {
   paint();
 }
 
+// ---------- 8K lines ----------
+
+const plural = (n, w) => n + " " + w + (n === 1 ? "" : "s");
+function leftText(l) {
+  if (l.daysLeft == null) return '<span class="muted">unknown</span>';
+  if (l.daysLeft < 0) return '<span class="err">expired ' + plural(-l.daysLeft, "day") + " ago</span>";
+  const cls = l.daysLeft <= 7 ? "err" : l.daysLeft <= 30 ? "warn" : "ok";
+  return '<span class="' + cls + '">' + plural(l.daysLeft, "day") + "</span>";
+}
+
+async function renderLines(refresh) {
+  $("#app").innerHTML = '<div class="card muted">' + (refresh ? "Asking the panel about every line…" : "Loading lines…") + "</div>";
+  const [panel, data, p] = await Promise.all([api("/api/admin/panel"), api("/api/admin/lines" + (refresh ? "?refresh=1" : "")), api("/api/admin/profiles")]);
+  profiles = p.profiles;
+  if (!panel.configured) {
+    $("#app").innerHTML = '<div class="card"><h3 style="margin-top:0">Connect the 8K panel</h3><p>Add your reseller API key to the portal as the secret <code>IPTV_PANEL_API_KEY</code>, then redeploy it. ' +
+      "This page then shows each profile's line, how long it has left, and lets you renew or create lines.</p></div>";
+    return;
+  }
+  const months = (panel.months || [1, 3, 6, 12]).map((m) => '<option value="' + m + '">' + plural(m, "month") + "</option>").join("");
+  let html = '<div class="card row">' + (panel.error ? '<span class="err">Panel: ' + esc(panel.error) + "</span>" :
+    "<span><strong>" + esc(panel.reseller.credits) + '</strong> credits</span><span class="muted small">reseller ' + esc(panel.reseller.username) + "</span>") +
+    '<button class="b" id="lrefresh" style="margin-left:auto">Check all lines now</button></div>';
+  html += '<div class="card"><h3 style="margin-top:0">Lines</h3>';
+  if (!data.lines.length) html += '<p class="muted">No profile has an Xtream login yet. Create a line below or add one in Profiles.</p>';
+  else {
+    html += '<table><tr><th>Profile</th><th class="wide">Line</th><th>Expires</th><th>Left</th><th class="wide">Status</th><th>Renew</th></tr>';
+    for (const l of data.lines) {
+      const status = l.error ? '<span class="err">' + esc(l.error) + "</span>" : l.enabled === false ? '<span class="err">disabled on the panel</span>' :
+        l.enabled ? "active" + (l.maxConnections ? " · " + plural(l.maxConnections, "screen") : "") : "";
+      html += "<tr><td><strong>" + esc(l.profileName) + '</strong></td><td class="wide">' + esc(l.sourceName) + '<div class="muted small">' + esc(l.username) + "</div></td>" +
+        "<td>" + esc(l.expire || "") + "</td><td>" + leftText(l) + '</td><td class="wide small">' + status +
+        (l.checkedAt ? '<div class="muted">checked ' + ago(l.checkedAt) + "</div>" : "") + "</td>" +
+        '<td><div class="row" style="gap:6px;flex-wrap:nowrap"><select style="width:auto" data-m="' + esc(l.profileId + "/" + l.sourceId) + '">' + months + "</select>" +
+        '<button class="b" data-renew="' + esc(l.profileId + "/" + l.sourceId) + '">Renew</button></div></td></tr>';
+    }
+    html += "</table>";
+  }
+  html += '<div id="lmsg" class="small"></div></div>';
+  const popts = profiles.map((x) => '<option value="' + esc(x.id) + '">' + esc(x.name) + "</option>").join("");
+  const pkgs = (panel.packages || []).map((x) => '<option value="' + esc(x.id) + '">' + esc(x.name) + "</option>").join("");
+  html += '<div class="card"><h3 style="margin-top:0">New line for a profile</h3><p class="muted small">Creates a line on the panel (uses credits) and adds it to the profile. Its TVs pick it up within a minute.</p><div class="grid">' +
+    '<div><label>Profile</label><select id="nprof">' + (popts || '<option value="">Create a profile first</option>') + "</select></div>" +
+    '<div><label>Package</label><select id="npkg">' + (pkgs || '<option value="">No packages from the panel</option>') + "</select></div>" +
+    '<div><label>Length</label><select id="nmon">' + months + "</select></div>" +
+    '<div><label>Name in the profile</label><input id="nname" value="8K line"></div></div>' +
+    '<p><button class="b p" id="ncreate">Create line</button> <span id="nmsg" class="small"></span></p></div>';
+  $("#app").innerHTML = html;
+  $("#lrefresh").onclick = () => renderLines(true);
+  document.querySelectorAll("[data-renew]").forEach((b) => (b.onclick = async () => {
+    const key = b.dataset.renew, [profileId, sourceId] = key.split("/");
+    const l = data.lines.find((x) => x.profileId === profileId && x.sourceId === sourceId);
+    const m = +document.querySelector('[data-m="' + CSS.escape(key) + '"]').value;
+    if (!confirm("Renew " + l.profileName + " (" + l.username + ") for " + plural(m, "month") + "? This uses panel credits.")) return;
+    b.disabled = true; $("#lmsg").textContent = "Renewing…";
+    try { await api("/api/admin/lines/renew", { method: "POST", body: JSON.stringify({ profileId, sourceId, months: m }) }); renderLines(); }
+    catch (e) { b.disabled = false; $("#lmsg").innerHTML = '<span class="err">' + esc(e.message) + "</span>"; }
+  }));
+  $("#ncreate").onclick = async () => {
+    const profileId = $("#nprof").value, packageId = $("#npkg").value, m = +$("#nmon").value;
+    if (!profileId || !packageId) return;
+    const pname = profiles.find((x) => x.id === profileId).name, pkg = $("#npkg").selectedOptions[0].textContent;
+    if (!confirm("Create a new " + plural(m, "month") + " line (" + pkg + ") for " + pname + "? This uses panel credits.")) return;
+    $("#ncreate").disabled = true; $("#nmsg").textContent = "Creating…";
+    try {
+      const r = await api("/api/admin/lines/new", { method: "POST", body: JSON.stringify({ profileId, packageId, months: m, name: $("#nname").value }) });
+      if (r.ok) renderLines();
+      else { $("#ncreate").disabled = false; $("#nmsg").innerHTML = '<span class="err">' + esc(r.error) + "</span> Link: " + esc(r.url); }
+    } catch (e) { $("#ncreate").disabled = false; $("#nmsg").innerHTML = '<span class="err">' + esc(e.message) + "</span>"; }
+  };
+}
+
 async function render() {
   if (!token) return askToken();
   document.querySelectorAll("nav button").forEach((b) => b.classList.toggle("on", b.dataset.tab === tab));
   try {
     if (!Object.keys(verdicts).length) verdicts = await api("/api/admin/verdicts");
-    if (tab === "devices") await renderDevices(); else await renderProfiles();
+    if (tab === "devices") await renderDevices(); else if (tab === "lines") await renderLines(); else await renderProfiles();
   } catch (e) { if (token) $("#app").innerHTML = '<div class="card err">' + esc(e.message) + "</div>"; }
 }
 document.querySelectorAll("nav button").forEach((b) => (b.onclick = () => { tab = b.dataset.tab; render(); }));

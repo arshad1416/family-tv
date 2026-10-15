@@ -20,6 +20,7 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
             val stale = System.currentTimeMillis() - (app.db.catalog().sources().minOfOrNull { it.lastRefresh } ?: 0) > 12 * 3600_000
             if (stale) config.profile?.let { app.commands.refreshCatalog(it) }
             config.profile?.let { runCatching { app.newEpisodes.checkIfDue(it) } }
+            runCatching { CategoryReport.sendIfChanged(app) }
             Result.success()
         } catch (e: Exception) {
             Result.retry()
