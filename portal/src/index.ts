@@ -32,6 +32,8 @@ export interface Env {
 const APK_KEY = "family-tv.apk";
 /** The Rust rewrite (arshad1416/family-tv-rust): its own package, installed next to this app. */
 const RUST_APK_KEY = "family-tv-rust.apk";
+/** The Rust build's own update feed, written by its CI; the Kotlin app's latest.json is never offered to it. */
+const RUST_LATEST_KEY = "family-tv-rust-latest.json";
 const LATEST_KEY = "latest.json";
 
 const PAIR_TTL_MS = 30 * 60 * 1000;
@@ -881,6 +883,13 @@ async function appDownload(env: Env, method: string, key = APK_KEY): Promise<Res
   return new Response(method === "HEAD" ? null : obj.body, { headers });
 }
 
+/** The Rust app's update feed as its CI wrote it; 404 until the first build is published. */
+async function rustLatest(env: Env, method: string): Promise<Response> {
+  const obj = env.APPS ? await env.APPS.get(RUST_LATEST_KEY) : null;
+  if (!obj) return json({ error: "nothing published yet" }, 404);
+  return new Response(method === "HEAD" ? null : obj.body, { headers: { "content-type": "application/json", "cache-control": "no-store" } });
+}
+
 // ---------- router ----------
 
 function clip(s: string | undefined | null, n = 80) {
@@ -909,6 +918,7 @@ export async function handle(req: Request, env: Env): Promise<Response> {
   // TV app download: short enough to type into Downloader on a remote.
   if ((m === "GET" || m === "HEAD") && (p === "/tv" || p === "/app.apk")) return appDownload(env, m);
   if ((m === "GET" || m === "HEAD") && (p === "/tvrust" || p === "/tvrust/")) return appDownload(env, m, RUST_APK_KEY);
+  if ((m === "GET" || m === "HEAD") && p === "/tvrust/latest.json") return rustLatest(env, m);
 
   // Device endpoints
   if (m === "POST" && p === "/api/device/register") return deviceRegister(req, env);
