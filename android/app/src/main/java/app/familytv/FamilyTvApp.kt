@@ -6,12 +6,14 @@ import android.os.Bundle
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
+import app.familytv.core.CrashLog
 import app.familytv.data.AppDb
 import app.familytv.diag.Diagnoser
 import app.familytv.iptv.Catalog
 import app.familytv.portal.PortalClient
 import app.familytv.sync.CommandRunner
 import app.familytv.sync.NewEpisodes
+import app.familytv.sync.PlaybackStatus
 import app.familytv.sync.SyncWorker
 import app.familytv.trailer.MediaExtras
 import app.familytv.trakt.Trakt
@@ -47,6 +49,8 @@ class FamilyTvApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        CrashLog.install(this)
+        CrashLog.last(this)?.let { (trace, at) -> PlaybackStatus.lastCrash = trace; PlaybackStatus.lastCrashAt = at }
         registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
             override fun onActivityStarted(a: Activity) { started++ }
             override fun onActivityStopped(a: Activity) { started-- }

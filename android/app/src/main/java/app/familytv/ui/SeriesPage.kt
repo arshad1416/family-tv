@@ -307,7 +307,8 @@ fun SeriesPage(profile: Profile, group: SeriesGroup, visible: List<CategoryEntit
                 inSeason.isEmpty() -> item("none") { Text("No episodes found.", color = Tv.Muted) }
                 else -> {
                     if (!form.touch) item("hint") { Text("Hold OK (or press Menu) on an episode to mark it watched.", fontSize = 13.sp, color = Tv.Muted) }
-                    itemsIndexed(inSeason, key = { _, e -> "${v.key}/${e.id}" }) { _, e ->
+                    // The index keeps keys unique when a provider lists an episode twice.
+                    itemsIndexed(inSeason, key = { i, e -> "${v.key}/$i/${e.id}" }) { _, e ->
                         EpisodeRow(
                             e, cover, progressOf(e),
                             onFocus = { preview = e },

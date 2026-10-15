@@ -53,13 +53,24 @@ android {
         buildConfig = true
     }
     packaging { resources.excludes += "/META-INF/{AL2.0,LGPL2.1}" }
-    testOptions { unitTests.isReturnDefaultValues = true }
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+        unitTests.isIncludeAndroidResources = true
+        // Robolectric's Android jar comes through Gradle (and its proxy settings), not Robolectric's own downloader.
+        unitTests.all { test ->
+            test.systemProperty("robolectric.offline", "true")
+            test.systemProperty("robolectric.dependency.dir", robolectricJars.singleFile.parent)
+        }
+    }
 }
+
+val robolectricJars: Configuration by configurations.creating
+dependencies { robolectricJars("org.robolectric:android-all-instrumented:14-robolectric-10818077-i6") { isTransitive = false } }
 
 ksp { arg("room.schemaLocation", "$projectDir/schemas") }
 
 dependencies {
-    val composeBom = platform("androidx.compose:compose-bom:2024.10.01")
+    val composeBom = platform("androidx.compose:compose-bom:2025.05.01")
     implementation(composeBom)
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.ui:ui")
@@ -93,4 +104,9 @@ dependencies {
     testImplementation("net.sf.kxml:kxml2:2.3.0")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
+    // D-pad focus tests run the real Compose UI on the JVM.
+    testImplementation("org.robolectric:robolectric:4.13")
+    testImplementation(composeBom)
+    testImplementation("androidx.compose.ui:ui-test-junit4")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
 }
