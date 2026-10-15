@@ -54,6 +54,10 @@ import app.familytv.iptv.Streams
 import app.familytv.iptv.XtreamParser
 import app.familytv.portal.Profile
 import app.familytv.sync.PlaybackStatus
+import app.familytv.trakt.PlayItem
+import app.familytv.trakt.ProgressRules
+import app.familytv.user.Favourites
+import app.familytv.user.ProgressKey
 import coil.compose.AsyncImage
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.flowOf
@@ -104,6 +108,8 @@ fun EpisodeList(profile: Profile, s: SeriesEntity, onBack: () -> Unit) {
         episodes = if (src == null) emptyList() else runCatching { ctx.app.catalog.episodes(s.sourceId, s.seriesId, src) }.getOrDefault(emptyList())
     }
     val form = LocalFormFactor.current
+    val favourite = Favourites.key(Kind.SERIES, s.sourceId, s.seriesId) in rememberFavouriteKeys()
+    val progress = rememberProgress()
     // Touch: focus would paint the first episode blue, so only TV moves focus into the list.
     LaunchedEffect(episodes) { if (episodes != null && !form.touch) { delay(50); runCatching { first.requestFocus() } } }
     Row(horizontalArrangement = Arrangement.spacedBy(32.dp)) {
@@ -118,6 +124,11 @@ fun EpisodeList(profile: Profile, s: SeriesEntity, onBack: () -> Unit) {
             if (form.touch) TvButton("‹  Back", onBack, Modifier.padding(bottom = 8.dp))
             Text(s.name, fontSize = if (form == FormFactor.Phone) 22.sp else 28.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
             if (form == FormFactor.Phone) s.plot?.let { Text(it, fontSize = 13.sp, color = Tv.Muted, maxLines = 3, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp)) }
+            TvButton(
+                if (favourite) "\u2665  In Favourites" else "\u2661  Add to Favourites",
+                { toggleFavourite(ctx, Kind.SERIES, s.sourceId, s.seriesId, s.name) },
+                Modifier.padding(top = 10.dp),
+            )
             Spacer(Modifier.height(12.dp))
             val eps = episodes
             when {
@@ -129,13 +140,25 @@ fun EpisodeList(profile: Profile, s: SeriesEntity, onBack: () -> Unit) {
                 }
                 else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp), contentPadding = PaddingValues(bottom = 32.dp)) {
                     itemsIndexed(eps, key = { _, e -> e.id }) { i, e ->
+                        val p = progress[ProgressKey.episode(s.sourceId, s.seriesId, e.season, e.episode)]
                         FocusBox(
-                            onClick = { scope.launch { Streams(ctx.app.db, profile).episode(s.sourceId, e)?.let { play(ctx, it, "S${e.season} E${e.episode} ${e.title}") } } },
+                            onClick = {
+                                scope.launch {
+                                    Streams(ctx.app.db, profile).episode(s.sourceId, e)?.let {
+                                        play(ctx, it, "S${e.season} E${e.episode} ${e.title}", PlayItem.episode(s.sourceId, s.seriesId, s.name, e.season, e.episode))
+                                    }
+                                }
+                            },
                             modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).then(if (i == 0) Modifier.focusRequester(first) else Modifier),
                         ) { focused ->
                             Column(Modifier.padding(horizontal = 18.dp, vertical = 12.dp)) {
-                                Text("S${e.season} E${e.episode}  ${e.title}", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text("S${e.season} E${e.episode}  ${e.title}", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                                    if (p?.watched == true) Text("  \u2713 Watched", fontSize = 13.sp, color = if (focused) Tv.Text else Tv.Good, maxLines = 1)
+                                }
                                 e.plot?.let { Text(it, maxLines = 2, overflow = TextOverflow.Ellipsis, fontSize = 13.sp, color = if (focused) Tv.Text else Tv.Muted) }
+                                val bar = ProgressRules.bar(p)
+                                if (bar > 0f) ProgressLine(bar, Modifier.padding(top = 8.dp).widthIn(max = 260.dp), fill = if (focused) Tv.Text else Tv.Accent)
                             }
                         }
                     }
@@ -145,11 +168,11 @@ fun EpisodeList(profile: Profile, s: SeriesEntity, onBack: () -> Unit) {
     }
 }
 
-/** Remembers the selected category, falling back to the first when it disappears. */
+/** Remembers the selected category, falling back to the first real one (not Favourites) when it disappears. */
 @Composable
 private fun selectedCategory(cats: List<CategoryEntity>): Pair<CategoryEntity?, (CategoryEntity) -> Unit> {
     var cat by remember { mutableStateOf<CategoryEntity?>(null) }
-    LaunchedEffect(cats) { if (cat == null || cat !in cats) cat = cats.firstOrNull() }
+    LaunchedEffect(cats) { if (cat == null || cat !in cats) cat = cats.firstOrNull { !it.isFavourites } ?: cats.firstOrNull() }
     return cat to { c: CategoryEntity -> cat = c }
 }
 
@@ -189,23 +212,41 @@ fun CategoryChips(cats: List<CategoryEntity>, selected: CategoryEntity?, onSelec
 @Composable
 fun LiveScreen(vm: MainViewModel, profile: Profile) {
     val ctx = LocalContext.current
-    val cats = categories(vm, profile, Kind.LIVE)
+    val visible = categories(vm, profile, Kind.LIVE)
+    val cats = remember(visible) { if (visible.isEmpty()) visible else listOf(favouritesCategory(Kind.LIVE)) + visible }
     val (cat, select) = selectedCategory(cats)
-    val channels by remember(cat) {
-        cat?.let { ctx.app.db.catalog().channels(it.sourceId, it.categoryId) } ?: flowOf(emptyList())
+    val favs = rememberFavourites()
+    val favKeys = rememberFavouriteKeys(favs)
+    val favChannels = rememberFavouriteChannels(favs, visible)
+    val inCategory by remember(cat) {
+        cat?.takeUnless { it.isFavourites }?.let { ctx.app.db.catalog().channels(it.sourceId, it.categoryId) } ?: flowOf(emptyList())
     }.collectAsState(initial = emptyList())
+    val showingFavourites = cat?.isFavourites == true
+    val channels = if (showingFavourites) favChannels else inCategory
     val progs = rememberProgrammes(channels)
     if (cats.isEmpty()) return EmptyState(PlaybackStatus.lastRefreshError?.let { "Couldn't load channels: $it. Open Settings and run a check." } ?: "No channels yet.")
     // Phone: category chips over one column of channels. TV and tablet: categories beside channels.
-    val phone = LocalFormFactor.current == FormFactor.Phone
+    val form = LocalFormFactor.current
+    val phone = form == FormFactor.Phone
     val list: @Composable () -> Unit = {
-        LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(6.dp), contentPadding = PaddingValues(bottom = 32.dp)) {
-            itemsIndexed(channels, key = { _, c -> c.streamId }) { i, c ->
+        if (showingFavourites && channels.isEmpty()) {
+            FavouritesHint(
+                (if (form.touch) "Tap the heart on a channel" else "Hold OK (or press Menu) on a channel") + " to add it here. " +
+                    "Favourite channels stay on this device: Trakt has no live TV, so they don't sync.",
+            )
+        } else LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(6.dp), contentPadding = PaddingValues(bottom = 32.dp)) {
+            itemsIndexed(channels, key = { _, c -> "${c.sourceId}/${c.streamId}" }) { i, c ->
                 val p = c.epgId?.let { progs[it] }.orEmpty()
                 val now = p.firstOrNull()
                 val next = p.getOrNull(1)
-                FocusBox(onClick = { playLive(ctx, c.sourceId, c.categoryId, i) }, modifier = Modifier.fillMaxWidth().height(if (phone) 72.dp else 80.dp).then(entryPoint(i == 0))) { focused ->
-                    Row(Modifier.fillMaxSize().padding(horizontal = if (phone) 10.dp else 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                val favourite = Favourites.key(Kind.LIVE, c.sourceId, c.streamId) in favKeys
+                val onFavourite = { toggleFavourite(ctx, Kind.LIVE, c.sourceId, c.streamId, c.name) }
+                FocusBox(
+                    onClick = { if (showingFavourites) playLive(ctx, c.sourceId, c.categoryId, 0, c.streamId) else playLive(ctx, c.sourceId, c.categoryId, i) },
+                    onLongClick = onFavourite,
+                    modifier = Modifier.fillMaxWidth().height(if (phone) 72.dp else 80.dp).then(entryPoint(i == 0)),
+                ) { focused ->
+                    Row(Modifier.fillMaxSize().padding(start = if (phone) 10.dp else 14.dp, end = if (form.touch) 4.dp else 14.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text("${c.num}", Modifier.width(if (phone) 40.dp else 52.dp), fontSize = if (phone) 15.sp else 17.sp, color = if (focused) Tv.Text else Tv.Muted)
                         Logo(c.logo, if (phone) 44 else 54)
                         Spacer(Modifier.width(16.dp))
@@ -218,6 +259,7 @@ fun LiveScreen(vm: MainViewModel, profile: Profile) {
                             Text("Next · ${time(next.start)}", fontSize = 12.sp, color = if (focused) Tv.Text else Tv.Muted)
                             Text(next.title, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
+                        if (form.touch) FavouriteButton(favourite, onFavourite) else MarkBadge(favourite = favourite, size = 20.dp)
                     }
                 }
             }
@@ -241,17 +283,36 @@ fun LiveScreen(vm: MainViewModel, profile: Profile) {
 fun MoviesScreen(vm: MainViewModel, profile: Profile) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
-    val cats = categories(vm, profile, Kind.MOVIE)
+    val visible = categories(vm, profile, Kind.MOVIE)
+    val cats = remember(visible) { if (visible.isEmpty()) visible else listOf(favouritesCategory(Kind.MOVIE)) + visible }
     val (cat, select) = selectedCategory(cats)
-    val movies by remember(cat) {
-        cat?.let { ctx.app.db.catalog().movies(it.sourceId, it.categoryId) } ?: flowOf(emptyList())
+    val favs = rememberFavourites()
+    val favKeys = rememberFavouriteKeys(favs)
+    val favMovies = rememberFavouriteMovies(favs, visible)
+    val progress = rememberProgress()
+    val inCategory by remember(cat) {
+        cat?.takeUnless { it.isFavourites }?.let { ctx.app.db.catalog().movies(it.sourceId, it.categoryId) } ?: flowOf(emptyList())
     }.collectAsState(initial = emptyList())
+    val showingFavourites = cat?.isFavourites == true
+    val movies = if (showingFavourites) favMovies else inCategory
     if (cats.isEmpty()) return EmptyState("No movies on this line.")
     Column {
         PageTitle("Movies")
         CategoryChips(cats, cat, select)
         Spacer(Modifier.height(18.dp))
-        PosterGrid(movies.map { Triple(it.streamId, it.name, it.poster) }, back = null) { idx ->
+        if (showingFavourites && movies.isEmpty()) FavouritesHint(vodHint(LocalFormFactor.current, "a movie"))
+        PosterGrid(
+            movies.map { m ->
+                val p = progress[ProgressKey.movie(m.sourceId, m.streamId)]
+                GridItem(
+                    "${m.sourceId}/${m.streamId}", m.name, m.poster,
+                    favourite = Favourites.key(Kind.MOVIE, m.sourceId, m.streamId) in favKeys,
+                    watched = p?.watched == true, progress = ProgressRules.bar(p),
+                    onFavourite = { toggleFavourite(ctx, Kind.MOVIE, m.sourceId, m.streamId, m.name) },
+                )
+            },
+            back = null,
+        ) { idx ->
             scope.launch { playMovieNow(ctx, profile, movies[idx]) }
         }
     }
@@ -260,32 +321,59 @@ fun MoviesScreen(vm: MainViewModel, profile: Profile) {
 @Composable
 fun SeriesScreen(vm: MainViewModel, profile: Profile) {
     val ctx = LocalContext.current
-    val cats = categories(vm, profile, Kind.SERIES)
+    val visible = categories(vm, profile, Kind.SERIES)
+    val cats = remember(visible) { if (visible.isEmpty()) visible else listOf(favouritesCategory(Kind.SERIES)) + visible }
     val (cat, select) = selectedCategory(cats)
     val nav = rememberSeriesNav()
     val grid = rememberLazyGridState()
-    val series by remember(cat) {
-        cat?.let { ctx.app.db.catalog().series(it.sourceId, it.categoryId) } ?: flowOf(emptyList())
+    val favs = rememberFavourites()
+    val favKeys = rememberFavouriteKeys(favs)
+    val favSeries = rememberFavouriteSeries(favs, visible)
+    val inCategory by remember(cat) {
+        cat?.takeUnless { it.isFavourites }?.let { ctx.app.db.catalog().series(it.sourceId, it.categoryId) } ?: flowOf(emptyList())
     }.collectAsState(initial = emptyList())
+    val showingFavourites = cat?.isFavourites == true
+    val series = if (showingFavourites) favSeries else inCategory
     if (cats.isEmpty()) return EmptyState("No series on this line.")
     nav.Host(profile) {
         Column {
             PageTitle("Series")
             CategoryChips(cats, cat, select)
             Spacer(Modifier.height(18.dp))
-            PosterGrid(series.map { Triple(it.key, it.name, it.poster) }, back = nav.back, state = grid) { idx -> nav.open = series[idx] }
+            if (showingFavourites && series.isEmpty()) FavouritesHint(vodHint(LocalFormFactor.current, "a series"))
+            PosterGrid(
+                series.map { s ->
+                    GridItem(
+                        s.key, s.name, s.poster,
+                        favourite = Favourites.key(Kind.SERIES, s.sourceId, s.seriesId) in favKeys,
+                        onFavourite = { toggleFavourite(ctx, Kind.SERIES, s.sourceId, s.seriesId, s.name) },
+                    )
+                },
+                back = nav.back, state = grid,
+            ) { idx -> nav.open = series[idx] }
         }
     }
 }
 
+/** One poster in a [PosterGrid]. */
+private class GridItem(
+    val key: String,
+    val name: String,
+    val poster: String?,
+    val favourite: Boolean = false,
+    val watched: Boolean = false,
+    val progress: Float = 0f,
+    val onFavourite: (() -> Unit)? = null,
+)
+
 @Composable
 private fun PosterGrid(
-    items: List<Triple<String, String, String?>>,
+    items: List<GridItem>,
     back: String?,
     state: LazyGridState = rememberLazyGridState(),
     onClick: (Int) -> Unit,
 ) {
-    val hasBack = back != null && items.any { it.first == back }
+    val hasBack = back != null && items.any { it.key == back }
     // Three posters across a phone, more on wider screens.
     val cell = when (LocalFormFactor.current) { FormFactor.Phone -> 100.dp; FormFactor.Tablet -> 130.dp; FormFactor.Tv -> 150.dp }
     val gap = if (LocalFormFactor.current == FormFactor.Phone) 12.dp else 18.dp
@@ -296,8 +384,21 @@ private fun PosterGrid(
         horizontalArrangement = Arrangement.spacedBy(gap),
         verticalArrangement = Arrangement.spacedBy(gap),
     ) {
-        itemsIndexed(items, key = { _, it -> it.first }) { i, (key, name, poster) ->
-            PosterCard(name, poster, entryPoint(if (hasBack) key == back else i == 0), width = null) { onClick(i) }
+        itemsIndexed(items, key = { _, it -> it.key }) { i, it ->
+            PosterCard(
+                it.name, it.poster, entryPoint(if (hasBack) it.key == back else i == 0), width = null,
+                favourite = it.favourite, onFavourite = it.onFavourite, watched = it.watched, progress = it.progress,
+            ) { onClick(i) }
         }
     }
 }
+
+/** What an empty Favourites category says, and how to fill it. */
+@Composable
+private fun FavouritesHint(text: String) {
+    Text(text, fontSize = 16.sp, color = Tv.Muted, modifier = Modifier.padding(bottom = 16.dp).widthIn(max = 560.dp))
+}
+
+private fun vodHint(form: FormFactor, what: String) =
+    (if (form.touch) "Tap the heart on $what" else "Hold OK (or press Menu) on $what") +
+        " to add it here. With Trakt connected in Settings, favourite movies and series follow your Trakt watchlist on every device."

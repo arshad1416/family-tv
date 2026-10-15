@@ -10,6 +10,13 @@ export interface Env {
   LATEST_APP_VERSION_CODE?: string;
   LATEST_APP_URL?: string;
   APPS?: R2Bucket;
+  /** Trakt app credentials (wrangler secret put). Without both, the TV hides its Trakt section. */
+  TRAKT_CLIENT_ID?: string;
+  TRAKT_CLIENT_SECRET?: string;
+  /** The Trakt app's Redirect URI (wrangler.toml var); defaults to <this portal>/trakt. */
+  TRAKT_REDIRECT_URI?: string;
+  /** Optional secret: OpenSubtitles.com API key, delivered only to paired TVs for online subtitles. */
+  OPENSUBTITLES_API_KEY?: string;
 }
 
 const APK_KEY = "family-tv.apk";
@@ -112,6 +119,12 @@ export async function latestApp(env: Env, req: Request) {
   return code > 0 && env.LATEST_APP_URL ? { versionCode: code, versionName: null, url: env.LATEST_APP_URL } : null;
 }
 
+/** The subtitle key for paired devices; null (online subtitles hidden on the TV) when the secret isn't set. */
+export function subtitlesApiKey(env: Env): string | null {
+  const key = env.OPENSUBTITLES_API_KEY?.trim();
+  return key ? key : null;
+}
+
 async function freshPairCode(env: Env): Promise<string> {
   for (let i = 0; i < 5; i++) {
     const code = pairCode();
@@ -161,6 +174,9 @@ async function deviceConfig(req: Request, env: Env) {
     profile,
     commands: await takeCommands(env, d.id, now),
     latestApp: await latestApp(env, req),
+    // The client id is public (it goes in every Trakt API call); the secret never leaves the Worker.
+    trakt: traktConfigured(env) ? { clientId: env.TRAKT_CLIENT_ID } : null,
+    subtitlesApiKey: subtitlesApiKey(env),
   });
 }
 
@@ -223,6 +239,108 @@ async function deviceReachability(req: Request, env: Env) {
     }
   });
   return json({ results: await Promise.all(urls.map((u) => probe(u))) });
+}
+
+// ---------- Trakt token proxy ----------
+// Trakt's device-code login needs the app's client secret to exchange and refresh tokens. It
+// stays here as a Worker secret, and only paired TVs may use it. Everything else the TV sends
+// straight to api.trakt.tv with the user's own access token.
+
+const TRAKT_API = "https://api.trakt.tv";
+/**
+ * Must equal the Redirect URI registered on the Trakt app (Trakt rejects the old out-of-band URI).
+ * The device-code flow never redirects there; Trakt only checks it on refresh.
+ */
+export function traktRedirectUri(env: Env, req: Request): string {
+  return env.TRAKT_REDIRECT_URI || new URL("/trakt", req.url).toString();
+}
+
+export function traktConfigured(env: Env): boolean {
+  return !!env.TRAKT_CLIENT_ID;
+}
+
+/** Trakt apps made since Oct 2026 are PKCE-only and have no secret; older apps still send theirs. */
+function traktClient(env: Env): Record<string, string> {
+  return env.TRAKT_CLIENT_SECRET
+    ? { client_id: env.TRAKT_CLIENT_ID!, client_secret: env.TRAKT_CLIENT_SECRET }
+    : { client_id: env.TRAKT_CLIENT_ID! };
+}
+
+async function requireTraktDevice(req: Request, env: Env): Promise<DeviceRow> {
+  const d = await requireDevice(req, env);
+  if (!d.profile_id) throw new HttpError(403, "device not paired");
+  if (!traktConfigured(env)) throw new HttpError(404, "trakt not configured");
+  return d;
+}
+
+function tokenField(v: unknown, name: string): string {
+  if (typeof v !== "string" || !v || v.length > 512) throw new HttpError(400, `${name} is required`);
+  return v;
+}
+
+/**
+ * Calls Trakt and wraps its answer as {status, data} with HTTP 200, so the TV can tell Trakt's
+ * codes (400 = still waiting for the user, 410 = code expired, 418 = denied, 401 = bad refresh
+ * token) apart from the portal's own 401 for an unknown device.
+ */
+async function traktPost(env: Env, path: string, payload: Record<string, string>) {
+  let res: Response;
+  try {
+    res = await fetch(TRAKT_API + path, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "trakt-api-version": "2",
+        "trakt-api-key": env.TRAKT_CLIENT_ID!,
+        "user-agent": "FamilyTV-Portal/1",
+      },
+      body: JSON.stringify(payload),
+    });
+  } catch {
+    throw new HttpError(502, "trakt unreachable");
+  }
+  const text = await res.text();
+  let data: unknown = null;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = null;
+  }
+  return json({ status: res.status, data });
+}
+
+async function traktDeviceCode(req: Request, env: Env) {
+  await requireTraktDevice(req, env);
+  return traktPost(env, "/oauth/device/code", { client_id: env.TRAKT_CLIENT_ID! });
+}
+
+async function traktDeviceToken(req: Request, env: Env) {
+  await requireTraktDevice(req, env);
+  const b = await body<{ code?: unknown }>(req);
+  return traktPost(env, "/oauth/device/token", {
+    code: tokenField(b.code, "code"),
+    ...traktClient(env),
+  });
+}
+
+async function traktRefresh(req: Request, env: Env) {
+  await requireTraktDevice(req, env);
+  const b = await body<{ refreshToken?: unknown }>(req);
+  return traktPost(env, "/oauth/token", {
+    refresh_token: tokenField(b.refreshToken, "refreshToken"),
+    ...traktClient(env),
+    redirect_uri: traktRedirectUri(env, req),
+    grant_type: "refresh_token",
+  });
+}
+
+async function traktRevoke(req: Request, env: Env) {
+  await requireTraktDevice(req, env);
+  const b = await body<{ token?: unknown }>(req);
+  return traktPost(env, "/oauth/revoke", {
+    token: tokenField(b.token, "token"),
+    ...traktClient(env),
+  });
 }
 
 // ---------- admin API ----------
@@ -388,6 +506,10 @@ export async function handle(req: Request, env: Env): Promise<Response> {
   if (m === "POST" && p === "/api/device/heartbeat") return deviceHeartbeat(req, env);
   if (m === "POST" && p === "/api/device/diagnostics") return deviceDiagnostics(req, env);
   if (m === "POST" && p === "/api/device/reachability") return deviceReachability(req, env);
+  if (m === "POST" && p === "/api/device/trakt/code") return traktDeviceCode(req, env);
+  if (m === "POST" && p === "/api/device/trakt/token") return traktDeviceToken(req, env);
+  if (m === "POST" && p === "/api/device/trakt/refresh") return traktRefresh(req, env);
+  if (m === "POST" && p === "/api/device/trakt/revoke") return traktRevoke(req, env);
   let mm = p.match(/^\/api\/device\/commands\/([a-f0-9]+)\/ack$/);
   if (m === "POST" && mm) return deviceAck(req, env, mm[1]);
 

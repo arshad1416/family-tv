@@ -12,6 +12,12 @@ import app.familytv.iptv.Catalog
 import app.familytv.portal.PortalClient
 import app.familytv.sync.CommandRunner
 import app.familytv.sync.SyncWorker
+import app.familytv.trakt.Trakt
+import app.familytv.user.Favourites
+import app.familytv.user.UserDb
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import java.util.concurrent.TimeUnit
 
 class FamilyTvApp : Application() {
@@ -20,6 +26,13 @@ class FamilyTvApp : Application() {
     val catalog by lazy { Catalog(db) }
     val diagnoser by lazy { Diagnoser(this, db, portal) }
     val commands by lazy { CommandRunner(this) }
+    /** Favourites, resume points and watched marks; kept apart from the catalog so reloads never touch them. */
+    val userDb by lazy { UserDb.create(this) }
+    val favourites by lazy { Favourites(this) }
+    val trakt by lazy { Trakt(this) }
+
+    /** For work that must outlive a screen, like the stop scrobble sent as the player closes. */
+    val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     /** True while one of our screens is showing; background updates wait for the app to close. */
     val visible: Boolean get() = started > 0

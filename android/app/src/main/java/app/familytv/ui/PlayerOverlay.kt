@@ -7,8 +7,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -74,10 +76,15 @@ fun LiveOverlay(
         if (guideOpen) MiniGuide(channels, playing, programmes, onTune, onFocusChannel, focusPlaying = touch == null)
         // A phone has no room for the banner beside the guide; the guide already shows what's on.
         if (!(guideOpen && touch != null)) banner?.let { channels.getOrNull(it) }?.let { ch ->
-            InfoBanner(ch, programmes[ch.epgId], Modifier.align(Alignment.BottomStart).padding(start = if (guideOpen) GUIDE_W else 0.dp))
+            InfoBanner(ch, programmes[ch.epgId], Modifier.align(Alignment.BottomStart).padding(start = if (guideOpen) GUIDE_W else 0.dp), hint = if (touch == null && !guideOpen) "→  Captions & info" else null)
         }
         if (touch != null && touch.visible && !guideOpen) {
             RoundIcon(Icons.AutoMirrored.Filled.ArrowBack, "Close player", Modifier.align(Alignment.TopStart).padding(16.dp), touch.onClose)
+            Row(Modifier.align(Alignment.TopEnd).padding(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                CaptionButton(touch.captionsOn, onClick = touch.onCaptions)
+                touch.onTracks?.let { RoundIcon(Icons.Filled.Settings, "Audio and video tracks", onClick = it) }
+                RoundIcon(Icons.Filled.Info, "Stream info", onClick = touch.onInfo)
+            }
             Column(Modifier.align(Alignment.CenterEnd).padding(end = 16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 RoundIcon(Icons.Filled.KeyboardArrowUp, "Previous channel", onClick = { touch.onZap(-1) })
                 RoundIcon(Icons.AutoMirrored.Filled.List, "Channel guide", onClick = touch.onGuide)
@@ -94,17 +101,22 @@ class TouchControls(
     val onZap: (Int) -> Unit,
     val onGuide: () -> Unit,
     val onClose: () -> Unit,
+    val captionsOn: Boolean = false,
+    val onCaptions: () -> Unit = {},
+    /** Null when there is only one audio and one video track. */
+    val onTracks: (() -> Unit)? = null,
+    val onInfo: () -> Unit = {},
 )
 
 @Composable
-private fun RoundIcon(icon: ImageVector, label: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
+fun RoundIcon(icon: ImageVector, label: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
     FocusBox(onClick = onClick, color = Color(0x99000000), shape = CircleShape, modifier = modifier.size(56.dp), contentAlignment = Alignment.Center) {
         Icon(icon, contentDescription = label, tint = Tv.Text, modifier = Modifier.size(28.dp))
     }
 }
 
 @Composable
-private fun InfoBanner(ch: ChannelEntity, progs: List<NowNext>?, modifier: Modifier) {
+private fun InfoBanner(ch: ChannelEntity, progs: List<NowNext>?, modifier: Modifier, hint: String? = null) {
     val now = System.currentTimeMillis()
     val (cur, next) = progs.nowAndNext(now)
     Box(
@@ -124,7 +136,10 @@ private fun InfoBanner(ch: ChannelEntity, progs: List<NowNext>?, modifier: Modif
                 }
                 next?.let { Text("Next: ${time(it.start)}  ${it.title}", fontSize = 15.sp, color = Tv.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp)) }
             }
-            Text(time(now), fontSize = 22.sp, color = Tv.Muted, modifier = Modifier.padding(start = 24.dp))
+            Column(Modifier.padding(start = 24.dp), horizontalAlignment = Alignment.End) {
+                Text(time(now), fontSize = 22.sp, color = Tv.Muted)
+                hint?.let { Text(it, fontSize = 13.sp, color = Tv.Muted, modifier = Modifier.padding(top = 6.dp)) }
+            }
         }
     }
 }

@@ -19,6 +19,26 @@ passwords on a remote, and when a TV goes black the portal tells you why.
 - Lists stream straight into SQLite in batches of 500, and the guide keeps only the next 48 hours for
   your channels. That keeps memory flat on 1 GB Fire TV Sticks.
 - D-pad up/down changes channel. A live stream that fails on `.ts` retries once as HLS (`.m3u8`).
+- **Favourites:** hold OK (or press Menu) on any channel, movie or series to add or remove it; on a
+  phone or tablet tap the heart. Live TV, Movies and Series each get a *Favourites* category at the
+  top, and Home a *Favourites* row. Favourites survive channel reloads.
+- **Trakt (optional):** connect a Trakt account in Settings with a code and a QR (no typing on the
+  remote). Favourite movies and series follow the Trakt watchlist both ways, and watched marks and
+  resume points sync through Trakt scrobbling, so every device on the same Trakt account agrees.
+  Channel favourites stay on the device, since Trakt has no live TV.
+- Captions, audio/video tracks and stream info in the player. Live TV: D-pad right opens Options;
+  movies and episodes: press up from the player controls for the CC, audio & video and info buttons;
+  phones and tablets: tap the video. The remote's Info, Captions and Menu keys work too.
+  - **Captions** come from the stream itself first (CEA-608 in live TV, subtitle tracks in movies,
+    HLS subtitle renditions). On/off and the caption language are remembered.
+  - **Online subtitles** for movies and episodes with none of their own come from OpenSubtitles.com,
+    matched by the provider's TMDB/IMDb ids (series id + season + episode for episodes), falling back
+    to title and year. Only shown when the portal has an `OPENSUBTITLES_API_KEY`.
+  - **Audio & video** lists each audio track (language, codec, channels) and video quality
+    (resolution, bitrate, Auto) when there's more than one.
+  - **Stream info** shows what is really playing: codecs, resolution, frame rate (declared and
+    rendered), declared and measured bitrate, HDR, audio channels and sample rate, stream type,
+    dropped frames and buffer, updating every second.
 - **Help → Run a check**, which also runs by itself when playback fails. It works out which of these
   is the problem and tells the viewer in plain words:
 
@@ -63,6 +83,11 @@ openssl rand -base64 32 | npx wrangler secret put CONFIG_KEY
 npm run deploy                               # serves https://familytv.arshadkazi.ca (routes in wrangler.toml) and workers.dev
 ```
 Keep `CONFIG_KEY` safe: losing it means re-entering the line passwords.
+
+Optional, for online subtitles: create an API consumer at opensubtitles.com (Profile → API consumers)
+and `npx wrangler secret put OPENSUBTITLES_API_KEY`. Paired TVs get the key with their config; without
+it the TV only offers the stream's own captions. Without an OpenSubtitles login the key allows a small
+number of downloads a day per IP; the TV says so when the limit is reached.
 For a nicer sign-in, put the Worker on your own domain behind Cloudflare Access as well.
 
 ### 2. TV app
@@ -100,6 +125,23 @@ Merging to `main` runs `.github/workflows/release.yml`: it builds a signed APK, 
 Secrets stay in Bitwarden Secrets Manager (EU), in a project of their own:
 `FAMILYTV_KEYSTORE_B64`, `FAMILYTV_KEYSTORE_PASSWORD` and `CLOUDFLARE_API_TOKEN` (R2 edit on this
 account). GitHub holds only `BWS_ACCESS_TOKEN`, for a machine account that can read that project.
+
+### 4. Trakt sync (optional)
+1. At <https://trakt.tv/oauth/applications/new> create an app: any name, **Redirect URI**
+   `https://familytv.arshadkazi.ca/trakt` (Trakt refuses the old `urn:ietf:wg:oauth:2.0:oob`; if you
+   change it, set `TRAKT_REDIRECT_URI` in `wrangler.toml` to match), no JavaScript (CORS) origins, and under Permissions tick
+   */scrobble* (*/checkin* is not used).
+2. Give the Worker the app's Client ID, then redeploy:
+   ```bash
+   cd portal
+   npx wrangler secret put TRAKT_CLIENT_ID
+   ```
+   Apps created since October 2026 are PKCE-only and show "Not issued" for the Client Secret; the
+   device-code sign-in works without one. An older app that has a secret can also set
+   `TRAKT_CLIENT_SECRET`, which only this Worker ever sees.
+The TV asks the portal (only once paired) to exchange and refresh its Trakt tokens, then calls Trakt
+directly with its own token. Without `TRAKT_CLIENT_ID` the TVs hide
+the Trakt section. No database migration is needed; Trakt tokens live on each device.
 
 ## Develop
 | Where | Command |

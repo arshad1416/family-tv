@@ -2,7 +2,9 @@ package app.familytv.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Box
@@ -23,6 +25,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
@@ -67,11 +72,14 @@ fun FamilyTvTheme(content: @Composable () -> Unit) {
 /**
  * The one focusable building block: D-pad focus paints it blue (or outlines it, for artwork),
  * OK clicks it. Lighter than tv-material's Surface, which matters in the guide grid.
+ * [onLongClick] runs on holding OK or pressing Menu on a remote, and on a long press on touch.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun FocusBox(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    onLongClick: (() -> Unit)? = null,
     color: Color = Tv.Panel,
     selected: Boolean = false,
     outline: Boolean = false,
@@ -86,6 +94,7 @@ fun FocusBox(
     val source = remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
     val focused = hasFocus || pressed
+    val okPress = remember { OkPress() }
     val bg = when {
         focused && !outline -> Tv.Accent
         selected -> Tv.Raised
@@ -98,10 +107,49 @@ fun FocusBox(
             .clip(shape)
             .background(bg)
             .then(if (focused && outline) Modifier.border(3.dp, Tv.Accent, shape) else Modifier)
-            .clickable(source, indication = null, onClick = onClick),
+            .then(
+                if (onLongClick == null) {
+                    Modifier.clickable(source, indication = null, onClick = onClick)
+                } else {
+                    Modifier.remoteLongPress(okPress, onClick, onLongClick).combinedClickable(source, indication = null, onLongClick = onLongClick, onClick = onClick)
+                },
+            ),
         contentAlignment = contentAlignment,
     ) { content(focused) }
 }
+
+/** Where an OK press on a [FocusBox] with a long-press action is: [down] seen here, [held] long enough. */
+private class OkPress {
+    var down = false
+    var held = false
+}
+
+/**
+ * Remote keys for a box with a long-press action: OK clicks on release, holding OK runs
+ * [onLongClick] once (and the release then doesn't click), and Menu runs it too. A release
+ * whose press began elsewhere (the OK that opened this screen) does nothing.
+ */
+private fun Modifier.remoteLongPress(press: OkPress, onClick: () -> Unit, onLongClick: () -> Unit): Modifier =
+    onPreviewKeyEvent { e ->
+        val k = e.nativeKeyEvent
+        when (k.keyCode) {
+            android.view.KeyEvent.KEYCODE_MENU -> { if (e.type == KeyEventType.KeyUp) onLongClick(); true }
+            android.view.KeyEvent.KEYCODE_DPAD_CENTER, android.view.KeyEvent.KEYCODE_ENTER, android.view.KeyEvent.KEYCODE_NUMPAD_ENTER -> when (e.type) {
+                KeyEventType.KeyDown -> {
+                    if (k.repeatCount == 0) { press.down = true; press.held = false }
+                    else if (press.down && !press.held) { press.held = true; onLongClick() }
+                    true
+                }
+                KeyEventType.KeyUp -> {
+                    if (press.down && !press.held) onClick()
+                    press.down = false; press.held = false
+                    true
+                }
+                else -> false
+            }
+            else -> false
+        }
+    }
 
 @Composable
 fun TvButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true) {

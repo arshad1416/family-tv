@@ -59,7 +59,7 @@ data class ChannelEntity(
     val gen: Long,
 )
 
-@Entity(tableName = "movies", primaryKeys = ["sourceId", "streamId"], indices = [Index("categoryId")])
+@Entity(tableName = "movies", primaryKeys = ["sourceId", "streamId"], indices = [Index("categoryId"), Index("tmdb")])
 data class MovieEntity(
     val sourceId: String,
     val streamId: String,
@@ -71,9 +71,12 @@ data class MovieEntity(
     val url: String?,
     val added: Long,
     val gen: Long,
+    /** From the provider's list when it has one; used to match Trakt. */
+    val tmdb: String? = null,
+    val year: Int? = null,
 )
 
-@Entity(tableName = "series", primaryKeys = ["sourceId", "seriesId"], indices = [Index("categoryId")])
+@Entity(tableName = "series", primaryKeys = ["sourceId", "seriesId"], indices = [Index("categoryId"), Index("tmdb")])
 data class SeriesEntity(
     val sourceId: String,
     val seriesId: String,
@@ -83,6 +86,8 @@ data class SeriesEntity(
     val plot: String?,
     val rating: String?,
     val gen: Long,
+    val tmdb: String? = null,
+    val year: Int? = null,
 )
 
 @Entity(tableName = "programmes", indices = [Index(value = ["epgId", "start"])])
@@ -142,11 +147,18 @@ interface CatalogDao {
     @Query("SELECT description FROM programmes WHERE epgId = :epgId AND start = :start LIMIT 1") suspend fun description(epgId: String, start: Long): String?
 
     @Query("SELECT COUNT(*) FROM channels") suspend fun channelCount(): Int
+
+    // Single rows, for favourites and Trakt matching.
+    @Query("SELECT * FROM channels WHERE sourceId = :sourceId AND streamId = :streamId") suspend fun channel(sourceId: String, streamId: String): ChannelEntity?
+    @Query("SELECT * FROM movies WHERE sourceId = :sourceId AND streamId = :streamId") suspend fun movie(sourceId: String, streamId: String): MovieEntity?
+    @Query("SELECT * FROM series WHERE sourceId = :sourceId AND seriesId = :seriesId") suspend fun seriesItem(sourceId: String, seriesId: String): SeriesEntity?
+    @Query("SELECT * FROM movies WHERE tmdb IN (:tmdb)") suspend fun moviesByTmdb(tmdb: List<String>): List<MovieEntity>
+    @Query("SELECT * FROM series WHERE tmdb IN (:tmdb)") suspend fun seriesByTmdb(tmdb: List<String>): List<SeriesEntity>
 }
 
 @Database(
     entities = [SourceEntity::class, CategoryEntity::class, ChannelEntity::class, MovieEntity::class, SeriesEntity::class, ProgrammeEntity::class],
-    version = 1,
+    version = 2,
     exportSchema = true,
 )
 abstract class AppDb : RoomDatabase() {

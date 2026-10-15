@@ -31,7 +31,17 @@ data class DeviceConfig(
     val profile: Profile? = null,
     val commands: List<Command>? = null,
     val latestApp: LatestApp? = null,
+    /** Set when the portal has Trakt credentials; null hides Trakt on the TV. */
+    val trakt: TraktPortal? = null,
+    /** OpenSubtitles API key from the portal's Worker secret; null hides online subtitles. */
+    val subtitlesApiKey: String? = null,
 )
+
+/** The Trakt app's public client id. The secret stays in the portal. */
+data class TraktPortal(val clientId: String? = null)
+
+/** Trakt's answer to a token call made through the portal: Trakt's HTTP status and JSON body. */
+data class TraktProxyResult(val status: Int = 0, val data: com.google.gson.JsonElement? = null)
 
 data class HeartbeatResponse(val paired: Boolean, val commands: List<Command>?, val latestApp: LatestApp? = null)
 

@@ -34,7 +34,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -48,8 +47,6 @@ import androidx.tv.material3.Text
 import app.familytv.BuildConfig
 import app.familytv.app
 import app.familytv.sync.CommandRunner
-import com.google.zxing.BarcodeFormat
-import com.google.zxing.qrcode.QRCodeWriter
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -144,12 +141,7 @@ private fun SyncingScreen(s: Screen.Syncing) = Centered {
 
 @Composable
 private fun PairingScreen(code: String) {
-    val qr = remember(code) {
-        val url = "${BuildConfig.PORTAL_URL.trimEnd('/')}/#pair=$code"
-        val m = QRCodeWriter().encode(url, BarcodeFormat.QR_CODE, 360, 360)
-        val px = IntArray(m.width * m.height) { i -> if (m[i % m.width, i / m.width]) 0xFF000000.toInt() else 0xFFFFFFFF.toInt() }
-        android.graphics.Bitmap.createBitmap(px, m.width, m.height, android.graphics.Bitmap.Config.ARGB_8888).asImageBitmap()
-    }
+    val qr = remember(code) { qrImage("${BuildConfig.PORTAL_URL.trimEnd('/')}/#pair=$code") }
     var dots by remember { mutableStateOf(0) }
     LaunchedEffect(Unit) { while (true) { kotlinx.coroutines.delay(800); dots = (dots + 1) % 4 } }
     val words: @Composable () -> Unit = {
