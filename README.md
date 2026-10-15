@@ -67,9 +67,12 @@ passwords on a remote, and when a TV goes black the portal tells you why.
   (OK shows that category's channels; a channel picked there becomes the list Up/Down zaps through),
   and Back once more leaves live TV.
 - Holding Back for about a second on any screen asks whether to exit Family TV (Cancel is selected).
-- Captions, audio/video tracks and stream info in the player. Live TV: D-pad right opens Options;
-  movies and episodes: press up from the player controls for the CC, audio & video and info buttons;
-  phones and tablets: tap the video. The remote's Info, Captions and Menu keys work too.
+- Captions, audio/video tracks, aspect ratio and stream info in the player. Live TV: D-pad right opens Options;
+  movies and episodes: press up from the player controls for the CC, audio & video, aspect ratio and info buttons;
+  phones and tablets: tap the video. The remote's Info, Captions, Menu and Zoom keys work too.
+  - **Aspect ratio:** Fit (the whole picture, black bars when the shape differs), Stretch (fills the
+    screen, distorting the picture) or Zoom (fills the screen, trimming the edges). The choice is
+    remembered for every channel, movie and episode; a remote's Zoom key cycles through them.
   - **Captions** come from the stream itself first (CEA-608 in live TV, subtitle tracks in movies,
     HLS subtitle renditions). On/off and the caption language are remembered.
   - **Online subtitles** for movies and episodes with none of their own come from OpenSubtitles.com,

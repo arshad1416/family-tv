@@ -63,6 +63,7 @@ import app.familytv.iptv.Streams
 import app.familytv.player.CaptionPrefs
 import app.familytv.player.ONLINE_SUFFIX
 import app.familytv.player.OnlineSubtitles
+import app.familytv.player.Picture
 import app.familytv.player.PlayerTracks
 import app.familytv.player.StatsCollector
 import app.familytv.player.StreamStats
@@ -87,7 +88,7 @@ import java.util.Locale
 /**
  * Full-screen player. Live TV: D-pad up/down (or channel keys) zaps through the category, each
  * tune shows an info banner, OK opens a mini guide on the left (Back closes it) and right opens
- * the options panel (captions, audio & video, stream info).
+ * the options panel (captions, audio & video, aspect ratio, stream info).
  * When a stream fails it falls back from .ts to .m3u8 once, then runs a network check and
  * shows the person a plain-language reason instead of a spinner.
  *
@@ -144,6 +145,7 @@ class PlayerActivity : ComponentActivity() {
     private var playItem: PlayItem? = null
     private var media: MediaRef? = null
     private var online: OnlineSubtitles? = null
+    private var picture by mutableStateOf(Picture.Fit)
 
     // Phones and tablets: tap the video for on-screen controls, since there's no remote.
     private var touch = false
@@ -204,6 +206,7 @@ class PlayerActivity : ComponentActivity() {
             keepScreenOn = true
             setShowBuffering(PlayerView.SHOW_BUFFERING_ALWAYS)
         }
+        applyPicture(Picture.load(this))
         overlay = TextView(this).apply {
             setTextColor(Color.WHITE)
             textSize = 22f
@@ -273,6 +276,7 @@ class PlayerActivity : ComponentActivity() {
                     captionsOn = tracks.captionsOn,
                     onCaptions = { openPanel(PlayerPanel.Captions) },
                     onTracks = if (tracks.hasChoices) ({ openPanel(PlayerPanel.Tracks) }) else null,
+                    onPicture = { openPanel(PlayerPanel.Picture) },
                     onInfo = { openPanel(PlayerPanel.Info) },
                 )
                 // The guide fades in over the video and out again; the last mode stays drawn while it fades.
@@ -291,6 +295,7 @@ class PlayerActivity : ComponentActivity() {
                     tracks, buttonsFocus,
                     onCaptions = { openPanel(PlayerPanel.Captions) },
                     onTracks = { openPanel(PlayerPanel.Tracks) },
+                    onPicture = { openPanel(PlayerPanel.Picture) },
                     onInfo = { openPanel(PlayerPanel.Info) },
                     onLeave = ::leaveButtons,
                     modifier = Modifier.align(Alignment.TopEnd).safeDrawingPadding().padding(24.dp),
@@ -299,7 +304,7 @@ class PlayerActivity : ComponentActivity() {
                     repeat(5) { withFrameNanos { }; if (runCatching { buttonsFocus.requestFocus() }.isSuccess) return@LaunchedEffect }
                 }
             }
-            PlayerPanels(panel, tracks, online, live, touch, stats = ::snapshot, onOpen = ::openPanel, onClose = ::closePanel)
+            PlayerPanels(panel, tracks, online, live, touch, stats = ::snapshot, picture = picture, onPicture = ::pickPicture, onOpen = ::openPanel, onClose = ::closePanel)
         }
     }
 
@@ -369,6 +374,16 @@ class PlayerActivity : ComponentActivity() {
         show("Subtitles: $lang", 2_500)
     }
 
+    private fun applyPicture(p: Picture) {
+        picture = p
+        view.resizeMode = p.resizeMode
+    }
+
+    private fun pickPicture(p: Picture) {
+        applyPicture(p)
+        Picture.save(this, p)
+    }
+
     private fun togglePanel(p: PlayerPanel) = if (panel == p) closePanel() else openPanel(p)
 
     private fun openPanel(p: PlayerPanel) {
@@ -423,7 +438,7 @@ class PlayerActivity : ComponentActivity() {
         show(if (tracks.captionsOn) "Captions on" else "Captions off", 2_000)
     }
 
-    /** Info, Captions, Menu and Audio-track keys; neither PlayerView nor the panels use them, so they arrive here. */
+    /** Info, Captions, Menu, Audio-track and Zoom keys; neither PlayerView nor the panels use them, so they arrive here. */
     private fun panelKey(keyCode: Int, event: KeyEvent): Boolean {
         if (keyCode !in PANEL_KEYS) return false
         if (event.repeatCount == 0) when (keyCode) {
@@ -431,6 +446,7 @@ class PlayerActivity : ComponentActivity() {
             KeyEvent.KEYCODE_CAPTIONS -> toggleCaptions()
             KeyEvent.KEYCODE_MENU -> togglePanel(PlayerPanel.Menu)
             KeyEvent.KEYCODE_MEDIA_AUDIO_TRACK -> togglePanel(PlayerPanel.Tracks)
+            KeyEvent.KEYCODE_TV_ZOOM_MODE -> picture.next().let { pickPicture(it); show("Aspect ratio: ${it.label}", 2_000) }
         }
         return true
     }
@@ -762,6 +778,6 @@ class PlayerActivity : ComponentActivity() {
             KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT,
             KeyEvent.KEYCODE_CHANNEL_UP, KeyEvent.KEYCODE_CHANNEL_DOWN,
         )
-        private val PANEL_KEYS = setOf(KeyEvent.KEYCODE_INFO, KeyEvent.KEYCODE_CAPTIONS, KeyEvent.KEYCODE_MENU, KeyEvent.KEYCODE_MEDIA_AUDIO_TRACK)
+        private val PANEL_KEYS = setOf(KeyEvent.KEYCODE_INFO, KeyEvent.KEYCODE_CAPTIONS, KeyEvent.KEYCODE_MENU, KeyEvent.KEYCODE_MEDIA_AUDIO_TRACK, KeyEvent.KEYCODE_TV_ZOOM_MODE)
     }
 }

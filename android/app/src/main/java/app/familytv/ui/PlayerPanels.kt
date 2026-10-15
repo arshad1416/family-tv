@@ -1,6 +1,7 @@
 package app.familytv.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -55,6 +56,7 @@ import androidx.tv.material3.Icon
 import androidx.tv.material3.Text
 import app.familytv.player.InfoSection
 import app.familytv.player.OnlineSubtitles
+import app.familytv.player.Picture
 import app.familytv.player.PlayerTracks
 import app.familytv.player.StreamInfo
 import app.familytv.player.StreamStats
@@ -62,8 +64,8 @@ import app.familytv.player.TrackLabels
 import kotlinx.coroutines.delay
 import java.util.Locale
 
-/** The player's side panels. Menu is the TV entry point (D-pad right / Menu key) to the other three. */
-enum class PlayerPanel { Menu, Captions, Tracks, Info }
+/** The player's side panels. Menu is the TV entry point (D-pad right / Menu key) to the others. */
+enum class PlayerPanel { Menu, Captions, Tracks, Picture, Info }
 
 private val PanelBg = Color(0xF2060A14)
 
@@ -80,6 +82,8 @@ fun PlayerPanels(
     live: Boolean,
     touch: Boolean,
     stats: () -> StreamStats,
+    picture: Picture,
+    onPicture: (Picture) -> Unit,
     onOpen: (PlayerPanel) -> Unit,
     onClose: () -> Unit,
 ) {
@@ -113,9 +117,10 @@ fun PlayerPanels(
                     }
                     LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp), contentPadding = PaddingValues(bottom = 32.dp)) {
                         when (panel) {
-                            PlayerPanel.Menu -> menuRows(tracks, stats, first, onOpen)
+                            PlayerPanel.Menu -> menuRows(tracks, stats, picture, first, onOpen)
                             PlayerPanel.Captions -> captionRows(tracks, online, live, first, onClose)
                             PlayerPanel.Tracks -> trackRows(tracks, first)
+                            PlayerPanel.Picture -> pictureRows(picture, first) { onPicture(it); onClose() }
                             else -> Unit
                         }
                     }
@@ -129,6 +134,7 @@ private fun panelTitle(p: PlayerPanel) = when (p) {
     PlayerPanel.Menu -> "Options"
     PlayerPanel.Captions -> "Captions"
     PlayerPanel.Tracks -> "Audio & video"
+    PlayerPanel.Picture -> "Aspect ratio"
     PlayerPanel.Info -> "Stream info"
 }
 
@@ -158,11 +164,12 @@ private fun LazyListScope.note(key: String, text: String) = item(key = key) {
     Text(text, fontSize = 13.sp, color = Tv.Muted, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
 }
 
-private fun LazyListScope.menuRows(tracks: PlayerTracks, stats: () -> StreamStats, first: FocusRequester, onOpen: (PlayerPanel) -> Unit) {
+private fun LazyListScope.menuRows(tracks: PlayerTracks, stats: () -> StreamStats, picture: Picture, first: FocusRequester, onOpen: (PlayerPanel) -> Unit) {
     item(key = "cc") { PanelRow("Captions", tracks.captionSummary(), focus = first) { onOpen(PlayerPanel.Captions) } }
     if (tracks.hasChoices) item(key = "tracks") {
         PanelRow("Audio & video", "${tracks.audio.size} audio · ${tracks.video.size} video") { onOpen(PlayerPanel.Tracks) }
     }
+    item(key = "picture") { PanelRow("Aspect ratio", picture.label) { onOpen(PlayerPanel.Picture) } }
     item(key = "info") { PanelRow("Stream info", StreamInfo.summary(stats()) ?: "Codec, resolution, bitrate") { onOpen(PlayerPanel.Info) } }
 }
 
@@ -222,6 +229,12 @@ private fun LazyListScope.trackRows(tracks: PlayerTracks, first: FocusRequester)
     if (!tracks.hasChoices) note("single", "This stream has one audio and one video track.")
 }
 
+private fun LazyListScope.pictureRows(current: Picture, first: FocusRequester, onPick: (Picture) -> Unit) {
+    Picture.entries.forEachIndexed { i, p ->
+        item(key = p.name) { PanelRow(p.label, p.detail, selected = p == current, focus = if (i == 0) first else null) { onPick(p) } }
+    }
+}
+
 @Composable
 private fun InfoContent(stats: () -> StreamStats, wide: Boolean) {
     var sections by remember { mutableStateOf<List<InfoSection>>(emptyList()) }
@@ -269,6 +282,7 @@ fun PlayerButtons(
     first: FocusRequester,
     onCaptions: () -> Unit,
     onTracks: () -> Unit,
+    onPicture: () -> Unit,
     onInfo: () -> Unit,
     onLeave: () -> Unit,
     modifier: Modifier = Modifier,
@@ -281,6 +295,7 @@ fun PlayerButtons(
     ) {
         CaptionButton(tracks.captionsOn, Modifier.focusRequester(first), onCaptions)
         if (tracks.hasChoices) RoundIcon(Icons.Filled.Settings, "Audio and video tracks", onClick = onTracks)
+        PictureButton(onClick = onPicture)
         RoundIcon(Icons.Filled.Info, "Stream info", onClick = onInfo)
     }
 }
@@ -297,5 +312,13 @@ fun CaptionButton(on: Boolean, modifier: Modifier = Modifier, onClick: () -> Uni
             )
             Box(Modifier.padding(top = 2.dp).width(18.dp).heightIn(min = 3.dp, max = 3.dp).background(if (on) (if (focused) Tv.Text else Tv.Accent) else Color.Transparent))
         }
+    }
+}
+
+/** A screen-shaped outline in a round button; opens the aspect ratio panel. */
+@Composable
+fun PictureButton(modifier: Modifier = Modifier, onClick: () -> Unit) {
+    FocusBox(onClick = onClick, color = Color(0x99000000), shape = CircleShape, modifier = modifier.size(56.dp), contentAlignment = Alignment.Center) {
+        Box(Modifier.width(28.dp).heightIn(min = 18.dp, max = 18.dp).border(2.dp, Tv.Text, androidx.compose.foundation.shape.RoundedCornerShape(3.dp)))
     }
 }
