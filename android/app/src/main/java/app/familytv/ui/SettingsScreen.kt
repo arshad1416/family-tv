@@ -94,9 +94,10 @@ private fun Panel(modifier: Modifier = Modifier, content: @Composable () -> Unit
 
 @Composable
 private fun Info(label: String, value: String) {
+    // The value takes the rest of the row and wraps, so a narrow panel can't squeeze it to nothing.
     Row {
         Text(label, Modifier.width(130.dp), fontSize = 15.sp, color = Tv.Muted)
-        Text(value, fontSize = 15.sp)
+        Text(value, Modifier.weight(1f), fontSize = 15.sp)
     }
 }
 
