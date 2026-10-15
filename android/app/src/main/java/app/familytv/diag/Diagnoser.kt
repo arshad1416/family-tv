@@ -3,6 +3,7 @@ package app.familytv.diag
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.net.wifi.WifiManager
 import android.os.Build
 import app.familytv.BuildConfig
 import app.familytv.core.Http
@@ -103,9 +104,12 @@ class Diagnoser(private val context: Context, private val db: AppDb, private val
         val public = publicDns(u.host)
         var tcpOk: Boolean? = null
         var tcpError: String? = null
+        var connectMs: Long? = null
         for (target in Classifier.connectOrder(system, public)) {
             try {
+                val started = System.nanoTime()
                 Socket().use { it.connect(InetSocketAddress(target, u.port), 4000) }
+                connectMs = (System.nanoTime() - started) / 1_000_000
                 tcpOk = true
                 tcpError = null
                 break
@@ -125,7 +129,7 @@ class Diagnoser(private val context: Context, private val db: AppDb, private val
                 }
             }
         }
-        return HostFacts(redact(url), hostPort, system, public, tcpOk, tcpError, portalReachable, status, html)
+        return HostFacts(redact(url), hostPort, system, public, tcpOk, tcpError, portalReachable, status, html, connectMs)
     }
 
     /** DNS-over-HTTPS by IP address, so the home network's DNS (and any filter on it) is bypassed for this lookup only. */
@@ -194,6 +198,9 @@ class Diagnoser(private val context: Context, private val db: AppDb, private val
             else -> "other"
         }
         val dnsServers = runCatching { cm?.getLinkProperties(cm.activeNetwork)?.dnsServers?.map { it.hostAddress } }.getOrNull()
+        // Signal and band let the portal tell weak Wi-Fi from a slow line. WifiInfo needs no location permission for these.
+        @Suppress("DEPRECATION")
+        val wifi = if (link == "wifi") runCatching { context.applicationContext.getSystemService(WifiManager::class.java)?.connectionInfo }.getOrNull() else null
         return mapOf(
             "model" to "${Build.MANUFACTURER} ${Build.MODEL}",
             "android" to Build.VERSION.RELEASE,
@@ -201,6 +208,9 @@ class Diagnoser(private val context: Context, private val db: AppDb, private val
             "network" to link,
             "downMbps" to caps?.linkDownstreamBandwidthKbps?.div(1000),
             "dnsServers" to dnsServers,
+            "wifiRssi" to wifi?.rssi?.takeIf { it in -127..0 },
+            "wifiMbps" to wifi?.linkSpeed?.takeIf { it > 0 },
+            "wifiGhz" to wifi?.frequency?.takeIf { it > 0 }?.let { if (it < 3000) 2.4 else if (it < 5925) 5 else 6 },
             "privateDns" to runCatching { if (Build.VERSION.SDK_INT >= 28) cm?.getLinkProperties(cm.activeNetwork)?.isPrivateDnsActive else null }.getOrNull(),
         )
     }

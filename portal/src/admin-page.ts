@@ -107,7 +107,7 @@ async function renderDevices() {
 async function openDevice(id, dev) {
   const box = $("#d-" + id);
   if (box.innerHTML) { box.innerHTML = ""; return; }
-  const { diagnostics, commands } = await api("/api/admin/devices/" + id);
+  const { diagnostics, commands, suggestions } = await api("/api/admin/devices/" + id);
   const popts = profiles.map((x) => '<option value="' + esc(x.id) + '"' + (x.id === dev.profile_id ? " selected" : "") + ">" + esc(x.name) + "</option>").join("");
   let html = '<div class="row" style="margin-top:10px">' +
     '<button class="b p" data-cmd="diagnose">Run check</button><button class="b" data-cmd="refresh">Reload channels</button>' +
@@ -115,6 +115,10 @@ async function openDevice(id, dev) {
     '<button class="b" data-cmd="message">Show a message</button><button class="b" data-cmd="update">Update app</button>' +
     '<select id="mv-' + esc(id) + '" style="width:auto">' + popts + '</select><button class="b" data-move>Change profile</button>' +
     '<button class="b" data-del style="margin-left:auto">Remove TV</button></div><div class="small muted" id="cm-' + esc(id) + '"></div>';
+  if (suggestions && suggestions.length) {
+    html += "<h4>Suggestions from the last check</h4>" + suggestions.map((s, i) => '<div class="verdict s' + s.severity + '"><strong>' + esc(s.title) + "</strong><div>" + esc(s.detail) + "</div>" +
+      (s.action ? '<p style="margin:6px 0 0"><button class="b" data-fix="' + i + '">' + esc(s.action.label) + "</button></p>" : "") + "</div>").join("");
+  }
   html += "<h4>Checks</h4>";
   if (!diagnostics.length) html += '<p class="muted small">No checks yet. Press Run check; the TV answers within a minute while it is on.</p>';
   for (const r of diagnostics) {
@@ -131,6 +135,13 @@ async function openDevice(id, dev) {
     if (b.dataset.cmd === "restart" && !confirm("Restart the app on this TV?")) return;
     try { await api("/api/admin/devices/" + id + "/commands", { method: "POST", body: JSON.stringify({ type: b.dataset.cmd, payload }) });
       $("#cm-" + id).textContent = "Sent. The TV picks it up within a minute if it is on."; } catch (e) { $("#cm-" + id).textContent = e.message; }
+  }));
+  box.querySelectorAll("[data-fix]").forEach((b) => (b.onclick = async () => {
+    const a = suggestions[+b.dataset.fix].action;
+    if (!confirm(a.label + " for every TV on this profile?")) return;
+    try { await api("/api/admin/profiles/" + dev.profile_id + "/primary-server", { method: "POST", body: JSON.stringify({ sourceId: a.sourceId, url: a.url }) });
+      b.replaceWith(Object.assign(document.createElement("span"), { className: "small ok", textContent: "Done. The TVs reload within a minute." })); }
+    catch (e) { $("#cm-" + id).textContent = e.message; }
   }));
   box.querySelector("[data-move]").onclick = async () => { await api("/api/admin/devices/" + id, { method: "PATCH", body: JSON.stringify({ profileId: $("#mv-" + id).value }) }); render(); };
   box.querySelector("[data-del]").onclick = async () => { if (confirm("Remove this TV? It will show a new pairing code.")) { await api("/api/admin/devices/" + id, { method: "DELETE" }); render(); } };

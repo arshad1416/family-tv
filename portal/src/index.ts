@@ -2,6 +2,7 @@ import { openJson, pairCode, randomId, sealJson, sha256Hex, timingSafeEqual } fr
 import { CATEGORY_KINDS, cleanNames, maskSecrets, mergeSecrets, profileHosts, validateProfile, VERDICTS, type ProfileData } from "./model";
 import { probe } from "./reachability";
 import { ADMIN_PAGE } from "./admin-page";
+import { preferServer, suggestions } from "./advice";
 import { daysLeft, loginFromLineUrl, Panel, PanelError, RENEW_MONTHS } from "./panel";
 
 export interface Env {
@@ -445,6 +446,7 @@ async function adminCommand(req: Request, env: Env, deviceId: string) {
 }
 
 async function adminDeviceDetail(env: Env, id: string) {
+  const dev = await env.DB.prepare("SELECT profile_id FROM devices WHERE id = ?").bind(id).first<{ profile_id: string | null }>();
   const [diag, cmds] = await Promise.all([
     env.DB.prepare("SELECT id, created_at, verdict, report_json FROM diagnostics WHERE device_id = ? ORDER BY created_at DESC LIMIT 10").bind(id).all(),
     env.DB.prepare("SELECT id, type, created_at, delivered_at, acked_at, result FROM commands WHERE device_id = ? ORDER BY created_at DESC LIMIT 20").bind(id).all(),
@@ -457,7 +459,25 @@ async function adminDeviceDetail(env: Env, id: string) {
       ...(VERDICTS[r.verdict as string] ?? { label: r.verdict, advice: "" }),
     })),
     commands: cmds.results,
+    // Suggestions from the latest check, against the profile as it is now.
+    suggestions: diag.results.length ? suggestions(JSON.parse(diag.results[0].report_json as string) ?? {}, await loadProfile(env, dev?.profile_id ?? null)) : [],
   });
+}
+
+/** One-click fix from a suggestion: try this server first for the line. */
+async function adminPreferServer(req: Request, env: Env, id: string) {
+  const b = await body<{ sourceId?: unknown; url?: unknown }>(req);
+  const profile = await loadProfile(env, id);
+  if (!profile) throw new HttpError(404, "profile not found");
+  try {
+    preferServer(profile, String(b.sourceId), String(b.url));
+  } catch (e) {
+    throw new HttpError(400, (e as Error).message);
+  }
+  await env.DB.prepare("UPDATE profiles SET data_enc = ?, updated_at = ? WHERE id = ?").bind(await sealJson(env.CONFIG_KEY, profile), Date.now(), id).run();
+  const { results } = await env.DB.prepare("SELECT id FROM devices WHERE profile_id = ?").bind(id).all<{ id: string }>();
+  for (const d of results) await queueCommand(env, d.id, "refresh", null);
+  return json({ ok: true });
 }
 
 async function adminProfiles(env: Env) {
@@ -751,6 +771,7 @@ export async function handle(req: Request, env: Env): Promise<Response> {
     if (m === "POST" && p === "/api/admin/lines/renew") return adminRenewLine(req, env);
     if (m === "POST" && p === "/api/admin/lines/new") return adminNewLine(req, env);
     if (m === "GET" && (mm = p.match(/^\/api\/admin\/profiles\/([a-f0-9]+)\/categories$/))) return adminProfileCategories(env, mm[1]);
+    if (m === "POST" && (mm = p.match(/^\/api\/admin\/profiles\/([a-f0-9]+)\/primary-server$/))) return adminPreferServer(req, env, mm[1]);
     if ((mm = p.match(/^\/api\/admin\/profiles\/([a-f0-9]+)$/))) {
       if (m === "PUT") return adminSaveProfile(req, env, mm[1]);
       if (m === "DELETE") {
