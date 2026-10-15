@@ -639,12 +639,14 @@ fun categories(vm: MainViewModel, profile: Profile, kind: String): List<Category
     val ctx = LocalContext.current
     val unlocked by vm.adultUnlocked.collectAsState()
     val all by remember(kind) { ctx.app.db.catalog().categories(kind) }.collectAsState(initial = emptyList())
-    val hidden = profile.hiddenCategories.orEmpty().map { it.lowercase() }.toSet()
-    return remember(all, unlocked, hidden) {
-        all.filter { c ->
-            c.name.lowercase() !in hidden && (unlocked || profile.parentalPin.isNullOrEmpty() || !ADULT.containsMatchIn(c.name))
-        }
-    }
+    return remember(all, unlocked, profile) { visibleCategories(all, profile, unlocked) }
+}
+
+/** [all] minus the profile's hidden categories and, unless [unlocked], adult ones; with no profile, adult ones stay hidden. */
+fun visibleCategories(all: List<CategoryEntity>, profile: Profile?, unlocked: Boolean): List<CategoryEntity> {
+    val hidden = profile?.hiddenCategories.orEmpty().map { it.lowercase() }.toSet()
+    val adultOk = unlocked || (profile != null && profile.parentalPin.isNullOrEmpty())
+    return all.filter { c -> c.name.lowercase() !in hidden && (adultOk || !ADULT.containsMatchIn(c.name)) }
 }
 
 /** Programmes overlapping [from, from + hours) for these channels, grouped by EPG id. */
