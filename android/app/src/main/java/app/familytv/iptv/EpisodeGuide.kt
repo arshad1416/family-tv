@@ -37,8 +37,12 @@ object EpisodeGuide {
         episodes.filter { it.season > 0 }.maxWithOrNull(compareBy({ it.season }, { it.episode }))?.let { it.season to it.episode }
 
     /** How many regular episodes come after (season, episode) [since]. */
-    fun countAfter(episodes: List<XtreamParser.Episode>, since: Pair<Int, Int>): Int =
-        episodes.count { it.season > since.first || (it.season == since.first && it.episode > since.second) }
+    fun countAfter(episodes: List<XtreamParser.Episode>, since: Pair<Int, Int>): Int = after(episodes, since).size
+
+    /** The regular episodes after (season, episode) [since], as (season, episode), oldest first. */
+    fun after(episodes: List<XtreamParser.Episode>, since: Pair<Int, Int>): List<Pair<Int, Int>> =
+        episodes.filter { it.season > 0 && (it.season > since.first || (it.season == since.first && it.episode > since.second)) }
+            .map { it.season to it.episode }.distinct().sortedWith(compareBy({ it.first }, { it.second }))
 
     private val SXE = Regex("(?i)^.*?\\bS\\d{1,3}\\s*E\\d{1,4}\\b\\s*[-:–|.]*\\s*")
 

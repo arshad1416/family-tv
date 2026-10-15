@@ -41,7 +41,9 @@ import app.familytv.data.MovieEntity
 import app.familytv.data.SeriesEntity
 import app.familytv.user.Favourites
 import app.familytv.user.FavouriteEntity
+import app.familytv.user.NewEpisodeList
 import app.familytv.user.ProgressEntity
+import app.familytv.user.ProgressKey
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -141,7 +143,7 @@ fun FavouriteButton(on: Boolean, onClick: () -> Unit, modifier: Modifier = Modif
     }
 }
 
-/** "NEW" (or "3 NEW") on a favourite show's poster while it has episodes the family hasn't opened yet. */
+/** "NEW" (or "3 NEW") on a favourite show's poster while new episodes are waiting to be watched. */
 @Composable
 fun NewBadge(modifier: Modifier = Modifier, count: Int = 0) {
     Box(modifier.padding(6.dp).background(Tv.Accent, RoundedCornerShape(6.dp)).padding(horizontal = 7.dp, vertical = 2.dp)) {
@@ -174,12 +176,20 @@ fun rememberFavouriteShowRows(favs: List<FavouriteEntity> = rememberFavourites()
     return rows
 }
 
-/** How many new episodes each show has ("sourceId/seriesId"), newest first, since the family last opened it. */
+/**
+ * How many new episodes each show ("sourceId/seriesId") has waiting to be watched, newest first.
+ * The count goes down as each one is watched (here or on Trakt), and the show drops off at zero.
+ */
 @Composable
-fun rememberNewEpisodeKeys(): Map<String, Int> {
+fun rememberNewEpisodeKeys(progress: Map<String, ProgressEntity> = rememberProgress()): Map<String, Int> {
     val ctx = LocalContext.current
     val rows by remember { ctx.app.userDb.user().newEpisodes() }.collectAsState(initial = emptyList())
-    return remember(rows) { rows.associateTo(LinkedHashMap()) { "${it.sourceId}/${it.seriesId}" to it.newCount } }
+    return remember(rows, progress) {
+        rows.mapNotNull { w ->
+            val n = NewEpisodeList.unwatched(w) { s, e -> progress[ProgressKey.episode(w.sourceId, w.seriesId, s, e)]?.watched == true }
+            if (n > 0) "${w.sourceId}/${w.seriesId}" to n else null
+        }.toMap(LinkedHashMap())
+    }
 }
 
 /** Those shows as posters, newest first, minus any in hidden or locked categories. */

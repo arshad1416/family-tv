@@ -2,6 +2,8 @@ package app.familytv
 
 import app.familytv.iptv.EpisodeGuide
 import app.familytv.iptv.XtreamParser
+import app.familytv.user.EpisodeWatchEntity
+import app.familytv.user.NewEpisodeList
 import app.familytv.user.ProgressEntity
 import app.familytv.user.ProgressKey
 import app.familytv.user.WatchedMarks
@@ -59,5 +61,26 @@ class WatchedTest {
         assertEquals(2, EpisodeGuide.countAfter(show, 1 to 3))
         assertEquals(0, EpisodeGuide.countAfter(show, 2 to 2))
         assertEquals(2, EpisodeGuide.countAfter(show + listOf(ep(3, 1)), 2 to 1))
+    }
+
+    @Test fun newEpisodesAreListedOldestFirst() {
+        assertEquals(listOf(2 to 1, 2 to 2), EpisodeGuide.after(show, 1 to 3))
+        assertEquals(emptyList<Pair<Int, Int>>(), EpisodeGuide.after(show, 2 to 2))
+    }
+
+    @Test fun newEpisodeListRoundTripsAndSkipsJunk() {
+        assertEquals("1:5,2:1", NewEpisodeList.encode(listOf(1 to 5, 2 to 1)))
+        assertEquals(listOf(1 to 5, 2 to 1), NewEpisodeList.decode("1:5,2:1"))
+        assertEquals(listOf(3 to 4), NewEpisodeList.decode("x,3:4,:,5"))
+        assertEquals(emptyList<Pair<Int, Int>>(), NewEpisodeList.decode(""))
+    }
+
+    @Test fun counterCountsDownAsNewEpisodesAreWatched() {
+        val w = EpisodeWatchEntity("s", "9", "Show", 2, 3, 0, newCount = 3, newSince = 1, newEpisodes = "2:1,2:2,2:3")
+        assertEquals(3, NewEpisodeList.unwatched(w) { _, _ -> false })
+        assertEquals(1, NewEpisodeList.unwatched(w) { s, e -> s == 2 && e <= 2 })
+        assertEquals(0, NewEpisodeList.unwatched(w) { _, _ -> true })
+        // A count saved before episodes were listed stays as it was.
+        assertEquals(4, NewEpisodeList.unwatched(w.copy(newCount = 4, newEpisodes = "")) { _, _ -> true })
     }
 }

@@ -222,7 +222,7 @@ fun SeriesPage(profile: Profile, group: SeriesGroup, visible: List<CategoryEntit
     }
 
     val all = remember(group.key, copies) { SeriesGroup(group.key, copies) }
-    // Opening the show catches the family up on its new episodes, whichever copy was favourited.
+    // New episodes count down as they are watched; opening the show only clears an old-style count.
     LaunchedEffect(copies) { copies.forEach { app.newEpisodes.seen(it.sourceId, it.seriesId) } }
     val favRows = rememberFavouriteShowRows()
     val favourite = remember(favRows, all) { ShowFavourites(favRows).has(all) }
