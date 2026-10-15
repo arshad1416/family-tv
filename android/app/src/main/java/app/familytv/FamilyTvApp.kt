@@ -12,6 +12,7 @@ import app.familytv.iptv.Catalog
 import app.familytv.portal.PortalClient
 import app.familytv.sync.CommandRunner
 import app.familytv.sync.SyncWorker
+import app.familytv.trailer.MediaExtras
 import app.familytv.trakt.Trakt
 import app.familytv.user.Favourites
 import app.familytv.user.UserDb
@@ -30,6 +31,8 @@ class FamilyTvApp : Application() {
     val userDb by lazy { UserDb.create(this) }
     val favourites by lazy { Favourites(this) }
     val trakt by lazy { Trakt(this) }
+    /** Trailers and episode details beyond the provider (TMDB, TheTVDB). */
+    val extras by lazy { MediaExtras(this) }
 
     /** For work that must outlive a screen, like the stop scrobble sent as the player closes. */
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)

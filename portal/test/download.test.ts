@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { handle, latestApp, subtitlesApiKey, type Env } from "../src/index";
+import { handle, latestApp, subtitlesApiKey, tmdbApiKey, tvdbApiKey, type Env } from "../src/index";
 
 const apk = new Uint8Array([0x50, 0x4b, 3, 4]);
 const bucket = (has: boolean) =>
@@ -43,5 +43,17 @@ describe("subtitlesApiKey", () => {
   it("is null when the secret is unset or blank", () => {
     expect(subtitlesApiKey({} as unknown as Env)).toBeNull();
     expect(subtitlesApiKey({ OPENSUBTITLES_API_KEY: "  " } as unknown as Env)).toBeNull();
+  });
+});
+
+describe("tmdbApiKey and tvdbApiKey", () => {
+  it("pass their secrets through, trimmed", () => {
+    expect(tmdbApiKey({ TMDB_API_KEY: " tmdb123 " } as unknown as Env)).toBe("tmdb123");
+    expect(tvdbApiKey({ TVDB_API_KEY: "tvdb-key\n" } as unknown as Env)).toBe("tvdb-key");
+  });
+  it("are null when unset or blank, and independent of each other", () => {
+    expect(tmdbApiKey({ TVDB_API_KEY: "x" } as unknown as Env)).toBeNull();
+    expect(tmdbApiKey({ TMDB_API_KEY: " " } as unknown as Env)).toBeNull();
+    expect(tvdbApiKey({ TMDB_API_KEY: "x" } as unknown as Env)).toBeNull();
   });
 });

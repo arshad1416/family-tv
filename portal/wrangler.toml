@@ -34,3 +34,5 @@ TRAKT_REDIRECT_URI = "https://familytv.arshadkazi.ca/trakt"
 #   TRAKT_CLIENT_ID      optional: Trakt app client id (trakt.tv/oauth/applications); enables Trakt sync on the TVs
 #   TRAKT_CLIENT_SECRET  optional, older Trakt apps only (new apps are PKCE-only and issue none); only this Worker sees it
 #   OPENSUBTITLES_API_KEY  optional; OpenSubtitles.com API key for online subtitles on movies/episodes
+#   TMDB_API_KEY           optional; TMDB API key (v3 key or v4 read token) for trailers, season overviews and episode stills
+#   TVDB_API_KEY           optional; TheTVDB v4 API key, a fallback when TMDB has no episode still/overview or trailer

@@ -17,6 +17,10 @@ export interface Env {
   TRAKT_REDIRECT_URI?: string;
   /** Optional secret: OpenSubtitles.com API key, delivered only to paired TVs for online subtitles. */
   OPENSUBTITLES_API_KEY?: string;
+  /** Optional secret: TMDB API key (v3 key or v4 read token), delivered only to paired TVs for trailers and episode details. */
+  TMDB_API_KEY?: string;
+  /** Optional secret: TheTVDB v4 API key, delivered only to paired TVs as a fallback after TMDB. */
+  TVDB_API_KEY?: string;
 }
 
 const APK_KEY = "family-tv.apk";
@@ -119,10 +123,24 @@ export async function latestApp(env: Env, req: Request) {
   return code > 0 && env.LATEST_APP_URL ? { versionCode: code, versionName: null, url: env.LATEST_APP_URL } : null;
 }
 
+const optionalKey = (v: string | undefined): string | null => {
+  const key = v?.trim();
+  return key ? key : null;
+};
+
 /** The subtitle key for paired devices; null (online subtitles hidden on the TV) when the secret isn't set. */
 export function subtitlesApiKey(env: Env): string | null {
-  const key = env.OPENSUBTITLES_API_KEY?.trim();
-  return key ? key : null;
+  return optionalKey(env.OPENSUBTITLES_API_KEY);
+}
+
+/** The TMDB key for paired devices; null (no TMDB trailers or episode details) when the secret isn't set. */
+export function tmdbApiKey(env: Env): string | null {
+  return optionalKey(env.TMDB_API_KEY);
+}
+
+/** The TheTVDB key for paired devices; null (no TVDB fallback) when the secret isn't set. */
+export function tvdbApiKey(env: Env): string | null {
+  return optionalKey(env.TVDB_API_KEY);
 }
 
 async function freshPairCode(env: Env): Promise<string> {
@@ -177,6 +195,8 @@ async function deviceConfig(req: Request, env: Env) {
     // The client id is public (it goes in every Trakt API call); the secret never leaves the Worker.
     trakt: traktConfigured(env) ? { clientId: env.TRAKT_CLIENT_ID } : null,
     subtitlesApiKey: subtitlesApiKey(env),
+    tmdbApiKey: tmdbApiKey(env),
+    tvdbApiKey: tvdbApiKey(env),
   });
 }
 

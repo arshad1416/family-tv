@@ -186,17 +186,20 @@ object XtreamParser {
         )
     }
 
-    /** get_vod_info: the movie's YouTube trailer id ("info.youtube_trailer"), or null. */
-    fun vodTrailer(reader: Reader): String? {
+    /** What get_vod_info adds for a movie's trailer: the YouTube id and the TMDB id to ask TMDB with. */
+    data class VodInfo(val trailer: String?, val tmdb: String?)
+
+    /** get_vod_info: the movie's YouTube trailer ("info.youtube_trailer") and TMDB id. */
+    fun vodInfo(reader: Reader): VodInfo {
         val r = JsonReader(reader).apply { isLenient = true }
-        if (r.peek() != JsonToken.BEGIN_OBJECT) { r.skipValue(); return null }
+        if (r.peek() != JsonToken.BEGIN_OBJECT) { r.skipValue(); return VodInfo(null, null) }
         var info: Map<String, String?> = emptyMap()
         r.beginObject()
         while (r.hasNext()) {
             if (r.nextName() == "info" && r.peek() == JsonToken.BEGIN_OBJECT) info = readFlatObject(r) else r.skipValue()
         }
         r.endObject()
-        return Trailers.youtubeId(info["youtube_trailer"] ?: info["trailer"])
+        return VodInfo(Trailers.youtubeId(info["youtube_trailer"] ?: info["trailer"]), tmdbId(info["tmdb_id"] ?: info["tmdb"]))
     }
 
     /** Reads a list of flat objects (or an object of them), skipping anything else. */

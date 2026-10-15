@@ -433,6 +433,7 @@ private fun HomePage(vm: MainViewModel, profile: Profile, onNavigate: (Page) -> 
                                     val p = progress[ProgressKey.movie(x.sourceId, x.streamId)]
                                     PosterCard(
                                         x.name, x.poster, entryPoint(entry), favourite = true, watched = p?.watched == true, progress = ProgressRules.bar(p),
+                                        trailer = rememberMovieTrailer(profile, x), trailerSlot = true,
                                         onFavourite = { toggleFavourite(ctx, Kind.MOVIE, x.sourceId, x.streamId, x.name) },
                                         onFocus = { hero.value = Hero(x.name, "Favourite movie", null) },
                                     ) { scope.launch { playMovieNow(ctx, profile, x) } }
@@ -467,6 +468,7 @@ private fun HomePage(vm: MainViewModel, profile: Profile, onNavigate: (Page) -> 
                                 favourite = Favourites.key(Kind.MOVIE, m.sourceId, m.streamId) in favKeys,
                                 onFavourite = { toggleFavourite(ctx, Kind.MOVIE, m.sourceId, m.streamId, m.name) },
                                 watched = p?.watched == true, progress = ProgressRules.bar(p),
+                                trailer = rememberMovieTrailer(profile, m), trailerSlot = true,
                                 onFocus = { hero.value = Hero(m.name, "Movie", m.rating?.takeIf { it.isNotBlank() && it != "0" }?.let { "Rating $it" }) },
                             ) {
                                 scope.launch { playMovieNow(ctx, profile, m) }
@@ -554,7 +556,8 @@ fun ChannelCard(
 /**
  * Artwork tile. [onFavourite] adds hold-OK or Menu (TV) or a heart button (touch) to toggle the
  * favourite; [watched] and [progress] draw the tick and the resume line. [logo] fits a channel
- * logo instead of cropping a poster.
+ * logo instead of cropping a poster. [trailer] adds a Trailer button (over the poster on touch,
+ * beside the name on TV, where [trailerSlot] keeps room for it so the row doesn't jump).
  */
 @Composable
 fun PosterCard(
@@ -567,10 +570,13 @@ fun PosterCard(
     onFavourite: (() -> Unit)? = null,
     watched: Boolean = false,
     progress: Float = 0f,
+    trailer: String? = null,
+    trailerSlot: Boolean = false,
     onFocus: () -> Unit = {},
     onClick: () -> Unit,
 ) {
-    val heart = LocalFormFactor.current.touch && onFavourite != null
+    val touch = LocalFormFactor.current.touch
+    val heart = touch && onFavourite != null
     Column(if (width != null) Modifier.width(width) else Modifier.fillMaxWidth()) {
         FocusBox(onClick = onClick, onLongClick = onFavourite, onFocus = onFocus, outline = true, scale = 1.06f, color = Tv.Raised, modifier = modifier.fillMaxWidth().aspectRatio(2f / 3f), contentAlignment = Alignment.Center) {
             Text(name, Modifier.padding(8.dp), fontSize = 13.sp, maxLines = 4, color = Tv.Muted)
@@ -582,8 +588,16 @@ fun PosterCard(
             if (heart) FavouriteButton(favourite, onFavourite!!, Modifier.align(Alignment.TopEnd))
             else MarkBadge(Modifier.align(Alignment.TopEnd), favourite = favourite)
             if (progress > 0f) ProgressLine(progress, Modifier.align(Alignment.BottomCenter).padding(8.dp), height = 4.dp)
+            if (touch && trailer != null) TrailerButton(trailer, Modifier.align(Alignment.BottomStart), compact = true)
         }
-        Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 13.sp, color = Tv.Muted, modifier = Modifier.padding(top = 6.dp))
+        if (!touch && trailerSlot) {
+            Row(Modifier.padding(top = 4.dp).height(30.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 13.sp, color = Tv.Muted, modifier = Modifier.weight(1f))
+                if (trailer != null) TrailerButton(trailer, compact = true)
+            }
+        } else {
+            Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 13.sp, color = Tv.Muted, modifier = Modifier.padding(top = 6.dp))
+        }
     }
 }
 

@@ -220,6 +220,12 @@ class Catalog(private val db: AppDb) {
         get(XtreamUrls.api(server, s.username!!, s.password.orEmpty(), action, mapOf(param to id))) { XtreamParser.infoIds(it) }
     }
 
+    /** get_vod_info's trailer and TMDB id for a movie (Xtream only). */
+    suspend fun vodInfo(sourceId: String, streamId: String, s: Source): XtreamParser.VodInfo = withContext(Dispatchers.IO) {
+        val server = dao.source(sourceId)?.activeServer ?: s.serverUrls!!.first()
+        get(XtreamUrls.api(server, s.username!!, s.password.orEmpty(), "get_vod_info", mapOf("vod_id" to streamId))) { XtreamParser.vodInfo(it) }
+    }
+
     // --- streaming helpers ---
 
     /** Streams an Xtream list and writes it [BATCH] rows at a time (runs on an IO thread). */

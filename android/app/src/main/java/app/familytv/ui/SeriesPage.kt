@@ -59,6 +59,7 @@ import app.familytv.iptv.SeriesTitles
 import app.familytv.iptv.Streams
 import app.familytv.iptv.XtreamParser
 import app.familytv.portal.Profile
+import app.familytv.trailer.SeasonExtras
 import app.familytv.trakt.PlayItem
 import app.familytv.trakt.ProgressRules
 import app.familytv.user.ProgressEntity
@@ -178,7 +179,20 @@ fun SeriesPage(profile: Profile, group: SeriesGroup, visible: List<CategoryEntit
     }
     var pickedSeason by remember(v.key) { mutableStateOf<Int?>(null) }
     val season = pickedSeason?.takeIf { it in seasons } ?: EpisodeGuide.defaultSeason(seasons, lastPlayedSeason)
-    val inSeason = remember(episodes, season) { episodes.filter { it.season == season }.sortedBy { it.episode } }
+    // Provider first; TMDB, then TheTVDB, fill a missing season overview, trailer, episode still or synopsis.
+    var extras by remember(v.key, season) { mutableStateOf<SeasonExtras?>(null) }
+    LaunchedEffect(v.key, season, info != null) { if (info != null && season != null) extras = app.extras.season(v, season) }
+    var showTrailer by remember(v.key) { mutableStateOf<String?>(null) }
+    LaunchedEffect(v.key, info) { info?.let { showTrailer = it.trailer ?: app.extras.showTrailer(v) } }
+    val inSeason = remember(episodes, season, extras) {
+        episodes.filter { it.season == season }.sortedBy { it.episode }.map { e ->
+            val meta = extras?.episodes?.get(e.episode)
+            if (meta == null) e else e.copy(image = e.image ?: meta.still, plot = e.plot ?: meta.overview)
+        }
+    }
+    val providerSeason = info?.seasons?.firstOrNull { it.number == season }
+    val seasonOverview = providerSeason?.overview ?: extras?.overview
+    val seasonTrailer = providerSeason?.trailer ?: extras?.trailer
     val next = remember(episodes, progress) {
         EpisodeGuide.nextUp(episodes, { progressOf(it)?.watched == true }, { ProgressRules.bar(progressOf(it)) > 0f })
     }
@@ -247,6 +261,14 @@ fun SeriesPage(profile: Profile, group: SeriesGroup, visible: List<CategoryEntit
                 }
             }
             if (seasons.size > 1) item("seasons") { ChoiceChips(seasons.map(EpisodeGuide::seasonLabel), seasons.indexOf(season)) { pickedSeason = seasons[it] } }
+            // Episodes with their own trailers get a button each; otherwise the season (or show) trailer goes here.
+            val trailer = if (inSeason.any { it.trailer != null }) null else seasonTrailer ?: showTrailer
+            if (season != null && (seasonOverview != null || trailer != null)) item("season-about") {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (seasonOverview != null) ExpandableText(seasonOverview, collapsedLines = 3)
+                    if (trailer != null) TrailerButton(trailer, label = if (trailer == seasonTrailer) "${EpisodeGuide.seasonLabel(season)} trailer" else "Trailer")
+                }
+            }
             when {
                 info == null -> item("loading") { Text("Loading episodes…", color = Tv.Muted) }
                 inSeason.isEmpty() -> item("none") { Text("No episodes found.", color = Tv.Muted) }
@@ -355,25 +377,28 @@ private fun meta(e: XtreamParser.Episode, long: Boolean): String = listOfNotNull
 private fun EpisodeRow(e: XtreamParser.Episode, cover: String?, p: ProgressEntity?, onFocus: () -> Unit, onClick: () -> Unit) {
     val form = LocalFormFactor.current
     val stillWidth = when (form) { FormFactor.Phone -> 128.dp; FormFactor.Tablet -> 168.dp; FormFactor.Tv -> 128.dp }
-    FocusBox(onClick = onClick, onFocus = onFocus, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { focused ->
-        Row(Modifier.padding(10.dp)) {
-            EpisodeStill(e, cover, Modifier.width(stillWidth))
-            Spacer(Modifier.width(14.dp))
-            Column(Modifier.weight(1f)) {
-                Text("${e.episode}. ${EpisodeGuide.title(e)}", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                val m = meta(e, long = false)
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (m.isNotEmpty()) Text(m, fontSize = 13.sp, color = if (focused) Tv.Text else Tv.Muted, maxLines = 1)
-                    if (p?.watched == true) Text((if (m.isNotEmpty()) "  ·  " else "") + "✓ Watched", fontSize = 13.sp, color = if (focused) Tv.Text else Tv.Good, maxLines = 1)
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FocusBox(onClick = onClick, onFocus = onFocus, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { focused ->
+            Row(Modifier.padding(10.dp)) {
+                EpisodeStill(e, cover, Modifier.width(stillWidth))
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("${e.episode}. ${EpisodeGuide.title(e)}", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    val m = meta(e, long = false)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (m.isNotEmpty()) Text(m, fontSize = 13.sp, color = if (focused) Tv.Text else Tv.Muted, maxLines = 1)
+                        if (p?.watched == true) Text((if (m.isNotEmpty()) "  ·  " else "") + "✓ Watched", fontSize = 13.sp, color = if (focused) Tv.Text else Tv.Good, maxLines = 1)
+                    }
+                    Text(
+                        e.plot ?: "No description", fontSize = 13.sp, color = if (focused) Tv.Text else Tv.Muted,
+                        maxLines = if (form.touch) 2 else 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp),
+                    )
+                    val bar = ProgressRules.bar(p)
+                    if (bar > 0f) ProgressLine(bar, Modifier.padding(top = 8.dp).widthIn(max = 260.dp), fill = if (focused) Tv.Text else Tv.Accent)
                 }
-                Text(
-                    e.plot ?: "No description", fontSize = 13.sp, color = if (focused) Tv.Text else Tv.Muted,
-                    maxLines = if (form.touch) 2 else 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp),
-                )
-                val bar = ProgressRules.bar(p)
-                if (bar > 0f) ProgressLine(bar, Modifier.padding(top = 8.dp).widthIn(max = 260.dp), fill = if (focused) Tv.Text else Tv.Accent)
             }
         }
+        e.trailer?.let { TrailerButton(it, compact = form == FormFactor.Phone) }
     }
 }
 
@@ -429,6 +454,7 @@ private fun EpisodeSheet(e: XtreamParser.Episode, cover: String?, p: ProgressEnt
                 if (bar > 0f) ProgressLine(bar, Modifier.padding(top = 8.dp).widthIn(max = 260.dp))
                 Row(Modifier.padding(top = 14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     TvButton(if (bar > 0f) "▶  Resume" else "▶  Play", onPlay)
+                    e.trailer?.let { TrailerButton(it) }
                     TvButton("Close", onClose)
                 }
                 Spacer(Modifier.height(14.dp))

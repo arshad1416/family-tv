@@ -45,6 +45,7 @@ import androidx.tv.material3.Text
 import app.familytv.app
 import app.familytv.data.CategoryEntity
 import app.familytv.data.Kind
+import app.familytv.data.MovieEntity
 import app.familytv.portal.Profile
 import app.familytv.sync.PlaybackStatus
 import app.familytv.trakt.ProgressRules
@@ -194,9 +195,10 @@ fun MoviesScreen(vm: MainViewModel, profile: Profile) {
                     favourite = Favourites.key(Kind.MOVIE, m.sourceId, m.streamId) in favKeys,
                     watched = p?.watched == true, progress = ProgressRules.bar(p),
                     onFavourite = { toggleFavourite(ctx, Kind.MOVIE, m.sourceId, m.streamId, m.name) },
+                    movie = m,
                 )
             },
-            back = null,
+            back = null, profile = profile,
         ) { idx ->
             scope.launch { playMovieNow(ctx, profile, movies[idx]) }
         }
@@ -247,6 +249,8 @@ private class GridItem(
     val watched: Boolean = false,
     val progress: Float = 0f,
     val onFavourite: (() -> Unit)? = null,
+    /** Set for movies: the card gets a Trailer button when one is found. */
+    val movie: MovieEntity? = null,
 )
 
 @Composable
@@ -254,6 +258,7 @@ private fun PosterGrid(
     items: List<GridItem>,
     back: String?,
     state: LazyGridState = rememberLazyGridState(),
+    profile: Profile? = null,
     onClick: (Int) -> Unit,
 ) {
     val hasBack = back != null && items.any { it.key == back }
@@ -271,6 +276,8 @@ private fun PosterGrid(
             PosterCard(
                 it.name, it.poster, entryPoint(if (hasBack) it.key == back else i == 0), width = null,
                 favourite = it.favourite, onFavourite = it.onFavourite, watched = it.watched, progress = it.progress,
+                trailer = if (it.movie != null && profile != null) rememberMovieTrailer(profile, it.movie) else null,
+                trailerSlot = it.movie != null,
             ) { onClick(i) }
         }
     }
