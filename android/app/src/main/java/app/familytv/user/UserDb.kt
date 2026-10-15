@@ -55,7 +55,10 @@ data class ProgressEntity(
     val percent: Float = 0f,
     val watched: Boolean = false,
     val updatedAt: Long = 0,
-    /** Watched here but not yet on Trakt (the stop scrobble failed); pushed through sync/history. */
+    /**
+     * [watched] changed here but not yet on Trakt (the stop scrobble failed, or it was marked by
+     * hand): pushed through sync/history, or sync/history/remove when [watched] is false.
+     */
     val pendingHistory: Boolean = false,
 )
 

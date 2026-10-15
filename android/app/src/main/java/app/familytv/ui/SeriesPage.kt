@@ -134,7 +134,8 @@ fun SeriesNav.Host(vm: MainViewModel, profile: Profile, content: @Composable () 
 /**
  * One show: language picker (when the provider has it in 2+ languages), description with
  * More/Less, seasons as chips and that season's episodes with stills and synopses. TV shows the
- * focused episode in a preview column and OK plays it; touch opens an episode sheet.
+ * focused episode in a preview column, OK plays it and holding OK flips its watched mark; touch
+ * opens an episode sheet. A button marks the whole season.
  */
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
@@ -156,6 +157,8 @@ fun SeriesPage(profile: Profile, group: SeriesGroup, visible: List<CategoryEntit
             .filter { it.key in shown || (it.sourceId to it.categoryId) in visibleKeys }
             .sortedWith(compareBy({ SeriesTitles.languageName(it.lang ?: SeriesTitles.ORIGINAL) }, { it.key }))
     }
+    // Opening the page is seeing what's new.
+    LaunchedEffect(copies) { app.newEpisodes.seen(copies) }
     var chosenKey by rememberSaveable(group.key) { mutableStateOf<String?>(null) }
     val defaultIndex = remember(copies) { languages.choose(copies).coerceAtLeast(0) }
     val v = copies.firstOrNull { it.key == chosenKey } ?: copies.getOrNull(defaultIndex) ?: group.first
@@ -261,6 +264,14 @@ fun SeriesPage(profile: Profile, group: SeriesGroup, visible: List<CategoryEntit
                 }
             }
             if (seasons.size > 1) item("seasons") { ChoiceChips(seasons.map(EpisodeGuide::seasonLabel), seasons.indexOf(season)) { pickedSeason = seasons[it] } }
+            if (season != null && inSeason.isNotEmpty()) item("season-watched") {
+                val all = inSeason.all { progressOf(it)?.watched == true }
+                val label = EpisodeGuide.seasonLabel(season)
+                TvButton(
+                    if (all) "Mark $label as not watched" else "✓  Mark $label as watched",
+                    { setWatched(ctx, inSeason.map { episodeItem(v, it) }, !all, label) },
+                )
+            }
             // Episodes with their own trailers get a button each; otherwise the season (or show) trailer goes here.
             val trailer = if (inSeason.any { it.trailer != null }) null else seasonTrailer ?: showTrailer
             if (season != null && (seasonOverview != null || trailer != null)) item("season-about") {
@@ -277,6 +288,7 @@ fun SeriesPage(profile: Profile, group: SeriesGroup, visible: List<CategoryEntit
                         e, cover, progressOf(e),
                         onFocus = { preview = e },
                         onClick = { if (form.touch) sheet = e else playEpisode(scope, ctx, profile, v, e) },
+                        onToggleWatched = { toggleEpisodeWatched(ctx, v, e, progressOf(e)) },
                     )
                 }
             }
@@ -298,18 +310,28 @@ fun SeriesPage(profile: Profile, group: SeriesGroup, visible: List<CategoryEntit
             }
         }
         sheet?.let { e ->
-            EpisodeSheet(e, cover, progressOf(e), phone, onPlay = { sheet = null; playEpisode(scope, ctx, profile, v, e) }, onClose = { sheet = null })
+            EpisodeSheet(
+                e, cover, progressOf(e), phone,
+                onPlay = { sheet = null; playEpisode(scope, ctx, profile, v, e) },
+                onToggleWatched = { toggleEpisodeWatched(ctx, v, e, progressOf(e)) },
+                onClose = { sheet = null },
+            )
         }
     }
 }
 
+private fun episodeItem(v: SeriesEntity, e: XtreamParser.Episode) = PlayItem.episode(v.sourceId, v.seriesId, v.name, e.season, e.episode)
+
 private fun playEpisode(scope: CoroutineScope, ctx: android.content.Context, profile: Profile, v: SeriesEntity, e: XtreamParser.Episode) {
     scope.launch {
         Streams(ctx.app.db, profile).episode(v.sourceId, e)?.let {
-            play(ctx, it, "S${e.season} E${e.episode} ${EpisodeGuide.title(e)}", PlayItem.episode(v.sourceId, v.seriesId, v.name, e.season, e.episode))
+            play(ctx, it, "S${e.season} E${e.episode} ${EpisodeGuide.title(e)}", episodeItem(v, e))
         }
     }
 }
+
+private fun toggleEpisodeWatched(ctx: android.content.Context, v: SeriesEntity, e: XtreamParser.Episode, p: ProgressEntity?) =
+    setWatched(ctx, listOf(episodeItem(v, e)), p?.watched != true, "S${e.season} E${e.episode}")
 
 /** A row of selectable chips (languages, seasons); on TV a focusable row that remembers its place. */
 @OptIn(ExperimentalComposeUiApi::class)
@@ -374,11 +396,12 @@ private fun meta(e: XtreamParser.Episode, long: Boolean): String = listOfNotNull
 ).joinToString("  ·  ")
 
 @Composable
-private fun EpisodeRow(e: XtreamParser.Episode, cover: String?, p: ProgressEntity?, onFocus: () -> Unit, onClick: () -> Unit) {
+private fun EpisodeRow(e: XtreamParser.Episode, cover: String?, p: ProgressEntity?, onFocus: () -> Unit, onClick: () -> Unit, onToggleWatched: () -> Unit) {
     val form = LocalFormFactor.current
     val stillWidth = when (form) { FormFactor.Phone -> 128.dp; FormFactor.Tablet -> 168.dp; FormFactor.Tv -> 128.dp }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        FocusBox(onClick = onClick, onFocus = onFocus, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { focused ->
+        // Hold OK (or Menu, or a long press) flips the watched mark.
+        FocusBox(onClick = onClick, onLongClick = onToggleWatched, onFocus = onFocus, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { focused ->
             Row(Modifier.padding(10.dp)) {
                 EpisodeStill(e, cover, Modifier.width(stillWidth))
                 Spacer(Modifier.width(14.dp))
@@ -418,13 +441,17 @@ private fun EpisodePreview(e: XtreamParser.Episode?, cover: String?, p: Progress
         val m = meta(e, long = true)
         if (m.isNotEmpty()) Text(m, fontSize = 13.sp, color = Tv.Muted, modifier = Modifier.padding(top = 4.dp))
         if (p?.watched == true) Text("✓ Watched", fontSize = 13.sp, color = Tv.Good, modifier = Modifier.padding(top = 4.dp))
+        Text(
+            if (p?.watched == true) "Hold OK to mark as not watched" else "Hold OK to mark as watched",
+            fontSize = 12.sp, color = Tv.Muted, modifier = Modifier.padding(top = 4.dp),
+        )
         Text(e.plot ?: "No description", fontSize = 14.sp, color = Tv.Muted, lineHeight = 20.sp, maxLines = 10, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 10.dp))
     }
 }
 
 /** Touch: the episode's large still, details and Play/Resume, over the page. */
 @Composable
-private fun EpisodeSheet(e: XtreamParser.Episode, cover: String?, p: ProgressEntity?, phone: Boolean, onPlay: () -> Unit, onClose: () -> Unit) {
+private fun EpisodeSheet(e: XtreamParser.Episode, cover: String?, p: ProgressEntity?, phone: Boolean, onPlay: () -> Unit, onToggleWatched: () -> Unit, onClose: () -> Unit) {
     BackHandler(onBack = onClose)
     val none = remember { MutableInteractionSource() }
     BoxWithConstraints(
@@ -455,6 +482,7 @@ private fun EpisodeSheet(e: XtreamParser.Episode, cover: String?, p: ProgressEnt
                 Row(Modifier.padding(top = 14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     TvButton(if (bar > 0f) "▶  Resume" else "▶  Play", onPlay)
                     e.trailer?.let { TrailerButton(it) }
+                    TvButton(if (p?.watched == true) "Mark not watched" else "✓  Mark watched", onToggleWatched)
                     TvButton("Close", onClose)
                 }
                 Spacer(Modifier.height(14.dp))

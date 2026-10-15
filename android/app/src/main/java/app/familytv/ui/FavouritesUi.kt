@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.dp
 import androidx.tv.material3.Icon
 import app.familytv.FamilyTvApp
 import app.familytv.app
+import app.familytv.trakt.PlayItem
 import app.familytv.iptv.SeriesTitles
 import app.familytv.user.Pending
 import app.familytv.user.SeriesLanguages
@@ -75,6 +76,16 @@ fun toggleFavourite(ctx: Context, kind: String, sourceId: String, itemId: String
     app.scope.launch {
         val on = app.favourites.toggle(kind, sourceId, itemId, name)
         withContext(Dispatchers.Main) { Toast.makeText(ctx.applicationContext, favouriteMessage(app, kind, on), Toast.LENGTH_SHORT).show() }
+    }
+}
+
+/** Marks movies or episodes watched or not by hand, and says so with a toast. [what] names them ("Season 2"). */
+fun setWatched(ctx: Context, items: List<PlayItem>, watched: Boolean, what: String) {
+    val app = ctx.app
+    app.scope.launch {
+        app.trakt.sync.setWatched(items, watched)
+        val text = "$what marked as ${if (watched) "watched" else "not watched"}" + if (app.trakt.signedIn) " here and on Trakt" else ""
+        withContext(Dispatchers.Main) { Toast.makeText(ctx.applicationContext, text, Toast.LENGTH_SHORT).show() }
     }
 }
 
