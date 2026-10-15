@@ -39,6 +39,26 @@ object EpisodeGuide {
     /** How many regular episodes come after (season, episode) [since]. */
     fun countAfter(episodes: List<XtreamParser.Episode>, since: Pair<Int, Int>): Int = after(episodes, since).size
 
+    /**
+     * The episodes of a followed show waiting to be watched, oldest first: those already [listed],
+     * those that arrived after [since] (the newest one at the last check; null on a first look),
+     * and every one after the furthest the family has watched. None of them [watched], and only
+     * ones the provider still has. A show nobody has started counts only arrivals.
+     */
+    fun waiting(
+        episodes: List<XtreamParser.Episode>,
+        listed: List<Pair<Int, Int>>,
+        since: Pair<Int, Int>?,
+        watched: Set<Pair<Int, Int>>,
+    ): List<Pair<Int, Int>> {
+        val exists = episodes.filter { it.season > 0 }.mapTo(HashSet()) { it.season to it.episode }
+        val furthest = watched.filter { it in exists }.maxWithOrNull(compareBy({ it.first }, { it.second }))
+        val behind = furthest?.let { after(episodes, it) }.orEmpty()
+        val arrived = since?.let { after(episodes, it) }.orEmpty()
+        return (listed + arrived + behind).distinct().filter { it in exists && it !in watched }
+            .sortedWith(compareBy({ it.first }, { it.second }))
+    }
+
     /** The regular episodes after (season, episode) [since], as (season, episode), oldest first. */
     fun after(episodes: List<XtreamParser.Episode>, since: Pair<Int, Int>): List<Pair<Int, Int>> =
         episodes.filter { it.season > 0 && (it.season > since.first || (it.season == since.first && it.episode > since.second)) }

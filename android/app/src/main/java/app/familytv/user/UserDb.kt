@@ -91,8 +91,8 @@ data class MediaIdsEntity(
 
 /**
  * The newest episode seen for a favourite show, so the background check can tell when another
- * one arrives. [newEpisodes] lists the episodes that arrived since and aren't watched yet; the
- * show's counter is how many of them are still unwatched.
+ * one arrives. [newEpisodes] lists the episodes waiting to be watched (see
+ * [app.familytv.iptv.EpisodeGuide.waiting]); the show's counter is how many are still unwatched.
  */
 @Entity(tableName = "episode_watch", primaryKeys = ["sourceId", "seriesId"])
 data class EpisodeWatchEntity(
@@ -142,6 +142,8 @@ interface UserDao {
     @Query("SELECT * FROM progress WHERE `key` = :key") suspend fun progress(key: String): ProgressEntity?
     @Query("SELECT * FROM progress WHERE `key` IN (:keys)") suspend fun progressFor(keys: List<String>): List<ProgressEntity>
     @Query("SELECT * FROM progress WHERE pendingHistory = 1") suspend fun pendingHistory(): List<ProgressEntity>
+    @Query("SELECT * FROM progress WHERE kind = 'episode' AND sourceId = :sourceId AND itemId = :seriesId AND watched = 1")
+    suspend fun watchedEpisodes(sourceId: String, seriesId: String): List<ProgressEntity>
     @Upsert suspend fun upsertProgress(p: ProgressEntity)
     @Upsert suspend fun upsertProgressRows(p: List<ProgressEntity>)
     @Query("UPDATE progress SET pendingHistory = 0 WHERE `key` IN (:keys)") suspend fun clearPendingHistory(keys: List<String>)
