@@ -42,14 +42,17 @@ fun SettingsScreen(vm: MainViewModel, config: DeviceConfig) {
     var pinError by remember { mutableStateOf(false) }
     Column(Modifier.verticalScroll(rememberScrollState())) {
         PageTitle("Settings", bottom = 18.dp)
-        // TV: the two panels side by side. Phones and tablets: stacked, so nothing runs off a narrow screen.
+        // TV: two columns sharing the width, so neither is squeezed. Phones and tablets: stacked.
         val touch = LocalFormFactor.current.touch
-        val panes: @Composable (@Composable () -> Unit) -> Unit = { content ->
-            if (touch) Column(Modifier.widthIn(max = 640.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) { content() }
-            else Row(horizontalArrangement = Arrangement.spacedBy(28.dp)) { content() }
+        val panes: @Composable (left: @Composable (Modifier) -> Unit, right: @Composable (Modifier) -> Unit) -> Unit = { left, right ->
+            if (touch) {
+                Column(Modifier.widthIn(max = 640.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) { left(Modifier); right(Modifier) }
+            } else {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(28.dp)) { left(Modifier.weight(1f)); right(Modifier.weight(1f)) }
+            }
         }
-        panes {
-            Panel(if (touch) Modifier.fillMaxWidth() else Modifier.width(560.dp)) {
+        panes({ mod ->
+            Panel(mod) {
                 Text("Not working?", fontSize = 22.sp, fontWeight = FontWeight.Bold)
                 Text("Run a check. It tests this TV's internet, the home network and the TV service, and sends the result to your TV admin.", fontSize = 15.sp, color = Tv.Muted)
                 TvButton(if (running) "Checking…" else "Run a check", { vm.runDiagnosis() }, entryPoint(), enabled = !running)
@@ -62,7 +65,8 @@ fun SettingsScreen(vm: MainViewModel, config: DeviceConfig) {
                 Text("Downloads channels, movies, series and the guide again.", fontSize = 14.sp, color = Tv.Muted)
                 TvButton("Reload channels", { vm.reload() })
             }
-            Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
+        }, { mod ->
+            Column(mod, verticalArrangement = Arrangement.spacedBy(20.dp)) {
                 Panel {
                     Text("This TV", fontSize = 20.sp, fontWeight = FontWeight.Bold)
                     Info("Name", config.nickname ?: "-")
@@ -71,7 +75,7 @@ fun SettingsScreen(vm: MainViewModel, config: DeviceConfig) {
                     Info("Lists updated", if (PlaybackStatus.lastRefresh > 0) DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(PlaybackStatus.lastRefresh)) else "this session not yet")
                 }
                 // Only shown when the portal has Trakt set up.
-                if (config.trakt?.clientId != null) TraktPanel(if (touch) Modifier else Modifier.widthIn(max = 560.dp))
+                if (config.trakt?.clientId != null) TraktPanel()
                 if (!config.profile?.parentalPin.isNullOrEmpty() && !unlocked) {
                     Panel {
                         Text("Parental lock", fontSize = 20.sp, fontWeight = FontWeight.Bold)
@@ -83,15 +87,14 @@ fun SettingsScreen(vm: MainViewModel, config: DeviceConfig) {
                     }
                 }
             }
-        }
+        })
         Spacer(Modifier.height(32.dp))
     }
 }
 
 @Composable
 internal fun Panel(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
-    val fill = if (LocalFormFactor.current.touch) Modifier.fillMaxWidth() else Modifier
-    Column(modifier.then(fill).background(Tv.Panel, Tv.Shape).padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) { content() }
+    Column(modifier.fillMaxWidth().background(Tv.Panel, Tv.Shape).padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) { content() }
 }
 
 @Composable

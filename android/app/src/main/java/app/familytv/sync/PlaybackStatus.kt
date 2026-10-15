@@ -12,6 +12,9 @@ object PlaybackStatus {
     @Volatile var lastRefresh: Long = 0
     @Volatile var lastRefreshError: String? = null
     @Volatile var update: String? = null
+    /** The last crash's stack trace (see [app.familytv.core.CrashLog]), so the admin can see why the app closed. */
+    @Volatile var lastCrash: String? = null
+    @Volatile var lastCrashAt: Long = 0
 
     fun started(t: String) {
         title = t; startedAt = System.currentTimeMillis(); bufferingEvents = 0; bitrateKbps = null; droppedFrames = 0
@@ -27,5 +30,6 @@ object PlaybackStatus {
         "lastRefresh" to lastRefresh,
         "lastRefreshError" to lastRefreshError,
         "update" to update,
+        "lastCrash" to lastCrash?.let { mapOf("at" to lastCrashAt, "trace" to it.take(5000)) },
     )
 }
