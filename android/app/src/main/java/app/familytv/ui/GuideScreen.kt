@@ -54,6 +54,7 @@ import app.familytv.data.ChannelEntity
 import app.familytv.data.Kind
 import app.familytv.data.NowNext
 import app.familytv.portal.Profile
+import app.familytv.user.Favourites
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
@@ -86,12 +87,19 @@ private data class GuideFocus(val channel: ChannelEntity, val prog: NowNext?)
 @Composable
 fun GuideScreen(vm: MainViewModel, profile: Profile) {
     val ctx = LocalContext.current
-    val cats = categories(vm, profile, Kind.LIVE)
+    val visible = categories(vm, profile, Kind.LIVE)
+    // Favourites leads the chips, as on the channel list; the guide still opens on the first real category.
+    val cats = remember(visible) { if (visible.isEmpty()) visible else listOf(favouritesCategory(Kind.LIVE)) + visible }
     var cat by remember { mutableStateOf<CategoryEntity?>(null) }
-    LaunchedEffect(cats) { if (cat == null || cat !in cats) cat = cats.firstOrNull() }
-    val channels by remember(cat) {
-        cat?.let { ctx.app.db.catalog().channels(it.sourceId, it.categoryId) } ?: flowOf(emptyList())
+    LaunchedEffect(cats) { if (cat == null || cat !in cats) cat = visible.firstOrNull() }
+    val favs = rememberFavourites()
+    val favKeys = rememberFavouriteKeys(favs)
+    val favChannels = rememberFavouriteChannels(favs, visible)
+    val inCategory by remember(cat) {
+        cat?.takeUnless { it.isFavourites }?.let { ctx.app.db.catalog().channels(it.sourceId, it.categoryId) } ?: flowOf(emptyList())
     }.collectAsState(initial = emptyList())
+    val showingFavourites = cat?.isFavourites == true
+    val channels = if (showingFavourites) favChannels else inCategory
     val now = produceState(System.currentTimeMillis()) { while (true) { delay(30_000); value = System.currentTimeMillis() } }
     val start by remember { derivedStateOf { now.value / SLOT * SLOT } }
     val progs = rememberProgrammes(channels, from = start, hours = HOURS)
@@ -114,12 +122,20 @@ fun GuideScreen(vm: MainViewModel, profile: Profile) {
         Spacer(Modifier.height(if (form.touch) 4.dp else 12.dp))
         TimeBar(d, start, scroll, now)
         Spacer(Modifier.height(6.dp))
+        if (showingFavourites && channels.isEmpty()) {
+            FavouritesHint(
+                (if (form.touch) "Long-press a channel or show in the guide" else "Hold OK (or press Menu) on a channel or show in the guide") + " to add it here. " +
+                    "Favourite channels stay on this device: Trakt has no live TV, so they don't sync.",
+            )
+        }
         LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp), contentPadding = PaddingValues(bottom = 32.dp)) {
-            itemsIndexed(channels, key = { _, c -> c.streamId }) { i, c ->
+            itemsIndexed(channels, key = { _, c -> "${c.sourceId}/${c.streamId}" }) { i, c ->
                 GuideRow(
                     d, c, c.epgId?.let { progs[it] }.orEmpty(), start, scroll, now, entry = i == 0, compact = form == FormFactor.Phone,
+                    favourite = Favourites.key(Kind.LIVE, c.sourceId, c.streamId) in favKeys,
                     onFocus = { focus.value = GuideFocus(c, it) },
-                    onPlay = { playLive(ctx, c.sourceId, c.categoryId, i) },
+                    onPlay = { if (showingFavourites) playLive(ctx, c.sourceId, c.categoryId, 0, c.streamId) else playLive(ctx, c.sourceId, c.categoryId, i) },
+                    onFavourite = { toggleFavourite(ctx, Kind.LIVE, c.sourceId, c.streamId, c.name) },
                 )
             }
         }
@@ -191,26 +207,30 @@ private fun GuideRow(
     now: State<Long>,
     entry: Boolean,
     compact: Boolean,
+    favourite: Boolean,
     onFocus: (NowNext?) -> Unit,
     onPlay: () -> Unit,
+    onFavourite: () -> Unit,
 ) {
     val end = start + HOURS * 3_600_000L
     CompositionLocalProvider(LocalBringIntoViewSpec provides MinimalScroll) {
         Row(Modifier.fillMaxWidth().height(d.rowH)) {
             if (compact) {
                 // Phone: logo over number, pinned left, and the whole tile tunes like the cells do.
-                FocusBox(onClick = onPlay, modifier = Modifier.width(d.chanW).fillMaxHeight(), shape = RoundedCornerShape(8.dp), contentAlignment = Alignment.Center) {
+                FocusBox(onClick = onPlay, onLongClick = onFavourite, modifier = Modifier.width(d.chanW).fillMaxHeight(), shape = RoundedCornerShape(8.dp), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Logo(c.logo, 34)
                         Text("${c.num}", fontSize = 12.sp, color = Tv.Muted, maxLines = 1)
                     }
+                    MarkBadge(Modifier.align(Alignment.TopEnd), favourite = favourite, size = 16.dp)
                 }
             } else {
                 Row(Modifier.width(d.chanW).fillMaxHeight().background(Tv.Panel, RoundedCornerShape(8.dp)).padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("${c.num}", Modifier.width(42.dp), fontSize = 14.sp, color = Tv.Muted)
                     Logo(c.logo, 40)
                     Spacer(Modifier.width(10.dp))
-                    Text(c.name, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(c.name, Modifier.weight(1f), fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    if (favourite) MarkBadge(favourite = true, size = 18.dp)
                 }
             }
             Spacer(Modifier.width(4.dp))
@@ -218,13 +238,13 @@ private fun GuideRow(
                 Box(Modifier.width(d.gridW).fillMaxHeight().nowLine(d, start, now, Tv.Accent)) {
                     val cells = list.filter { minOf(it.stop, end) > maxOf(it.start, start) }
                     if (cells.isEmpty()) {
-                        GuideCell(if (compact) c.name else "No guide information", if (compact) "No guide information" else null, 0.dp, d.slotW * 4, onAir = false, entryPoint(entry), { onFocus(null) }, onPlay)
+                        GuideCell(if (compact) c.name else "No guide information", if (compact) "No guide information" else null, 0.dp, d.slotW * 4, onAir = false, entryPoint(entry), { onFocus(null) }, onPlay, onFavourite)
                     }
                     cells.forEachIndexed { i, p ->
                         val s = maxOf(p.start, start)
                         GuideCell(
                             p.title, "${time(p.start)} – ${time(p.stop)}", d.span(s - start), d.span(minOf(p.stop, end) - s),
-                            onAir = p.start <= now.value && now.value < p.stop, entryPoint(entry && i == 0), { onFocus(p) }, onPlay,
+                            onAir = p.start <= now.value && now.value < p.stop, entryPoint(entry && i == 0), { onFocus(p) }, onPlay, onFavourite,
                         )
                     }
                 }
@@ -234,9 +254,10 @@ private fun GuideRow(
 }
 
 @Composable
-private fun GuideCell(title: String, times: String?, x: Dp, w: Dp, onAir: Boolean, modifier: Modifier, onFocus: () -> Unit, onClick: () -> Unit) {
+private fun GuideCell(title: String, times: String?, x: Dp, w: Dp, onAir: Boolean, modifier: Modifier, onFocus: () -> Unit, onClick: () -> Unit, onLongClick: () -> Unit) {
+    // Holding OK (or Menu, or a long press) on any cell favourites its channel, so the guide can stand in for the channel list.
     FocusBox(
-        onClick = onClick, onFocus = onFocus, color = if (onAir) Tv.Raised else Tv.Panel, shape = RoundedCornerShape(6.dp),
+        onClick = onClick, onFocus = onFocus, onLongClick = onLongClick, color = if (onAir) Tv.Raised else Tv.Panel, shape = RoundedCornerShape(6.dp),
         modifier = modifier.offset(x = x).width((w - 3.dp).coerceAtLeast(4.dp)).fillMaxHeight(),
     ) { focused ->
         Column(Modifier.padding(horizontal = 10.dp, vertical = 7.dp)) {
