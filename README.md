@@ -46,7 +46,7 @@ passwords on a remote, and when a TV goes black the portal tells you why.
 - **New episodes:** every 6 hours the background check-in looks at favourite shows (up to 60, one at a
   time). A new episode puts the show in a *New episodes* row on Home with a NEW badge (with
   the count, like "3 NEW") until its page is opened, and posts a notification (on Android 13+ the app asks once for permission).
-- **Trakt (optional):** connect a Trakt account in Settings with a code and a QR (no typing on the
+- **Trakt (optional):** connect a Trakt account in Settings by scanning a QR that fills the code in (no typing on the
   remote). Favourite movies and series follow the Trakt watchlist both ways, and watched marks and
   resume points sync through Trakt scrobbling and history, so every device on the same Trakt account
   agrees. Every show in the Trakt history (and any with an episode in progress) is added to Favourites
