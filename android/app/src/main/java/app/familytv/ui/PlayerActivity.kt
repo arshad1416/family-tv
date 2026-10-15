@@ -2,6 +2,7 @@ package app.familytv.ui
 
 import android.graphics.Color
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.view.Gravity
 import android.view.KeyEvent
@@ -10,10 +11,15 @@ import android.view.ViewGroup
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
 import android.view.WindowManager
+import android.view.animation.DecelerateInterpolator
 import android.widget.FrameLayout
 import android.widget.TextView
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -23,6 +29,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
@@ -116,6 +123,9 @@ class PlayerActivity : ComponentActivity() {
     private var playing by mutableIntStateOf(0)
     private var banner by mutableStateOf<Int?>(null)
     private var guideOpen by mutableStateOf(false)
+    /** TV: the full guide that Back opens over live TV (see [PlayerGuide]). */
+    private var bigGuide by mutableStateOf(GuideMode.Off)
+    private var guideWindow: android.graphics.Rect? = null
     private var programmes by mutableStateOf<Map<String, List<NowNext>>>(emptyMap())
     private var programmesAt = 0L
     private var bannerJob: Job? = null
@@ -135,6 +145,14 @@ class PlayerActivity : ComponentActivity() {
     private var touch = false
     private var controls by mutableStateOf(false)
     private var controlsJob: Job? = null
+    /** TV live: Back opens the guide over the video, then shrinks the video, then leaves. */
+    private val guideBack = object : OnBackPressedCallback(false) {
+        override fun handleOnBackPressed() = when (bigGuide) {
+            GuideMode.Off -> openBigGuide()
+            GuideMode.Over -> showBigGuide(GuideMode.Picture)
+            GuideMode.Picture -> finish()
+        }
+    }
     private val closeGuideOnBack = object : OnBackPressedCallback(false) {
         override fun handleOnBackPressed() = closeGuide()
     }
@@ -206,6 +224,8 @@ class PlayerActivity : ComponentActivity() {
             }
         }
         root.addView(overlayView, 1, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT)) // under the error text
+        // Later callbacks run first: the panels, then the mini guide, then the big guide.
+        onBackPressedDispatcher.addCallback(this, guideBack)
         onBackPressedDispatcher.addCallback(this, closeGuideOnBack)
         onBackPressedDispatcher.addCallback(this, panelBack) // added last, so it runs first
 
@@ -225,6 +245,7 @@ class PlayerActivity : ComponentActivity() {
                 val src = intent.getStringExtra(EXTRA_SOURCE) ?: return@launch finish()
                 val cat = intent.getStringExtra(EXTRA_CATEGORY) ?: return@launch finish()
                 channels = app.db.catalog().channels(src, cat).first()
+                guideBack.isEnabled = !touch && channels.isNotEmpty()
                 val stream = intent.getStringExtra(EXTRA_STREAM)
                 index = channels.indexOfFirst { it.streamId == stream }.takeIf { it >= 0 }
                     ?: intent.getIntExtra(EXTRA_INDEX, 0).coerceIn(0, (channels.size - 1).coerceAtLeast(0))
@@ -248,7 +269,13 @@ class PlayerActivity : ComponentActivity() {
                     onTracks = if (tracks.hasChoices) ({ openPanel(PlayerPanel.Tracks) }) else null,
                     onInfo = { openPanel(PlayerPanel.Info) },
                 )
-                LiveOverlay(channels, playing, banner, guideOpen, programmes, onTune = ::tuneFromGuide, onFocusChannel = { if (guideOpen) banner = it }, touch = touchUi)
+                // The guide fades in over the video and out again; the last mode stays drawn while it fades.
+                val shownMode = remember { mutableStateOf(GuideMode.Over) }
+                if (bigGuide != GuideMode.Off) shownMode.value = bigGuide
+                AnimatedVisibility(bigGuide != GuideMode.Off, enter = fadeIn(tween(VIDEO_MOVE_MS.toInt())), exit = fadeOut(tween(VIDEO_MOVE_MS.toInt()))) {
+                    PlayerGuide(shownMode.value, channels, playing, rememberFavouriteKeys(), onPick = ::pickFromBigGuide, onWindow = ::onGuideWindow)
+                }
+                if (bigGuide == GuideMode.Off) LiveOverlay(channels, playing, banner, guideOpen, programmes, onTune = ::tuneFromGuide, onFocusChannel = { if (guideOpen) banner = it }, touch = touchUi)
             } else if ((vodControls || buttonsActive) && panel == null) {
                 PlayerButtons(
                     tracks, buttonsFocus,
@@ -369,7 +396,7 @@ class PlayerActivity : ComponentActivity() {
      */
     private fun syncOverlayFocus() {
         val v = overlayView ?: return
-        val want = guideOpen || buttonsActive || (panel != null && panel != PlayerPanel.Info)
+        val want = guideOpen || bigGuide != GuideMode.Off || buttonsActive || (panel != null && panel != PlayerPanel.Info)
         if (want) {
             v.descendantFocusability = ViewGroup.FOCUS_AFTER_DESCENDANTS
             v.requestFocus()
@@ -499,7 +526,7 @@ class PlayerActivity : ComponentActivity() {
         if (channels.isEmpty() || keyCode == KeyEvent.KEYCODE_BACK) return super.onKeyDown(keyCode, event)
         // With the mini guide or a list panel open, Compose moves focus through the list; whatever
         // reaches here fell off its edge and must not zap.
-        if (guideOpen || (panel != null && panel != PlayerPanel.Info)) return keyCode in LIVE_KEYS || super.onKeyDown(keyCode, event)
+        if (guideOpen || bigGuide != GuideMode.Off || (panel != null && panel != PlayerPanel.Info)) return keyCode in LIVE_KEYS || super.onKeyDown(keyCode, event)
         when (keyCode) {
             KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_CHANNEL_UP -> zap(-1)
             KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_CHANNEL_DOWN -> zap(1)
@@ -526,6 +553,7 @@ class PlayerActivity : ComponentActivity() {
     override fun onUserInteraction() {
         super.onUserInteraction()
         if (guideOpen) closeGuideLater()
+        if (bigGuide == GuideMode.Over) closeBigGuideLater()
     }
 
     private fun onTap() {
@@ -576,6 +604,77 @@ class PlayerActivity : ComponentActivity() {
     private fun closeGuideLater() {
         guideJob?.cancel()
         guideJob = lifecycleScope.launch { delay(20_000); closeGuide() }
+    }
+
+    private var bigGuideJob: Job? = null
+
+    private fun openBigGuide() {
+        if (panel != null) closePanel()
+        if (guideOpen) closeGuide()
+        banner = null
+        showBigGuide(GuideMode.Over)
+        syncOverlayFocus()
+    }
+
+    /** Over the video it closes itself when left alone; with the small picture it stays until Back or OK. */
+    private fun showBigGuide(mode: GuideMode) {
+        bigGuide = mode
+        bigGuideJob?.cancel()
+        if (mode == GuideMode.Over) closeBigGuideLater()
+        layoutVideo()
+    }
+
+    private fun closeBigGuide() {
+        showBigGuide(GuideMode.Off)
+        syncOverlayFocus()
+        showBanner(index)
+    }
+
+    private fun closeBigGuideLater() {
+        bigGuideJob?.cancel()
+        bigGuideJob = lifecycleScope.launch { delay(30_000); closeBigGuide() }
+    }
+
+    /** OK in the big guide: another channel plays in the small picture; the one already playing goes full screen. */
+    private fun pickFromBigGuide(i: Int) {
+        if (i == index) return closeBigGuide()
+        index = i
+        playChannel()
+        banner = null
+        showBigGuide(GuideMode.Picture)
+    }
+
+    private fun onGuideWindow(r: androidx.compose.ui.geometry.Rect) {
+        guideWindow = android.graphics.Rect(r.left.toInt(), r.top.toInt(), r.right.toInt(), r.bottom.toInt())
+        layoutVideo()
+    }
+
+    /**
+     * Full screen, or shrunk into the big guide's window. Android 7+ moves and scales the video
+     * surface in step with the view, so it glides there; Android 6 (oldest Fire TV sticks) can't
+     * scale a SurfaceView, so the view is resized in one step instead.
+     */
+    private fun layoutVideo() {
+        val w = guideWindow.takeIf { bigGuide == GuideMode.Picture }
+        if (Build.VERSION.SDK_INT >= 24) {
+            val full = w == null || view.width == 0 || view.height == 0
+            view.pivotX = 0f
+            view.pivotY = 0f
+            view.animate()
+                .scaleX(if (full) 1f else w!!.width().toFloat() / view.width)
+                .scaleY(if (full) 1f else w!!.height().toFloat() / view.height)
+                .translationX(if (full) 0f else w!!.left.toFloat())
+                .translationY(if (full) 0f else w!!.top.toFloat())
+                .setDuration(VIDEO_MOVE_MS)
+                .setInterpolator(DecelerateInterpolator())
+                .start()
+            return
+        }
+        val lp = view.layoutParams as? FrameLayout.LayoutParams ?: return
+        val want = if (w == null) FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT)
+        else FrameLayout.LayoutParams(w.width(), w.height()).apply { leftMargin = w.left; topMargin = w.top }
+        if (lp.width == want.width && lp.height == want.height && lp.leftMargin == want.leftMargin && lp.topMargin == want.topMargin) return
+        view.layoutParams = want
     }
 
     private fun tuneFromGuide(i: Int) {
@@ -629,6 +728,9 @@ class PlayerActivity : ComponentActivity() {
         const val EXTRA_INDEX = "index"
         /** Optional: the channel to start on, when the caller doesn't know its index in the category. */
         const val EXTRA_STREAM = "stream"
+
+        /** How long the video takes to move into the guide's window and back; the guide's fades match it. */
+        const val VIDEO_MOVE_MS = 300L
 
         private val OK_KEYS = setOf(KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER)
         private val LIVE_KEYS = OK_KEYS + setOf(

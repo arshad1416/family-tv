@@ -35,6 +35,9 @@ passwords on a remote, and when a TV goes black the portal tells you why.
   with its watched episodes and resume points; those stay on the device, and one removed here isn't
   added back. Titles are matched by id, else by title and year. Channel favourites stay on the
   device, since Trakt has no live TV.
+- Live TV on a TV remote: OK shows the channel list; Back opens the full guide over the video, and
+  Back again shrinks the video into a window at the top of the guide. OK on another channel plays it
+  in that window, OK again goes full screen, and a third Back leaves live TV.
 - Captions, audio/video tracks and stream info in the player. Live TV: D-pad right opens Options;
   movies and episodes: press up from the player controls for the CC, audio & video and info buttons;
   phones and tablets: tap the video. The remote's Info, Captions and Menu keys work too.
