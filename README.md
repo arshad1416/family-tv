@@ -88,6 +88,11 @@ Optional, for online subtitles: create an API consumer at opensubtitles.com (Pro
 and `npx wrangler secret put OPENSUBTITLES_API_KEY`. Paired TVs get the key with their config; without
 it the TV only offers the stream's own captions. Without an OpenSubtitles login the key allows a small
 number of downloads a day per IP; the TV says so when the limit is reached.
+
+Optional, for trailers and richer episode pages: `npx wrangler secret put TMDB_API_KEY` (an API key or
+read access token from themoviedb.org → Settings → API) and/or `npx wrangler secret put TVDB_API_KEY`
+(a TheTVDB v4 project key). Paired TVs get them with their config. Trailers and episode details come
+from the provider first, then TMDB, then TheTVDB; without the keys only the provider's own data is used.
 For a nicer sign-in, put the Worker on your own domain behind Cloudflare Access as well.
 
 ### 2. TV app

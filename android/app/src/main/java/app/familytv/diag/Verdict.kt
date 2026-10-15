@@ -53,6 +53,15 @@ object Classifier {
     fun isSinkhole(addrs: List<String>?): Boolean =
         addrs != null && addrs.isNotEmpty() && addrs.all { it in SINKHOLES || it.startsWith("127.") }
 
+    /**
+     * Addresses to try for the connect check, IPv4 first. Phones often get IPv6 answers from DNS on a
+     * Wi-Fi network with no IPv6 route, and the player falls back to IPv4 there; the check must too.
+     */
+    fun connectOrder(system: List<String>?, public: List<String>?): List<String> {
+        val usable = system.orEmpty().filterNot { isSinkhole(listOf(it)) }.ifEmpty { public.orEmpty() }
+        return usable.distinct().sortedBy { it.contains(':') }.take(4)
+    }
+
     fun host(f: HostFacts): Finding? {
         val sysFailed = f.systemDns == null || f.systemDns.isEmpty()
         val publicResolves = !f.publicDns.isNullOrEmpty()

@@ -35,6 +35,10 @@ data class DeviceConfig(
     val trakt: TraktPortal? = null,
     /** OpenSubtitles API key from the portal's Worker secret; null hides online subtitles. */
     val subtitlesApiKey: String? = null,
+    /** TMDB key (v3 key or v4 read token) from the portal's Worker secret; null skips TMDB trailers and episode details. */
+    val tmdbApiKey: String? = null,
+    /** TheTVDB v4 key from the portal's Worker secret; null skips the TVDB fallback. */
+    val tvdbApiKey: String? = null,
 )
 
 /** The Trakt app's public client id. The secret stays in the portal. */

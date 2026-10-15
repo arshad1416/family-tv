@@ -1,8 +1,6 @@
 package app.familytv.ui
 
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -36,8 +34,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -49,124 +45,14 @@ import androidx.tv.material3.Text
 import app.familytv.app
 import app.familytv.data.CategoryEntity
 import app.familytv.data.Kind
-import app.familytv.data.SeriesEntity
-import app.familytv.iptv.Streams
-import app.familytv.iptv.XtreamParser
+import app.familytv.data.MovieEntity
 import app.familytv.portal.Profile
 import app.familytv.sync.PlaybackStatus
-import app.familytv.trakt.PlayItem
 import app.familytv.trakt.ProgressRules
 import app.familytv.user.Favourites
 import app.familytv.user.ProgressKey
-import coil.compose.AsyncImage
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
-
-val SeriesEntity.key get() = "$sourceId/$seriesId"
-
-/** Which series has its episode list open, and which poster to refocus when it closes. */
-class SeriesNav {
-    var open by mutableStateOf<SeriesEntity?>(null)
-    var back by mutableStateOf<String?>(null)
-    var refocus = false
-}
-
-@Composable
-fun rememberSeriesNav() = remember { SeriesNav() }
-
-/** Shows the open series' episodes in place of [content]; Back returns to the poster that opened it. */
-@Composable
-fun SeriesNav.Host(profile: Profile, content: @Composable () -> Unit) {
-    val entry = pageEntry()
-    val o = open
-    if (o != null) {
-        EpisodeList(profile, o) { back = o.key; refocus = true; open = null }
-    } else {
-        content()
-        LaunchedEffect(Unit) {
-            if (!refocus) return@LaunchedEffect
-            refocus = false
-            delay(80)
-            // The poster may not be composed any more (its row scrolled away); fall back to the page's entry.
-            if (entry.attached == 0) { back = null; delay(80) }
-            entry.focus()
-            back = null
-        }
-    }
-}
-
-@Composable
-fun EpisodeList(profile: Profile, s: SeriesEntity, onBack: () -> Unit) {
-    val ctx = LocalContext.current
-    val scope = rememberCoroutineScope()
-    var episodes by remember(s) { mutableStateOf<List<XtreamParser.Episode>?>(null) }
-    val first = remember { FocusRequester() }
-    BackHandler(onBack = onBack)
-    LaunchedEffect(s) {
-        val src = profile.sources.firstOrNull { it.id == s.sourceId }
-        episodes = if (src == null) emptyList() else runCatching { ctx.app.catalog.episodes(s.sourceId, s.seriesId, src) }.getOrDefault(emptyList())
-    }
-    val form = LocalFormFactor.current
-    val favourite = Favourites.key(Kind.SERIES, s.sourceId, s.seriesId) in rememberFavouriteKeys()
-    val progress = rememberProgress()
-    // Touch: focus would paint the first episode blue, so only TV moves focus into the list.
-    LaunchedEffect(episodes) { if (episodes != null && !form.touch) { delay(50); runCatching { first.requestFocus() } } }
-    Row(horizontalArrangement = Arrangement.spacedBy(32.dp)) {
-        // A phone has no room beside the list for the poster; its plot goes above the episodes instead.
-        if (form != FormFactor.Phone) Column(Modifier.width(220.dp)) {
-            Box(Modifier.fillMaxWidth().height(330.dp).padding(bottom = 12.dp)) {
-                if (s.poster != null) AsyncImage(s.poster, contentDescription = null, modifier = Modifier.fillMaxSize())
-            }
-            s.plot?.let { Text(it, fontSize = 13.sp, color = Tv.Muted, maxLines = 8, overflow = TextOverflow.Ellipsis) }
-        }
-        Column(Modifier.weight(1f)) {
-            if (form.touch) TvButton("‹  Back", onBack, Modifier.padding(bottom = 8.dp))
-            Text(s.name, fontSize = if (form == FormFactor.Phone) 22.sp else 28.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            if (form == FormFactor.Phone) s.plot?.let { Text(it, fontSize = 13.sp, color = Tv.Muted, maxLines = 3, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp)) }
-            TvButton(
-                if (favourite) "\u2665  In Favourites" else "\u2661  Add to Favourites",
-                { toggleFavourite(ctx, Kind.SERIES, s.sourceId, s.seriesId, s.name) },
-                Modifier.padding(top = 10.dp),
-            )
-            Spacer(Modifier.height(12.dp))
-            val eps = episodes
-            when {
-                eps == null -> Text("Loading episodes…", color = Tv.Muted)
-                eps.isEmpty() -> {
-                    Text("No episodes found.", color = Tv.Muted)
-                    Spacer(Modifier.height(12.dp))
-                    TvButton("Back", onBack, Modifier.focusRequester(first))
-                }
-                else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp), contentPadding = PaddingValues(bottom = 32.dp)) {
-                    itemsIndexed(eps, key = { _, e -> e.id }) { i, e ->
-                        val p = progress[ProgressKey.episode(s.sourceId, s.seriesId, e.season, e.episode)]
-                        FocusBox(
-                            onClick = {
-                                scope.launch {
-                                    Streams(ctx.app.db, profile).episode(s.sourceId, e)?.let {
-                                        play(ctx, it, "S${e.season} E${e.episode} ${e.title}", PlayItem.episode(s.sourceId, s.seriesId, s.name, e.season, e.episode))
-                                    }
-                                }
-                            },
-                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).then(if (i == 0) Modifier.focusRequester(first) else Modifier),
-                        ) { focused ->
-                            Column(Modifier.padding(horizontal = 18.dp, vertical = 12.dp)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text("S${e.season} E${e.episode}  ${e.title}", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-                                    if (p?.watched == true) Text("  \u2713 Watched", fontSize = 13.sp, color = if (focused) Tv.Text else Tv.Good, maxLines = 1)
-                                }
-                                e.plot?.let { Text(it, maxLines = 2, overflow = TextOverflow.Ellipsis, fontSize = 13.sp, color = if (focused) Tv.Text else Tv.Muted) }
-                                val bar = ProgressRules.bar(p)
-                                if (bar > 0f) ProgressLine(bar, Modifier.padding(top = 8.dp).widthIn(max = 260.dp), fill = if (focused) Tv.Text else Tv.Accent)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
 
 /** Remembers the selected category, falling back to the first real one (not Favourites) when it disappears. */
 @Composable
@@ -309,9 +195,10 @@ fun MoviesScreen(vm: MainViewModel, profile: Profile) {
                     favourite = Favourites.key(Kind.MOVIE, m.sourceId, m.streamId) in favKeys,
                     watched = p?.watched == true, progress = ProgressRules.bar(p),
                     onFavourite = { toggleFavourite(ctx, Kind.MOVIE, m.sourceId, m.streamId, m.name) },
+                    movie = m,
                 )
             },
-            back = null,
+            back = null, profile = profile,
         ) { idx ->
             scope.launch { playMovieNow(ctx, profile, movies[idx]) }
         }
@@ -327,27 +214,25 @@ fun SeriesScreen(vm: MainViewModel, profile: Profile) {
     val nav = rememberSeriesNav()
     val grid = rememberLazyGridState()
     val favs = rememberFavourites()
-    val favKeys = rememberFavouriteKeys(favs)
     val favSeries = rememberFavouriteSeries(favs, visible)
+    val showFavs = ShowFavourites(rememberFavouriteShowRows(favs))
     val inCategory by remember(cat) {
         cat?.takeUnless { it.isFavourites }?.let { ctx.app.db.catalog().series(it.sourceId, it.categoryId) } ?: flowOf(emptyList())
     }.collectAsState(initial = emptyList())
     val showingFavourites = cat?.isFavourites == true
-    val series = if (showingFavourites) favSeries else inCategory
+    // One poster per show, however many languages the provider lists it in.
+    val series = remember(showingFavourites, favSeries, inCategory) { groupSeries(if (showingFavourites) favSeries else inCategory) }
     if (cats.isEmpty()) return EmptyState("No series on this line.")
-    nav.Host(profile) {
+    nav.Host(vm, profile) {
         Column {
             PageTitle("Series")
             CategoryChips(cats, cat, select)
             Spacer(Modifier.height(18.dp))
             if (showingFavourites && series.isEmpty()) FavouritesHint(vodHint(LocalFormFactor.current, "a series"))
             PosterGrid(
-                series.map { s ->
-                    GridItem(
-                        s.key, s.name, s.poster,
-                        favourite = Favourites.key(Kind.SERIES, s.sourceId, s.seriesId) in favKeys,
-                        onFavourite = { toggleFavourite(ctx, Kind.SERIES, s.sourceId, s.seriesId, s.name) },
-                    )
+                series.map { g ->
+                    val on = showFavs.has(g)
+                    GridItem(g.key, g.title, g.poster, favourite = on, onFavourite = { toggleShowFavourite(ctx, g, on) })
                 },
                 back = nav.back, state = grid,
             ) { idx -> nav.open = series[idx] }
@@ -364,6 +249,8 @@ private class GridItem(
     val watched: Boolean = false,
     val progress: Float = 0f,
     val onFavourite: (() -> Unit)? = null,
+    /** Set for movies: the card gets a Trailer button (looked up when pressed). */
+    val movie: MovieEntity? = null,
 )
 
 @Composable
@@ -371,6 +258,7 @@ private fun PosterGrid(
     items: List<GridItem>,
     back: String?,
     state: LazyGridState = rememberLazyGridState(),
+    profile: Profile? = null,
     onClick: (Int) -> Unit,
 ) {
     val hasBack = back != null && items.any { it.key == back }
@@ -388,6 +276,7 @@ private fun PosterGrid(
             PosterCard(
                 it.name, it.poster, entryPoint(if (hasBack) it.key == back else i == 0), width = null,
                 favourite = it.favourite, onFavourite = it.onFavourite, watched = it.watched, progress = it.progress,
+                onTrailer = if (it.movie != null && profile != null) movieTrailerAction(profile, it.movie) else null,
             ) { onClick(i) }
         }
     }

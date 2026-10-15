@@ -76,7 +76,7 @@ data class MovieEntity(
     val year: Int? = null,
 )
 
-@Entity(tableName = "series", primaryKeys = ["sourceId", "seriesId"], indices = [Index("categoryId"), Index("tmdb")])
+@Entity(tableName = "series", primaryKeys = ["sourceId", "seriesId"], indices = [Index("categoryId"), Index("tmdb"), Index("titleKey")])
 data class SeriesEntity(
     val sourceId: String,
     val seriesId: String,
@@ -88,6 +88,10 @@ data class SeriesEntity(
     val gen: Long,
     val tmdb: String? = null,
     val year: Int? = null,
+    /** [app.familytv.iptv.SeriesTitles.key] of the cleaned title: copies of one show in other languages share it. */
+    val titleKey: String = "",
+    /** Language of this copy, from its title or category ([app.familytv.iptv.SeriesTitles.ORIGINAL] when neither says). */
+    val lang: String? = null,
 )
 
 @Entity(tableName = "programmes", indices = [Index(value = ["epgId", "start"])])
@@ -154,11 +158,14 @@ interface CatalogDao {
     @Query("SELECT * FROM series WHERE sourceId = :sourceId AND seriesId = :seriesId") suspend fun seriesItem(sourceId: String, seriesId: String): SeriesEntity?
     @Query("SELECT * FROM movies WHERE tmdb IN (:tmdb)") suspend fun moviesByTmdb(tmdb: List<String>): List<MovieEntity>
     @Query("SELECT * FROM series WHERE tmdb IN (:tmdb)") suspend fun seriesByTmdb(tmdb: List<String>): List<SeriesEntity>
+    /** Every copy of a show, in any language: same TMDB id or same cleaned title. */
+    @Query("SELECT * FROM series WHERE titleKey IN (:titleKeys) OR tmdb IN (:tmdb) ORDER BY sourceId, name")
+    suspend fun seriesCopies(titleKeys: List<String>, tmdb: List<String>): List<SeriesEntity>
 }
 
 @Database(
     entities = [SourceEntity::class, CategoryEntity::class, ChannelEntity::class, MovieEntity::class, SeriesEntity::class, ProgrammeEntity::class],
-    version = 2,
+    version = 3,
     exportSchema = true,
 )
 abstract class AppDb : RoomDatabase() {
