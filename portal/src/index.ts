@@ -755,6 +755,8 @@ async function adminAddLines(req: Request, env: Env) {
   if (!Array.isArray(b.lines) || !b.lines.length) throw new HttpError(400, "lines is required");
   if (b.lines.length > MAX_ADD_LINES) throw new HttpError(400, `at most ${MAX_ADD_LINES} lines at a time`);
   const p = panel(env);
+  // The fallback server comes from the lines profiles use, even before the Lines page was opened.
+  await rememberLines(env, (await allProfiles(env)).flatMap((pr) => pr.data.sources), false);
   const fallback = usualServer(await allLines(env));
   const results: { username: string | null; ok: boolean; error?: string; expire?: string }[] = [];
   for (const raw of b.lines as Record<string, unknown>[]) {
