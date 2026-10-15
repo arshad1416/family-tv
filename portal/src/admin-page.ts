@@ -161,17 +161,55 @@ async function renderProfiles(editId) {
   document.querySelectorAll("[data-edit]").forEach((b) => (b.onclick = () => renderProfiles(b.dataset.edit)));
 }
 
+// Category order and visibility, per kind. Rows are what the profile's TVs reported, saved order first.
+const KINDS = [["live", "Live TV"], ["movie", "Movies"], ["series", "TV Shows"]];
+let catKind = "live";
+function categoryRows(draft, reported) {
+  const saved = (draft.data.categoryOrder || {})[catKind] || [];
+  const seen = new Set(), rows = [];
+  for (const n of [...saved, ...((reported[catKind] || {}).names || [])]) { const k = n.toLowerCase(); if (!seen.has(k)) { seen.add(k); rows.push(n); } }
+  return rows;
+}
+function categoriesCard(draft, reported) {
+  if (!draft.id) return '<div class="card muted small">Save the profile and open Family TV on one of its TVs; its categories then show up here to arrange.</div>';
+  const rows = categoryRows(draft, reported);
+  const hidden = new Set((draft.data.hiddenCategories || []).map((n) => n.toLowerCase()));
+  let html = '<div class="card"><h3 style="margin-top:0">Categories</h3><div class="row" style="margin-bottom:8px">' +
+    KINDS.map(([k, label]) => '<button class="b' + (k === catKind ? " p" : "") + '" data-kind="' + k + '">' + label + "</button>").join("") +
+    '<span class="muted small">Order, show or hide what the TVs on this profile list. Saved with the profile.</span></div>';
+  if (!rows.length) html += '<p class="muted small">No categories reported yet. Open Family TV on a TV with this profile and come back in a minute.</p>';
+  html += rows.map((n, i) => '<div class="row" style="gap:6px;padding:4px 0;border-top:1px solid var(--line)">' +
+    '<input type="checkbox" style="width:auto" data-show="' + i + '"' + (hidden.has(n.toLowerCase()) ? "" : " checked") + ">" +
+    '<span style="flex:1">' + esc(n) + "</span>" +
+    '<button class="b" data-top="' + i + '" title="Move to top">Top</button><button class="b" data-up="' + i + '" title="Move up">▲</button><button class="b" data-down="' + i + '" title="Move down">▼</button></div>').join("");
+  return html + "</div>";
+}
+
 function editProfile(p) {
   const draft = JSON.parse(JSON.stringify(p));
+  let reported = {};
+  if (draft.id) api("/api/admin/profiles/" + draft.id + "/categories").then((r) => { reported = r.reported; collect(); paint(); }).catch(() => {});
+  const moveCat = (i, to) => {
+    collect();
+    const rows = categoryRows(draft, reported);
+    const [n] = rows.splice(i, 1);
+    rows.splice(Math.max(0, Math.min(rows.length, to)), 0, n);
+    draft.data.categoryOrder = { ...(draft.data.categoryOrder || {}), [catKind]: rows };
+    paint();
+  };
   const paint = () => {
     $("#app").innerHTML = '<div class="card"><label>Profile name</label><input id="pname" value="' + esc(draft.name) + '">' +
       '<label>Parental PIN (optional, locks adult categories)</label><input id="ppin" type="password" value="' + esc(draft.data.parentalPin) + '"></div>' +
-      draft.data.sources.map(sourceForm).join("") +
+      draft.data.sources.map(sourceForm).join("") + categoriesCard(draft, reported) +
       '<div class="row"><button class="b" id="adds">Add source</button><button class="b p" id="save">Save</button>' +
       (draft.id ? '<button class="b" id="delp">Delete profile</button>' : "") + '<button class="b" id="back">Back</button><span id="perr" class="err"></span></div>';
     $("#adds").onclick = () => { collect(); draft.data.sources.push({ id: crypto.randomUUID(), type: "xtream", name: "Line " + (draft.data.sources.length + 1) }); paint(); };
     document.querySelectorAll("[data-rm]").forEach((b) => (b.onclick = () => { collect(); draft.data.sources.splice(+b.closest("[data-src]").dataset.src, 1); paint(); }));
     $("#back").onclick = () => renderProfiles();
+    document.querySelectorAll("[data-kind]").forEach((b) => (b.onclick = () => { collect(); catKind = b.dataset.kind; paint(); }));
+    document.querySelectorAll("[data-top]").forEach((b) => (b.onclick = () => moveCat(+b.dataset.top, 0)));
+    document.querySelectorAll("[data-up]").forEach((b) => (b.onclick = () => moveCat(+b.dataset.up, +b.dataset.up - 1)));
+    document.querySelectorAll("[data-down]").forEach((b) => (b.onclick = () => moveCat(+b.dataset.down, +b.dataset.down + 1)));
     if ($("#delp")) $("#delp").onclick = async () => { if (confirm("Delete this profile? TVs on it stop playing until moved.")) { await api("/api/admin/profiles/" + draft.id, { method: "DELETE" }); renderProfiles(); } };
     $("#save").onclick = async () => {
       collect();
@@ -184,6 +222,14 @@ function editProfile(p) {
   const collect = () => {
     draft.name = $("#pname").value;
     draft.data.parentalPin = $("#ppin").value || undefined;
+    // Hidden names of the kind on screen are re-read from the checkboxes; other kinds' stay as they were.
+    const rows = categoryRows(draft, reported);
+    if (document.querySelector("[data-show]")) {
+      const onScreen = new Set(rows.map((n) => n.toLowerCase()));
+      const kept = (draft.data.hiddenCategories || []).filter((n) => !onScreen.has(n.toLowerCase()));
+      document.querySelectorAll("[data-show]").forEach((c) => { if (!c.checked) kept.push(rows[+c.dataset.show]); });
+      draft.data.hiddenCategories = kept;
+    }
     document.querySelectorAll("[data-src]").forEach((el) => {
       const g = (n) => el.querySelector('[name="' + n + '"]').value.trim();
       const s = draft.data.sources[+el.dataset.src];

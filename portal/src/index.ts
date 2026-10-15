@@ -1,5 +1,5 @@
 import { openJson, pairCode, randomId, sealJson, sha256Hex, timingSafeEqual } from "./crypto";
-import { maskSecrets, mergeSecrets, profileHosts, validateProfile, VERDICTS, type ProfileData } from "./model";
+import { CATEGORY_KINDS, cleanNames, maskSecrets, mergeSecrets, profileHosts, validateProfile, VERDICTS, type ProfileData } from "./model";
 import { probe } from "./reachability";
 import { ADMIN_PAGE } from "./admin-page";
 import { daysLeft, loginFromLineUrl, Panel, PanelError, RENEW_MONTHS } from "./panel";
@@ -249,6 +249,24 @@ async function deviceDiagnostics(req: Request, env: Env) {
   return json({ ok: true });
 }
 
+/** After loading its lists, a TV sends its category names so the admin page can arrange them. */
+async function deviceCategories(req: Request, env: Env) {
+  const d = await requireDevice(req, env);
+  if (!d.profile_id) throw new HttpError(409, "device not paired");
+  const b = await body<Record<string, unknown>>(req);
+  const now = Date.now();
+  const stmts = CATEGORY_KINDS.map((k) => [k, cleanNames(b[k])] as const)
+    .filter(([, names]) => names.length)
+    .map(([k, names]) =>
+      env.DB.prepare(
+        `INSERT INTO profile_categories (profile_id, kind, names_json, updated_at) VALUES (?,?,?,?)
+         ON CONFLICT (profile_id, kind) DO UPDATE SET names_json = excluded.names_json, updated_at = excluded.updated_at`,
+      ).bind(d.profile_id, k, JSON.stringify(names), now),
+    );
+  if (stmts.length) await env.DB.batch(stmts);
+  return json({ ok: true });
+}
+
 /** The TV asks "can *you* reach these?" so it can tell a local block from a dead server. */
 async function deviceReachability(req: Request, env: Env) {
   const d = await requireDevice(req, env);
@@ -453,6 +471,15 @@ async function adminProfiles(env: Env) {
     results.map(async (r) => ({ id: r.id, name: r.name, updated_at: r.updated_at, data: maskSecrets(await openJson<ProfileData>(env.CONFIG_KEY, r.data_enc)) })),
   );
   return json({ profiles: out });
+}
+
+async function adminProfileCategories(env: Env, id: string) {
+  const { results } = await env.DB.prepare("SELECT kind, names_json, updated_at FROM profile_categories WHERE profile_id = ?")
+    .bind(id)
+    .all<{ kind: string; names_json: string; updated_at: number }>();
+  const out: Record<string, { names: string[]; updatedAt: number }> = {};
+  for (const r of results) out[r.kind] = { names: JSON.parse(r.names_json), updatedAt: r.updated_at };
+  return json({ reported: out });
 }
 
 async function adminSaveProfile(req: Request, env: Env, id: string | null) {
@@ -703,6 +730,7 @@ export async function handle(req: Request, env: Env): Promise<Response> {
   if (m === "POST" && p === "/api/device/heartbeat") return deviceHeartbeat(req, env);
   if (m === "POST" && p === "/api/device/diagnostics") return deviceDiagnostics(req, env);
   if (m === "POST" && p === "/api/device/reachability") return deviceReachability(req, env);
+  if (m === "POST" && p === "/api/device/categories") return deviceCategories(req, env);
   if (m === "POST" && p === "/api/device/trakt/code") return traktDeviceCode(req, env);
   if (m === "POST" && p === "/api/device/trakt/token") return traktDeviceToken(req, env);
   if (m === "POST" && p === "/api/device/trakt/refresh") return traktRefresh(req, env);
@@ -722,6 +750,7 @@ export async function handle(req: Request, env: Env): Promise<Response> {
     if (m === "GET" && p === "/api/admin/lines") return adminLines(env, url.searchParams.get("refresh") === "1");
     if (m === "POST" && p === "/api/admin/lines/renew") return adminRenewLine(req, env);
     if (m === "POST" && p === "/api/admin/lines/new") return adminNewLine(req, env);
+    if (m === "GET" && (mm = p.match(/^\/api\/admin\/profiles\/([a-f0-9]+)\/categories$/))) return adminProfileCategories(env, mm[1]);
     if ((mm = p.match(/^\/api\/admin\/profiles\/([a-f0-9]+)$/))) {
       if (m === "PUT") return adminSaveProfile(req, env, mm[1]);
       if (m === "DELETE") {

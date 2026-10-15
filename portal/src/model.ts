@@ -11,10 +11,33 @@ export interface Source {
   epgUrl?: string;
 }
 
+export const CATEGORY_KINDS = ["live", "movie", "series"] as const;
+export type CategoryKind = (typeof CATEGORY_KINDS)[number];
+
 export interface ProfileData {
   sources: Source[];
   parentalPin?: string;
   hiddenCategories?: string[];
+  /** Category names per kind in the order the TVs list them; ones not named keep the provider's order after these. */
+  categoryOrder?: Partial<Record<CategoryKind, string[]>>;
+}
+
+const MAX_CATEGORIES = 1000;
+
+/** Category names as a TV reports or the admin page saves them: strings, trimmed, de-duplicated, capped. */
+export function cleanNames(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const x of v) {
+    if (typeof x !== "string") continue;
+    const n = x.trim().slice(0, 120);
+    if (!n || seen.has(n.toLowerCase())) continue;
+    seen.add(n.toLowerCase());
+    out.push(n);
+    if (out.length >= MAX_CATEGORIES) break;
+  }
+  return out;
 }
 
 export const MASK = "••••••";
@@ -72,6 +95,16 @@ export function validateProfile(p: unknown): ProfileData {
       throw new Error(`${s.name}: type must be xtream or m3u`);
     }
     if (s.epgUrl) assertHttpUrl(s.epgUrl);
+  }
+  if (d.hiddenCategories !== undefined) d.hiddenCategories = cleanNames(d.hiddenCategories);
+  if (d.categoryOrder !== undefined) {
+    if (!d.categoryOrder || typeof d.categoryOrder !== "object") throw new Error("categoryOrder must be an object");
+    const order: Partial<Record<CategoryKind, string[]>> = {};
+    for (const k of CATEGORY_KINDS) {
+      const names = cleanNames(d.categoryOrder[k]);
+      if (names.length) order[k] = names;
+    }
+    d.categoryOrder = order;
   }
   return d;
 }
