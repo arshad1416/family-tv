@@ -1,6 +1,7 @@
 package app.familytv.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -55,7 +56,7 @@ fun LiveOverlay(
     onTune: (Int) -> Unit,
     onFocusChannel: (Int) -> Unit,
 ) {
-    Box(Modifier.fillMaxSize()) {
+    Box(Modifier.fillMaxSize().safeDrawingPadding()) {
         if (guideOpen) MiniGuide(channels, playing, programmes, onTune, onFocusChannel)
         banner?.let { channels.getOrNull(it) }?.let { ch ->
             InfoBanner(ch, programmes[ch.epgId], Modifier.align(Alignment.BottomStart).padding(start = if (guideOpen) GUIDE_W else 0.dp))
