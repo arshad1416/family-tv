@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MASK, maskSecrets, mergeSecrets, profileHosts, validateProfile, type ProfileData } from "../src/model";
+import { DEFAULT_EXTRA_GUIDES, forDevice, MASK, maskSecrets, mergeSecrets, profileHosts, validateProfile, type ProfileData } from "../src/model";
 import { openJson, pairCode, sealJson } from "../src/crypto";
 import { probe } from "../src/reachability";
 
@@ -42,7 +42,25 @@ describe("validateProfile", () => {
 
 describe("profileHosts", () => {
   it("collects every host a TV may use", () => {
-    expect([...profileHosts(profile)].sort()).toEqual(["backup.example.net", "epg.example.org", "line.example.com:8080", "lists.example.org"]);
+    expect([...profileHosts(profile)].sort()).toEqual(["backup.example.net", "epg.example.org", "epgshare01.online", "line.example.com:8080", "lists.example.org"]);
+    expect([...profileHosts({ ...profile, extraGuides: [] })]).not.toContain("epgshare01.online");
+  });
+});
+
+describe("extra guides", () => {
+  it("gives TVs epgshare01 until the admin sets the list, and nothing once it is emptied", () => {
+    expect(forDevice(profile).extraGuides).toEqual(DEFAULT_EXTRA_GUIDES);
+    expect(forDevice({ ...profile, extraGuides: [] }).extraGuides).toEqual([]);
+    expect(forDevice({ ...profile, extraGuides: ["https://g.example/a.xml"] }).extraGuides).toEqual(["https://g.example/a.xml"]);
+  });
+
+  it("checks guide URLs and tidies pins", () => {
+    const ok = validateProfile({ ...profile, extraGuides: [" https://g.example/a.xml ", "https://g.example/a.xml"], guidePins: { " CA| CTV HD ": " CTV.Toronto.HD.ca2 ", empty: "" } });
+    expect(ok.extraGuides).toEqual(["https://g.example/a.xml"]);
+    expect(ok.guidePins).toEqual({ "CA| CTV HD": "CTV.Toronto.HD.ca2" });
+    expect(() => validateProfile({ ...profile, extraGuides: ["ftp://g.example/a.xml"] })).toThrow();
+    expect(() => validateProfile({ ...profile, extraGuides: ["https://a.x/1", "https://a.x/2", "https://a.x/3", "https://a.x/4", "https://a.x/5"] })).toThrow();
+    expect(() => validateProfile({ ...profile, guidePins: ["x"] })).toThrow();
   });
 });
 

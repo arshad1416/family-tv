@@ -1,5 +1,5 @@
 import { openJson, pairCode, randomId, sealJson, sha256Hex, timingSafeEqual } from "./crypto";
-import { CATEGORY_KINDS, cleanNames, maskSecrets, mergeSecrets, profileHosts, validateProfile, VERDICTS, type ProfileData } from "./model";
+import { CATEGORY_KINDS, cleanNames, forDevice, maskSecrets, mergeSecrets, profileHosts, validateProfile, VERDICTS, type ProfileData } from "./model";
 import { probe } from "./reachability";
 import { ADMIN_PAGE } from "./admin-page";
 import { preferServer, suggestions } from "./advice";
@@ -89,6 +89,16 @@ async function requireDevice(req: Request, env: Env): Promise<DeviceRow> {
   const row = await env.DB.prepare("SELECT * FROM devices WHERE token_hash = ?").bind(await sha256Hex(t)).first<DeviceRow>();
   if (!row) throw new HttpError(401, "unknown device");
   return row;
+}
+
+/** A TV's last status; null when missing or cut short (the column keeps 8,000 characters). */
+function parseStatus(raw: string | null): unknown {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
 }
 
 async function loadProfile(env: Env, id: string | null): Promise<ProfileData | null> {
@@ -195,7 +205,7 @@ async function deviceConfig(req: Request, env: Env) {
   return json({
     paired: true,
     nickname: d.nickname,
-    profile,
+    profile: profile && forDevice(profile),
     commands: await takeCommands(env, d.id, now),
     latestApp: await latestApp(env, req),
     // The client id is public (it goes in every Trakt API call); the secret never leaves the Worker.
@@ -399,7 +409,7 @@ async function adminDevices(env: Env) {
       WHERE d.profile_id IS NOT NULL
       ORDER BY d.nickname`,
   ).all();
-  return json({ devices: results.map((r) => ({ ...r, status: r.status_json ? JSON.parse(r.status_json as string) : null, status_json: undefined })) });
+  return json({ devices: results.map((r) => ({ ...r, status: parseStatus(r.status_json as string | null), status_json: undefined })) });
 }
 
 async function adminPair(req: Request, env: Env) {

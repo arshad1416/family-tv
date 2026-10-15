@@ -15,6 +15,8 @@ object PlaybackStatus {
     /** The last crash's stack trace (see [app.familytv.core.CrashLog]), so the admin can see why the app closed. */
     @Volatile var lastCrash: String? = null
     @Volatile var lastCrashAt: Long = 0
+    /** How the last refresh used the extra guides (see [app.familytv.iptv.Catalog]); null when there are none. */
+    @Volatile var guide: Map<String, Any?>? = null
 
     fun started(t: String) {
         title = t; startedAt = System.currentTimeMillis(); bufferingEvents = 0; bitrateKbps = null; droppedFrames = 0
@@ -30,6 +32,8 @@ object PlaybackStatus {
         "lastRefresh" to lastRefresh,
         "lastRefreshError" to lastRefreshError,
         "update" to update,
-        "lastCrash" to lastCrash?.let { mapOf("at" to lastCrashAt, "trace" to it.take(5000)) },
+        // The portal keeps 8,000 characters of this, so the trace leaves room for the rest.
+        "lastCrash" to lastCrash?.let { mapOf("at" to lastCrashAt, "trace" to it.take(4000)) },
+        "guide" to guide,
     )
 }
