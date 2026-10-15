@@ -157,7 +157,7 @@ describe("Lines API", () => {
 
   it("adds lines that are already on the panel from their links, checking each first", async () => {
     const env = await setup();
-    await call(env, "/api/admin/lines");
+    // No listing first: the profiles' lines still lend their server to a bare login.
     const r = await call(env, "/api/admin/lines/add", { method: "POST", body: JSON.stringify({ lines: [
       { name: "Grandma", link: "http://other.example:8080/get.php?username=gm1&password=pw&type=m3u_plus" },
       { link: "not a link" },
