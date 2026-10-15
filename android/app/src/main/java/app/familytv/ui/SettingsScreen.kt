@@ -15,10 +15,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -37,9 +33,6 @@ fun SettingsScreen(vm: MainViewModel, config: DeviceConfig) {
     val ctx = LocalContext.current
     val report by vm.diagnosis.collectAsState()
     val running by vm.diagnosing.collectAsState()
-    val unlocked by vm.adultUnlocked.collectAsState()
-    var pin by remember { mutableStateOf("") }
-    var pinError by remember { mutableStateOf(false) }
     Column(Modifier.verticalScroll(rememberScrollState())) {
         PageTitle("Settings", bottom = 18.dp)
         // TV: two columns sharing the width, so neither is squeezed. Phones and tablets: stacked.
@@ -76,16 +69,6 @@ fun SettingsScreen(vm: MainViewModel, config: DeviceConfig) {
                 }
                 // Only shown when the portal has Trakt set up.
                 if (config.trakt?.clientId != null) TraktPanel()
-                if (!config.profile?.parentalPin.isNullOrEmpty() && !unlocked) {
-                    Panel {
-                        Text("Parental lock", fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                        Text("Enter the PIN to show locked categories.", fontSize = 14.sp, color = Tv.Muted)
-                        PinPad(pin, onDigit = { if (pin.length < 8) pin += it; pinError = false }, onClear = { pin = "" }, onOk = {
-                            pinError = !vm.unlock(pin); pin = ""
-                        })
-                        if (pinError) Text("Wrong PIN", color = Tv.Bad)
-                    }
-                }
             }
         })
         Spacer(Modifier.height(32.dp))
@@ -103,23 +86,5 @@ internal fun Info(label: String, value: String) {
     Row {
         Text(label, Modifier.width(130.dp), fontSize = 15.sp, color = Tv.Muted)
         Text(value, Modifier.weight(1f), fontSize = 15.sp)
-    }
-}
-
-@Composable
-private fun PinPad(pin: String, onDigit: (String) -> Unit, onClear: () -> Unit, onOk: () -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(if (pin.isEmpty()) "Enter PIN" else "•".repeat(pin.length), fontSize = 20.sp)
-        listOf(listOf("1", "2", "3"), listOf("4", "5", "6"), listOf("7", "8", "9"), listOf("C", "0", "OK")).forEach { row ->
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                row.forEach { k ->
-                    FocusBox(
-                        onClick = { when (k) { "C" -> onClear(); "OK" -> onOk(); else -> onDigit(k) } },
-                        color = Tv.Raised, contentAlignment = Alignment.Center,
-                        modifier = Modifier.width(68.dp).height(48.dp),
-                    ) { Text(k, fontSize = 18.sp) }
-                }
-            }
-        }
     }
 }

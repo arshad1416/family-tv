@@ -62,7 +62,7 @@ private fun selectedCategory(cats: List<CategoryEntity>): Pair<CategoryEntity?, 
     return cat to { c: CategoryEntity -> id = c.chipKey }
 }
 
-private val CategoryEntity.chipKey get() = "$sourceId/$categoryId"
+internal val CategoryEntity.chipKey get() = "$sourceId/$categoryId"
 
 /** Category shortcuts across the top of Movies, Series and the Guide. */
 @OptIn(ExperimentalComposeUiApi::class)
@@ -85,7 +85,7 @@ fun CategoryChips(cats: List<CategoryEntity>, selected: CategoryEntity?, start: 
 fun MoviesScreen(vm: MainViewModel, profile: Profile) {
     val ctx = LocalContext.current
     val tv = !LocalFormFactor.current.touch
-    val visible = categories(vm, profile, Kind.MOVIE)
+    val visible = categories(profile, Kind.MOVIE)
     val cats = remember(visible) { if (visible.isEmpty()) visible else listOf(highlightsCategory(Kind.MOVIE), favouritesCategory(Kind.MOVIE)) + visible }
     val (cat, select) = selectedCategory(cats)
     val favs = rememberFavourites()
@@ -119,7 +119,7 @@ fun MoviesScreen(vm: MainViewModel, profile: Profile) {
 
 /** A movie poster: OK plays it, hold OK (or Menu) opens its menu, and it carries the Trailer button. */
 @Composable
-private fun MovieCard(m: MovieEntity, modifier: Modifier, width: Dp?, profile: Profile, favKeys: Set<String>, progress: Map<String, ProgressEntity>, onFocus: () -> Unit) {
+internal fun MovieCard(m: MovieEntity, modifier: Modifier, width: Dp?, profile: Profile, favKeys: Set<String>, progress: Map<String, ProgressEntity>, onFocus: () -> Unit) {
     val ctx = LocalContext.current
     val menus = LocalItemMenus.current
     val scope = rememberCoroutineScope()
@@ -134,6 +134,52 @@ private fun MovieCard(m: MovieEntity, modifier: Modifier, width: Dp?, profile: P
         onMenu = { menus.open = movieMenu(ctx, m, fav, p?.watched == true) },
         onFocus = onFocus,
     ) { scope.launch { playMovieNow(ctx, profile, m) } }
+}
+
+/**
+ * One category of [kind] as posters: live channels and movies play on OK, a show opens through
+ * [nav] (the Categories page, Adult Content included).
+ */
+@Composable
+internal fun CategoryPosters(profile: Profile, cat: CategoryEntity, nav: SeriesNav) {
+    val ctx = LocalContext.current
+    val dao = ctx.app.db.catalog()
+    val favs = rememberFavourites()
+    val favKeys = rememberFavouriteKeys(favs)
+    var lastCard by rememberSaveable(cat.chipKey) { mutableStateOf<String?>(null) }
+    when (cat.kind) {
+        Kind.LIVE -> {
+            val channels by remember(cat) { dao.channels(cat.sourceId, cat.categoryId) }.collectAsState(initial = emptyList())
+            PosterGrid(channels, { it.streamId }, lastCard) { c, mod, k ->
+                val fav = Favourites.key(Kind.LIVE, c.sourceId, c.streamId) in favKeys
+                PosterCard(
+                    c.name, c.logo, mod, width = null, logo = true,
+                    favourite = fav, onFavourite = { toggleFavourite(ctx, Kind.LIVE, c.sourceId, c.streamId, c.name) },
+                    onFocus = { lastCard = k },
+                ) { playLive(ctx, c.sourceId, c.categoryId, channels.indexOf(c), c.streamId) }
+            }
+        }
+        Kind.MOVIE -> {
+            val progress = rememberProgress()
+            val movies by remember(cat) { dao.movies(cat.sourceId, cat.categoryId) }.collectAsState(initial = emptyList())
+            PosterGrid(movies, { it.streamId }, lastCard) { m, mod, k -> MovieCard(m, mod, null, profile, favKeys, progress) { lastCard = k } }
+        }
+        else -> {
+            val showFavs = ShowFavourites(rememberFavouriteShowRows(favs))
+            val newKeys = rememberNewEpisodeKeys()
+            val rows by remember(cat) { dao.series(cat.sourceId, cat.categoryId) }.collectAsState(initial = emptyList())
+            val series = remember(rows) { groupSeries(rows) }
+            PosterGrid(series, SeriesGroup::key, nav.back ?: lastCard) { g, mod, k ->
+                val on = showFavs.has(g)
+                PosterCard(
+                    g.title, g.poster, mod, width = null,
+                    favourite = on, onFavourite = { toggleShowFavourite(ctx, g, on) },
+                    newBadge = g.hasNew(newKeys), newCount = g.newCount(newKeys),
+                    onFocus = { lastCard = k },
+                ) { nav.open = g }
+            }
+        }
+    }
 }
 
 /** Movies' Highlights: recently added, favourites and top rated, from the categories this profile shows. */
@@ -156,7 +202,7 @@ private fun rememberMovieShelves(visible: List<CategoryEntity>, favMovies: List<
 fun SeriesScreen(vm: MainViewModel, profile: Profile) {
     val ctx = LocalContext.current
     val tv = !LocalFormFactor.current.touch
-    val visible = categories(vm, profile, Kind.SERIES)
+    val visible = categories(profile, Kind.SERIES)
     val cats = remember(visible) { if (visible.isEmpty()) visible else listOf(highlightsCategory(Kind.SERIES), favouritesCategory(Kind.SERIES)) + visible }
     val (cat, select) = selectedCategory(cats)
     val nav = rememberSeriesNav()
@@ -249,7 +295,7 @@ private fun <T> Shelves(
 
 /** One category as a grid of posters; the entry point is the card last focused ([entry]) when it's here, else the first. */
 @Composable
-private fun <T> PosterGrid(
+internal fun <T> PosterGrid(
     items: List<T>,
     key: (T) -> String,
     entry: String?,

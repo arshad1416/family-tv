@@ -75,9 +75,9 @@ fun SearchScreen(vm: MainViewModel, profile: Profile) {
 
     // Results respect hidden categories and the parental lock, like the browse pages.
     fun keys(cats: List<CategoryEntity>) = cats.map { it.sourceId to it.categoryId }.toSet()
-    val live = keys(categories(vm, profile, Kind.LIVE))
-    val movies = keys(categories(vm, profile, Kind.MOVIE))
-    val series = keys(categories(vm, profile, Kind.SERIES))
+    val live = keys(categories(profile, Kind.LIVE))
+    val movies = keys(categories(profile, Kind.MOVIE))
+    val series = keys(categories(profile, Kind.SERIES))
     val q = query.trim()
     val results by produceState(Results(), q, live, movies, series) {
         delay(300) // let typing settle

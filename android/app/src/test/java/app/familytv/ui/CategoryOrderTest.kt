@@ -4,39 +4,50 @@ import app.familytv.data.CategoryEntity
 import app.familytv.data.Kind
 import app.familytv.portal.Profile
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CategoryOrderTest {
-    private fun cats(vararg names: String) = names.mapIndexed { i, n -> CategoryEntity("s", Kind.LIVE, "c$i", n, i, 0) }
-    private val all = cats("News", "Sports", "Kids", "Movies", "XXX Adult")
+    private fun cats(kind: String, vararg names: String) = names.mapIndexed { i, n -> CategoryEntity("s", kind, "c$i", n, i, 0) }
+    private val all = cats(Kind.LIVE, "News", "Sports", "Kids", "Movies", "XXX Adult", "Adults 18+")
 
     @Test
     fun namedCategoriesLeadInTheProfilesOrder() {
         val p = Profile(categoryOrder = mapOf(Kind.LIVE to listOf("kids", "Sports")), hiddenCategories = listOf("Movies"))
-        assertEquals(listOf("Kids", "Sports", "News", "XXX Adult"), visibleCategories(all, p, unlocked = false).map { it.name })
+        assertEquals(listOf("Kids", "Sports", "News"), visibleCategories(all, p).map { it.name })
     }
 
     @Test
     fun anotherKindsOrderDoesNotApply() {
         val p = Profile(categoryOrder = mapOf(Kind.MOVIE to listOf("Kids")), parentalPin = "1234")
-        assertEquals(listOf("News", "Sports", "Kids", "Movies"), visibleCategories(all, p, unlocked = false).map { it.name })
+        assertEquals(listOf("News", "Sports", "Kids", "Movies"), visibleCategories(all, p).map { it.name })
     }
 
     @Test
-    fun adultMoviesAndSeriesStayHiddenEvenUnlockedOrWithoutAPin() {
-        val movies = listOf("Action", "FOR ADULTS", "XXX").mapIndexed { i, n -> CategoryEntity("s", Kind.MOVIE, "m$i", n, i, 0) }
-        val series = listOf("Drama", "NETFLIX ADULT-SWIM", "HBO MAX (ADULT SWIM)", "Adult 18+")
-            .mapIndexed { i, n -> CategoryEntity("s", Kind.SERIES, "s$i", n, i, 0) }
+    fun adultCategoriesOnlyShowUnderAdultContent() {
+        val movies = cats(Kind.MOVIE, "Action", "FOR ADULTS", "XXX")
+        val series = cats(Kind.SERIES, "Drama", "NETFLIX ADULT-SWIM", "HBO MAX (ADULT SWIM)", "Adult 18+")
         for (p in listOf(Profile(), Profile(parentalPin = "1234"), null)) {
-            assertEquals(listOf("Action"), visibleCategories(movies, p, unlocked = true).map { it.name })
-            assertEquals(listOf("Drama", "NETFLIX ADULT-SWIM", "HBO MAX (ADULT SWIM)"), visibleCategories(series, p, unlocked = true).map { it.name })
+            assertEquals(listOf("Action"), visibleCategories(movies, p).map { it.name })
+            assertEquals(listOf("FOR ADULTS", "XXX"), adultCategories(movies, p).map { it.name })
+            assertEquals(listOf("Drama", "NETFLIX ADULT-SWIM", "HBO MAX (ADULT SWIM)"), visibleCategories(series, p).map { it.name })
+            assertEquals(listOf("Adult 18+"), adultCategories(series, p).map { it.name })
+            assertEquals(listOf("XXX Adult", "Adults 18+"), adultCategories(all, p).map { it.name })
         }
     }
 
     @Test
-    fun adultLiveCategoriesStillShowOnceUnlocked() {
-        val p = Profile(parentalPin = "1234")
-        assertEquals("XXX Adult", visibleCategories(all, p, unlocked = true).last().name)
-        assertEquals("XXX Adult", visibleCategories(all, Profile(), unlocked = false).last().name)
+    fun adultContentFollowsTheProfilesHiddenListAndOrder() {
+        val p = Profile(categoryOrder = mapOf(Kind.LIVE to listOf("Adults 18+")), hiddenCategories = listOf("XXX Adult"))
+        assertEquals(listOf("Adults 18+"), adultCategories(all, p).map { it.name })
+    }
+
+    @Test
+    fun pinIsOnlyAskedForWhenTheProfileHasOne() {
+        assertTrue(pinMatches(Profile(), ""))
+        assertTrue(pinMatches(Profile(parentalPin = "1234"), "1234"))
+        assertFalse(pinMatches(Profile(parentalPin = "1234"), "1111"))
+        assertFalse(pinMatches(Profile(parentalPin = "1234"), ""))
     }
 }

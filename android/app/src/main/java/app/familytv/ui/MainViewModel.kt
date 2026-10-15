@@ -32,7 +32,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     val diagnosis = MutableStateFlow<DiagnosisReport?>(null)
     val diagnosing = MutableStateFlow(false)
-    val adultUnlocked = MutableStateFlow(false)
 
     private var loop: Job? = null
 
@@ -123,12 +122,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         } finally {
             diagnosing.value = false
         }
-    }
-
-    fun unlock(pin: String): Boolean {
-        val ok = profile?.parentalPin?.let { it == pin } ?: true
-        if (ok) adultUnlocked.value = true
-        return ok
     }
 }
 

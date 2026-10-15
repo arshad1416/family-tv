@@ -84,8 +84,8 @@ class GuideCategories(
 /**
  * [PlayerGuide] with its categories: it opens on the list that's playing ([playingList], whose
  * channels the player already has) and can show any other visible live category or Favourites.
- * Adult categories stay hidden here whenever the profile has a PIN, since the player can't ask
- * for it. OK on a channel calls [onPick] with that channel's list and its index in it.
+ * Adult categories never show here; they open from Categories' Adult Content. OK on a channel
+ * calls [onPick] with that channel's list and its index in it.
  */
 @Composable
 fun LiveGuide(
@@ -101,7 +101,7 @@ fun LiveGuide(
 ) {
     val ctx = LocalContext.current
     val all by remember { ctx.app.db.catalog().categories(Kind.LIVE) }.collectAsState(initial = emptyList())
-    val visible = remember(all, profile) { visibleCategories(all, profile, unlocked = false) }
+    val visible = remember(all, profile) { visibleCategories(all, profile) }
     val cats = remember(visible) { listOf(favouritesCategory(Kind.LIVE)) + visible }
     val favs = rememberFavourites()
     val favKeys = rememberFavouriteKeys(favs)
