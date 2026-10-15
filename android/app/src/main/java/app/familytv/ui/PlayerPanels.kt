@@ -53,6 +53,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Icon
 import androidx.tv.material3.Text
+import app.familytv.player.Aspect
 import app.familytv.player.InfoSection
 import app.familytv.player.OnlineSubtitles
 import app.familytv.player.PlayerTracks
@@ -79,6 +80,8 @@ fun PlayerPanels(
     online: OnlineSubtitles?,
     live: Boolean,
     touch: Boolean,
+    aspect: Aspect,
+    onAspect: (Aspect) -> Unit,
     stats: () -> StreamStats,
     onOpen: (PlayerPanel) -> Unit,
     onClose: () -> Unit,
@@ -113,9 +116,9 @@ fun PlayerPanels(
                     }
                     LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp), contentPadding = PaddingValues(bottom = 32.dp)) {
                         when (panel) {
-                            PlayerPanel.Menu -> menuRows(tracks, stats, first, onOpen)
+                            PlayerPanel.Menu -> menuRows(tracks, aspect, stats, first, onOpen)
                             PlayerPanel.Captions -> captionRows(tracks, online, live, first, onClose)
-                            PlayerPanel.Tracks -> trackRows(tracks, first)
+                            PlayerPanel.Tracks -> trackRows(tracks, aspect, onAspect, first)
                             else -> Unit
                         }
                     }
@@ -128,7 +131,7 @@ fun PlayerPanels(
 private fun panelTitle(p: PlayerPanel) = when (p) {
     PlayerPanel.Menu -> "Options"
     PlayerPanel.Captions -> "Captions"
-    PlayerPanel.Tracks -> "Audio & video"
+    PlayerPanel.Tracks -> "Picture & sound"
     PlayerPanel.Info -> "Stream info"
 }
 
@@ -158,10 +161,11 @@ private fun LazyListScope.note(key: String, text: String) = item(key = key) {
     Text(text, fontSize = 13.sp, color = Tv.Muted, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
 }
 
-private fun LazyListScope.menuRows(tracks: PlayerTracks, stats: () -> StreamStats, first: FocusRequester, onOpen: (PlayerPanel) -> Unit) {
+private fun LazyListScope.menuRows(tracks: PlayerTracks, aspect: Aspect, stats: () -> StreamStats, first: FocusRequester, onOpen: (PlayerPanel) -> Unit) {
     item(key = "cc") { PanelRow("Captions", tracks.captionSummary(), focus = first) { onOpen(PlayerPanel.Captions) } }
-    if (tracks.hasChoices) item(key = "tracks") {
-        PanelRow("Audio & video", "${tracks.audio.size} audio · ${tracks.video.size} video") { onOpen(PlayerPanel.Tracks) }
+    item(key = "tracks") {
+        val counts = if (tracks.hasChoices) " · ${tracks.audio.size} audio · ${tracks.video.size} video" else ""
+        PanelRow("Picture & sound", "Picture: ${aspect.label}$counts") { onOpen(PlayerPanel.Tracks) }
     }
     item(key = "info") { PanelRow("Stream info", StreamInfo.summary(stats()) ?: "Codec, resolution, bitrate") { onOpen(PlayerPanel.Info) } }
 }
@@ -204,22 +208,22 @@ private fun LazyListScope.captionRows(tracks: PlayerTracks, online: OnlineSubtit
     }
 }
 
-private fun LazyListScope.trackRows(tracks: PlayerTracks, first: FocusRequester) {
-    var focusSet = false
-    fun f(): FocusRequester? = if (focusSet) null else { focusSet = true; first }
+private fun LazyListScope.trackRows(tracks: PlayerTracks, aspect: Aspect, onAspect: (Aspect) -> Unit, first: FocusRequester) {
+    header("Picture")
+    Aspect.entries.forEachIndexed { i, a ->
+        item(key = "p$i") { PanelRow(a.label, a.hint, selected = a == aspect, focus = if (i == 0) first else null) { onAspect(a) } }
+    }
     if (tracks.audio.size > 1) {
         header("Audio")
-        val ff = f()
-        tracks.audio.forEachIndexed { i, c -> item(key = "a$i") { PanelRow(c.label, selected = c.selected, focus = if (i == 0) ff else null) { tracks.selectAudio(c) } } }
+        tracks.audio.forEachIndexed { i, c -> item(key = "a$i") { PanelRow(c.label, selected = c.selected) { tracks.selectAudio(c) } } }
     }
     if (tracks.video.size > 1) {
         header("Video quality")
         val playing = tracks.video.firstOrNull { it.selected }?.let { TrackLabels.quality(-1, it.height) }
-        val ff = f()
-        item(key = "auto") { PanelRow("Auto", playing?.let { "Now playing $it" } ?: "Adjusts to the connection", selected = tracks.videoAuto, focus = ff) { tracks.selectVideo(null) } }
+        item(key = "auto") { PanelRow("Auto", playing?.let { "Now playing $it" } ?: "Adjusts to the connection", selected = tracks.videoAuto) { tracks.selectVideo(null) } }
         tracks.video.forEachIndexed { i, c -> item(key = "v$i") { PanelRow(c.label, selected = !tracks.videoAuto && c.selected) { tracks.selectVideo(c) } } }
     }
-    if (!tracks.hasChoices) note("single", "This stream has one audio and one video track.")
+    if (!tracks.hasChoices) note("single", "This stream has one audio track and one video quality.")
 }
 
 @Composable
@@ -280,7 +284,7 @@ fun PlayerButtons(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         CaptionButton(tracks.captionsOn, Modifier.focusRequester(first), onCaptions)
-        if (tracks.hasChoices) RoundIcon(Icons.Filled.Settings, "Audio and video tracks", onClick = onTracks)
+        RoundIcon(Icons.Filled.Settings, "Picture and sound", onClick = onTracks)
         RoundIcon(Icons.Filled.Info, "Stream info", onClick = onInfo)
     }
 }
