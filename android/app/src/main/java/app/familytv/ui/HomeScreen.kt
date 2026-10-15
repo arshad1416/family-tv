@@ -80,6 +80,7 @@ import app.familytv.data.NowNext
 import app.familytv.iptv.Streams
 import app.familytv.portal.DeviceConfig
 import app.familytv.portal.Profile
+import app.familytv.sync.NewEpisodes
 import app.familytv.sync.PlaybackStatus
 import app.familytv.trakt.PlayItem
 import app.familytv.trakt.ProgressRules
@@ -358,6 +359,7 @@ private data class Hero(val title: String, val subtitle: String, val detail: Str
 @Composable
 private fun HomePage(vm: MainViewModel, profile: Profile, onNavigate: (Page) -> Unit) {
     val ctx = LocalContext.current
+    val menus = LocalItemMenus.current
     val touch = LocalFormFactor.current.touch
     val dao = ctx.app.db.catalog()
     val scope = rememberCoroutineScope()
@@ -396,6 +398,11 @@ private fun HomePage(vm: MainViewModel, profile: Profile, onNavigate: (Page) -> 
     }
     val progress = rememberProgress()
     var openedFromFavourites by remember { mutableStateOf(false) }
+    val newKeys = rememberNewEpisodeKeys()
+    val newShows = rememberNewEpisodeShows(newKeys, seriesCats)
+    // Android 13+: ask once to notify about new episodes, when there is a favourite show to watch.
+    val activity = ctx as? android.app.Activity
+    LaunchedEffect(favSeries.isNotEmpty()) { if (favSeries.isNotEmpty() && activity != null) NewEpisodes.askOnce(activity) }
 
     if (onNow.isEmpty() && recent.isEmpty() && series.isEmpty() && favRow.isEmpty()) {
         return EmptyState(PlaybackStatus.lastRefreshError?.let { "Couldn't load channels: $it. Open Settings and run a check." } ?: "Nothing here yet.")
@@ -419,6 +426,16 @@ private fun HomePage(vm: MainViewModel, profile: Profile, onNavigate: (Page) -> 
             if (!touch) HeroHeader(hero)
             LazyColumn(verticalArrangement = Arrangement.spacedBy(22.dp), contentPadding = PaddingValues(bottom = 40.dp)) {
                 if (heroes.isNotEmpty()) item("hero") { HeroCarousel(heroes) }
+                if (newShows.isNotEmpty()) item("new-episodes") {
+                    Shelf("New episodes") {
+                        itemsIndexed(newShows, key = { _, g -> "new/${g.key}" }) { _, g ->
+                            PosterCard(
+                                g.title, g.poster, favourite = true, newBadge = true,
+                                onFocus = { hero.value = Hero(g.title, "New episodes", g.plot) },
+                            ) { nav.open = g }
+                        }
+                    }
+                }
                 if (favRow.isNotEmpty()) item("favourites") {
                     Shelf("Favourites") {
                         itemsIndexed(favRow, key = { _, (k, _) -> k }) { i, (_, x) ->
@@ -435,11 +452,12 @@ private fun HomePage(vm: MainViewModel, profile: Profile, onNavigate: (Page) -> 
                                         x.name, x.poster, entryPoint(entry), favourite = true, watched = p?.watched == true, progress = ProgressRules.bar(p),
                                         onTrailer = movieTrailerAction(profile, x),
                                         onFavourite = { toggleFavourite(ctx, Kind.MOVIE, x.sourceId, x.streamId, x.name) },
+                                        onMenu = { menus.open = movieMenu(ctx, x, true, p?.watched == true) },
                                         onFocus = { hero.value = Hero(x.name, "Favourite movie", null) },
                                     ) { scope.launch { playMovieNow(ctx, profile, x) } }
                                 }
                                 is SeriesGroup -> PosterCard(
-                                    x.title, x.poster, entryPoint(entry), favourite = true,
+                                    x.title, x.poster, entryPoint(entry), favourite = true, newBadge = x.hasNew(newKeys),
                                     onFavourite = { toggleShowFavourite(ctx, x, true) },
                                     onFocus = { hero.value = Hero(x.title, "Favourite series", x.plot) },
                                 ) { openedFromFavourites = true; nav.open = x }
@@ -463,12 +481,14 @@ private fun HomePage(vm: MainViewModel, profile: Profile, onNavigate: (Page) -> 
                     Shelf("Recently added movies", viewAll(Page.Movies)) {
                         itemsIndexed(recent, key = { _, m -> "${m.sourceId}/${m.streamId}" }) { i, m ->
                             val p = progress[ProgressKey.movie(m.sourceId, m.streamId)]
+                            val fav = Favourites.key(Kind.MOVIE, m.sourceId, m.streamId) in favKeys
                             PosterCard(
                                 m.name, m.poster, entryPoint(firstRow == 1 && i == 0),
-                                favourite = Favourites.key(Kind.MOVIE, m.sourceId, m.streamId) in favKeys,
+                                favourite = fav,
                                 onFavourite = { toggleFavourite(ctx, Kind.MOVIE, m.sourceId, m.streamId, m.name) },
                                 watched = p?.watched == true, progress = ProgressRules.bar(p),
                                 onTrailer = movieTrailerAction(profile, m),
+                                onMenu = { menus.open = movieMenu(ctx, m, fav, p?.watched == true) },
                                 onFocus = { hero.value = Hero(m.name, "Movie", m.rating?.takeIf { it.isNotBlank() && it != "0" }?.let { "Rating $it" }) },
                             ) {
                                 scope.launch { playMovieNow(ctx, profile, m) }
@@ -555,7 +575,8 @@ fun ChannelCard(
 
 /**
  * Artwork tile. [onFavourite] adds hold-OK or Menu (TV) or a heart button (touch) to toggle the
- * favourite; [watched] and [progress] draw the tick and the resume line. [logo] fits a channel
+ * favourite; [onMenu], when set, takes over hold-OK, Menu and long press (an [ItemMenu]);
+ * [newBadge] marks a show with new episodes; [watched] and [progress] draw the tick and the resume line. [logo] fits a channel
  * logo instead of cropping a poster. [onTrailer] adds a Trailer button (over the poster on touch,
  * beside the name on TV).
  */
@@ -571,19 +592,22 @@ fun PosterCard(
     watched: Boolean = false,
     progress: Float = 0f,
     onTrailer: (() -> Unit)? = null,
+    onMenu: (() -> Unit)? = null,
+    newBadge: Boolean = false,
     onFocus: () -> Unit = {},
     onClick: () -> Unit,
 ) {
     val touch = LocalFormFactor.current.touch
     val heart = touch && onFavourite != null
     Column(if (width != null) Modifier.width(width) else Modifier.fillMaxWidth()) {
-        FocusBox(onClick = onClick, onLongClick = onFavourite, onFocus = onFocus, outline = true, scale = 1.06f, color = Tv.Raised, modifier = modifier.fillMaxWidth().aspectRatio(2f / 3f), contentAlignment = Alignment.Center) {
+        FocusBox(onClick = onClick, onLongClick = onMenu ?: onFavourite, onFocus = onFocus, outline = true, scale = 1.06f, color = Tv.Raised, modifier = modifier.fillMaxWidth().aspectRatio(2f / 3f), contentAlignment = Alignment.Center) {
             Text(name, Modifier.padding(8.dp), fontSize = 13.sp, maxLines = 4, color = Tv.Muted)
             if (poster != null) {
                 if (logo) AsyncImage(poster, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize().padding(20.dp))
                 else AsyncImage(poster, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
             }
             MarkBadge(Modifier.align(Alignment.TopStart), watched = watched)
+            if (newBadge) NewBadge(Modifier.align(Alignment.BottomEnd))
             if (heart) FavouriteButton(favourite, onFavourite!!, Modifier.align(Alignment.TopEnd))
             else MarkBadge(Modifier.align(Alignment.TopEnd), favourite = favourite)
             if (progress > 0f) ProgressLine(progress, Modifier.align(Alignment.BottomCenter).padding(8.dp), height = 4.dp)

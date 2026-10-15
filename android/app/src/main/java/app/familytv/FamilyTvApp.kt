@@ -11,11 +11,13 @@ import app.familytv.diag.Diagnoser
 import app.familytv.iptv.Catalog
 import app.familytv.portal.PortalClient
 import app.familytv.sync.CommandRunner
+import app.familytv.sync.NewEpisodes
 import app.familytv.sync.SyncWorker
 import app.familytv.trailer.MediaExtras
 import app.familytv.trakt.Trakt
 import app.familytv.user.Favourites
 import app.familytv.user.UserDb
+import app.familytv.user.WatchedMarks
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -33,6 +35,8 @@ class FamilyTvApp : Application() {
     val trakt by lazy { Trakt(this) }
     /** Trailers and episode details beyond the provider (TMDB, TheTVDB). */
     val extras by lazy { MediaExtras(this) }
+    val watched by lazy { WatchedMarks(this) }
+    val newEpisodes by lazy { NewEpisodes(this) }
 
     /** For work that must outlive a screen, like the stop scrobble sent as the player closes. */
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)

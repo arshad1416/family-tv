@@ -62,7 +62,8 @@ class MainActivity : ComponentActivity() {
         }
         setContent {
             FamilyTvTheme {
-              CompositionLocalProvider(LocalFormFactor provides rememberFormFactor()) {
+              val menus = remember { ItemMenus() }
+              CompositionLocalProvider(LocalFormFactor provides rememberFormFactor(), LocalItemMenus provides menus) {
                 Surface(modifier = Modifier.fillMaxSize(), colors = SurfaceDefaults.colors(containerColor = Tv.Bg, contentColor = Tv.Text)) {
                     // Android 15 draws edge to edge; keep clear of a phone's status and navigation bars.
                     Box(Modifier.fillMaxSize().safeDrawingPadding()) {
@@ -83,6 +84,7 @@ class MainActivity : ComponentActivity() {
                             is Screen.Ready -> HomeScreen(vm, s.config)
                         }
                     }
+                    menus.Host()
                     message?.let { text ->
                         Dialog(onDismissRequest = { message = null }) {
                             Column(

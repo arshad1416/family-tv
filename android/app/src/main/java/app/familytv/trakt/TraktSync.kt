@@ -27,7 +27,8 @@ import java.time.Instant
 /**
  * Keeps this device and the Trakt account in step:
  * - movie and series favourites <-> the Trakt watchlist (two-way, see [WatchlistMerge]);
- * - watched marks: pulled from sync/watched, pushed by scrobble stop (or sync/history when that failed);
+ * - watched marks: pulled from sync/watched, pushed by scrobble stop (or sync/history when that failed
+ *   or a mark was set by hand; sync/history/remove when one was taken off);
  * - resume points: pulled from sync/playback, pushed by scrobble start/pause/stop.
  * Live channels have no Trakt equivalent, so channel favourites never leave the device.
  */
@@ -80,7 +81,7 @@ class TraktSync(private val app: FamilyTvApp, private val trakt: Trakt) {
     // ---- favourites <-> watchlist ----
 
     private suspend fun watchlist(budget: Budget) {
-        val rows = user.allFavouriteRows().filter { it.kind != Kind.LIVE }
+        val rows = user.allFavouriteRows().filter { it.kind != Kind.LIVE && !it.fromHistory }
         val local = rows.map { f ->
             // Only new favourites are worth a title search; synced ones were matched when they went up.
             val search = f.pending == Pending.ADD || (f.pending == null && !f.onTrakt)
@@ -107,7 +108,10 @@ class TraktSync(private val app: FamilyTvApp, private val trakt: Trakt) {
         for (r in plan.pull) {
             val refs = refs(r.kind, listOf(r.ids)).first().ifEmpty { refsByTitle(r.kind, r.title, r.year) }
             for (ref in refs) {
-                if (user.favourite(ref.kind, ref.sourceId, ref.itemId) != null) continue
+                val existing = user.favourite(ref.kind, ref.sourceId, ref.itemId)
+                // Followed from history, now on the watchlist too: an ordinary synced favourite.
+                if (existing?.fromHistory == true) user.upsertFavourite(existing.copy(fromHistory = false, pending = null, onTrakt = true))
+                if (existing != null) continue
                 val name = catalogName(ref) ?: continue
                 user.upsertFavourite(FavouriteEntity(ref.kind, ref.sourceId, ref.itemId, name, System.currentTimeMillis(), pending = null, onTrakt = true))
                 rememberIds(ref, r.ids)
@@ -129,24 +133,34 @@ class TraktSync(private val app: FamilyTvApp, private val trakt: Trakt) {
 
     // ---- watched ----
 
-    /** Watched here while Trakt couldn't be reached: send through sync/history. */
+    /**
+     * Watched here while Trakt couldn't be reached, or marked watched or unwatched by hand: sent
+     * through sync/history (or sync/history/remove).
+     */
     private suspend fun history(budget: Budget) {
         val rows = user.pendingHistory()
         if (rows.isEmpty()) return
+        val (add, remove) = rows.partition { it.watched }
+        val sent = historyCall("/sync/history", add, budget, dated = true) + historyCall("/sync/history/remove", remove, budget, dated = false)
+        sent.chunked(500).forEach { user.clearPendingHistory(it) }
+    }
+
+    /** Posts [rows] to [path] and returns the keys it sent (rows with no Trakt match wait for a later sync). */
+    private suspend fun historyCall(path: String, rows: List<ProgressEntity>, budget: Budget, dated: Boolean): List<String> {
         val movies = ArrayList<Map<String, Any>>()
         val shows = LinkedHashMap<MediaIds, MutableMap<Int, MutableList<Map<String, Any>>>>()
         val sent = ArrayList<String>()
         for (p in rows) {
             val movie = p.kind == ProgressKey.MOVIE
             val ids = idsFor(if (movie) Kind.MOVIE else Kind.SERIES, p.sourceId, p.itemId, budget) ?: continue
-            val at = iso(p.updatedAt)
-            if (movie) movies += mapOf("ids" to ids.toTrakt(), "watched_at" to at)
-            else shows.getOrPut(ids) { sortedMapOf() }.getOrPut(p.season) { ArrayList() } += mapOf("number" to p.episode, "watched_at" to at)
+            val at = if (dated) mapOf("watched_at" to iso(p.updatedAt)) else emptyMap()
+            if (movie) movies += mapOf("ids" to ids.toTrakt()) + at
+            else shows.getOrPut(ids) { sortedMapOf() }.getOrPut(p.season) { ArrayList() } += mapOf("number" to p.episode) + at
             sent += p.key
         }
-        if (sent.isEmpty()) return
+        if (sent.isEmpty()) return sent
         trakt.post(
-            "/sync/history",
+            path,
             mapOf(
                 "movies" to movies,
                 "shows" to shows.map { (ids, seasons) ->
@@ -154,19 +168,21 @@ class TraktSync(private val app: FamilyTvApp, private val trakt: Trakt) {
                 },
             ),
         )
-        sent.chunked(500).forEach { user.clearPendingHistory(it) }
+        return sent
     }
 
-    /** Watched marks from other devices (matched by id only: history can run to thousands of titles). */
+    /** Watched marks from other devices and other Trakt apps, for every title the catalog has. */
     private suspend fun watched() {
         val updates = ArrayList<Pair<ProgressEntity, Long>>()
         val movies = list<TWatchedMovie>("/sync/watched/movies").filter { it.movie?.ids != null }
-        refs(Kind.MOVIE, movies.map { it.movie!!.ids!!.toIds() }).forEachIndexed { i, refs ->
+        matched(Kind.MOVIE, movies.map { it.movie!! }).forEachIndexed { i, refs ->
             val at = parse(movies[i].lastWatchedAt)
             refs.forEach { r -> updates += ProgressEntity(ProgressKey.movie(r.sourceId, r.itemId), ProgressKey.MOVIE, r.sourceId, r.itemId) to at }
         }
         val shows = list<TWatchedShow>("/sync/watched/shows").filter { it.show?.ids != null }
-        refs(Kind.SERIES, shows.map { it.show!!.ids!!.toIds() }).forEachIndexed { i, refs ->
+        val showRefs = matched(Kind.SERIES, shows.map { it.show!! })
+        followShows(showRefs)
+        showRefs.forEachIndexed { i, refs ->
             for (r in refs) for (season in shows[i].seasons.orEmpty()) for (ep in season.episodes.orEmpty()) {
                 val key = ProgressKey.episode(r.sourceId, r.itemId, season.number, ep.number)
                 updates += ProgressEntity(key, ProgressKey.EPISODE, r.sourceId, r.itemId, season.number, ep.number) to parse(ep.lastWatchedAt)
@@ -178,6 +194,8 @@ class TraktSync(private val app: FamilyTvApp, private val trakt: Trakt) {
                 val e = existing[fresh.key]
                 when {
                     e == null -> fresh.copy(watched = true, percent = 100f, updatedAt = at)
+                    // Changed here since this sync sent history; the next sync sends it first.
+                    e.pendingHistory -> null
                     // Finished on another device after it last stopped here.
                     at > e.updatedAt -> e.copy(watched = true, percent = 100f, positionMs = 0, updatedAt = at)
                     !e.watched -> e.copy(watched = true)
@@ -188,6 +206,21 @@ class TraktSync(private val app: FamilyTvApp, private val trakt: Trakt) {
         }
     }
 
+    /**
+     * Shows the family watches on Trakt become favourites here, so they sit in Favourites with
+     * their progress. Not pushed to the watchlist; one removed here stays removed.
+     */
+    private suspend fun followShows(shows: List<List<Ref>>) {
+        val now = System.currentTimeMillis()
+        for (copies in shows) {
+            // One favourite per show (the Favourites page groups language copies anyway).
+            if (copies.isEmpty() || copies.any { user.favourite(it.kind, it.sourceId, it.itemId) != null }) continue
+            val ref = copies.first()
+            val name = catalogName(ref) ?: continue
+            user.upsertFavourite(FavouriteEntity(ref.kind, ref.sourceId, ref.itemId, name, now, fromHistory = true))
+        }
+    }
+
     // ---- resume points ----
 
     private suspend fun playback() {
@@ -195,10 +228,12 @@ class TraktSync(private val app: FamilyTvApp, private val trakt: Trakt) {
         val movies = items.filter { it.type == "movie" && it.movie?.ids != null }
         val episodes = items.filter { it.type == "episode" && it.show?.ids != null && it.episode?.season != null && it.episode.number != null }
         val updates = ArrayList<Pair<ProgressEntity, TPlayback>>()
-        refs(Kind.MOVIE, movies.map { it.movie!!.ids!!.toIds() }).forEachIndexed { i, refs ->
+        matched(Kind.MOVIE, movies.map { it.movie!! }).forEachIndexed { i, refs ->
             refs.forEach { r -> updates += ProgressEntity(ProgressKey.movie(r.sourceId, r.itemId), ProgressKey.MOVIE, r.sourceId, r.itemId) to movies[i] }
         }
-        refs(Kind.SERIES, episodes.map { it.show!!.ids!!.toIds() }).forEachIndexed { i, refs ->
+        val showRefs = matched(Kind.SERIES, episodes.map { it.show!! })
+        followShows(showRefs)
+        showRefs.forEachIndexed { i, refs ->
             val p = episodes[i]
             val s = p.episode!!.season!!
             val n = p.episode.number!!
@@ -319,6 +354,28 @@ class TraktSync(private val app: FamilyTvApp, private val trakt: Trakt) {
         }
     }
 
+    /**
+     * Catalog items for each Trakt title: by id, else by title and year (then the ids are saved,
+     * so the next sync matches by id). Title matching is capped per sync, since a long Trakt
+     * history can run to thousands of titles; the rest are matched on later syncs.
+     */
+    private suspend fun matched(kind: String, media: List<TMedia>): List<List<Ref>> {
+        val byIds = refs(kind, media.map { it.ids?.toIds() ?: MediaIds() })
+        var titleLookups = MAX_TITLE_MATCHES
+        val tried = HashMap<String, List<Ref>>()
+        return media.mapIndexed { i, m ->
+            byIds[i].ifEmpty {
+                val title = m.title?.takeIf { it.isNotBlank() } ?: return@ifEmpty emptyList()
+                tried.getOrPut("$title/${m.year}") {
+                    if (titleLookups-- <= 0) return@ifEmpty emptyList()
+                    refsByTitle(kind, title, m.year).also { found ->
+                        m.ids?.toIds()?.takeUnless { it.isEmpty }?.let { ids -> found.forEach { rememberIds(it, ids) } }
+                    }
+                }
+            }
+        }
+    }
+
     /** Last resort for watchlist items: the catalog by title (and year). */
     private suspend fun refsByTitle(kind: String, title: String, year: Int?): List<Ref> {
         // LIKE on the longest word, so punctuation differences ("Spider-Man:" vs "Spider Man") still find it.
@@ -352,6 +409,7 @@ class TraktSync(private val app: FamilyTvApp, private val trakt: Trakt) {
         const val TICK = "tick"
 
         private const val MAX_SEARCHES = 25
+        private const val MAX_TITLE_MATCHES = 200
         private const val RETRY_MS = 7 * 24 * 3_600_000L
 
         private fun iso(ms: Long) = Instant.ofEpochMilli(ms).toString()

@@ -27,6 +27,19 @@ object EpisodeGuide {
         return ordered.getOrNull(last + 1) ?: ordered.firstOrNull()
     }
 
+    /** Every regular episode from the start up to and including [last] (specials only when [last] is one). */
+    fun upTo(episodes: List<XtreamParser.Episode>, last: XtreamParser.Episode): List<XtreamParser.Episode> =
+        if (last.season == 0) episodes.filter { it.season == 0 && it.episode <= last.episode }
+        else episodes.filter { it.season in 1 until last.season || (it.season == last.season && it.episode <= last.episode) }
+
+    /** The newest regular episode as (season, episode), or null when there are none. Specials don't count. */
+    fun latest(episodes: List<XtreamParser.Episode>): Pair<Int, Int>? =
+        episodes.filter { it.season > 0 }.maxWithOrNull(compareBy({ it.season }, { it.episode }))?.let { it.season to it.episode }
+
+    /** How many regular episodes come after (season, episode) [since]. */
+    fun countAfter(episodes: List<XtreamParser.Episode>, since: Pair<Int, Int>): Int =
+        episodes.count { it.season > since.first || (it.season == since.first && it.episode > since.second) }
+
     private val SXE = Regex("(?i)^.*?\\bS\\d{1,3}\\s*E\\d{1,4}\\b\\s*[-:–|.]*\\s*")
 
     /** "Show - S01E03 - The Swarm" becomes "The Swarm"; an empty title becomes "Episode 3". */

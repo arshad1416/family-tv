@@ -168,6 +168,7 @@ fun LiveScreen(vm: MainViewModel, profile: Profile) {
 @Composable
 fun MoviesScreen(vm: MainViewModel, profile: Profile) {
     val ctx = LocalContext.current
+    val menus = LocalItemMenus.current
     val scope = rememberCoroutineScope()
     val visible = categories(vm, profile, Kind.MOVIE)
     val cats = remember(visible) { if (visible.isEmpty()) visible else listOf(favouritesCategory(Kind.MOVIE)) + visible }
@@ -190,12 +191,14 @@ fun MoviesScreen(vm: MainViewModel, profile: Profile) {
         PosterGrid(
             movies.map { m ->
                 val p = progress[ProgressKey.movie(m.sourceId, m.streamId)]
+                val fav = Favourites.key(Kind.MOVIE, m.sourceId, m.streamId) in favKeys
                 GridItem(
                     "${m.sourceId}/${m.streamId}", m.name, m.poster,
-                    favourite = Favourites.key(Kind.MOVIE, m.sourceId, m.streamId) in favKeys,
+                    favourite = fav,
                     watched = p?.watched == true, progress = ProgressRules.bar(p),
                     onFavourite = { toggleFavourite(ctx, Kind.MOVIE, m.sourceId, m.streamId, m.name) },
                     movie = m,
+                    onMenu = { menus.open = movieMenu(ctx, m, fav, p?.watched == true) },
                 )
             },
             back = null, profile = profile,
@@ -216,6 +219,7 @@ fun SeriesScreen(vm: MainViewModel, profile: Profile) {
     val favs = rememberFavourites()
     val favSeries = rememberFavouriteSeries(favs, visible)
     val showFavs = ShowFavourites(rememberFavouriteShowRows(favs))
+    val newKeys = rememberNewEpisodeKeys()
     val inCategory by remember(cat) {
         cat?.takeUnless { it.isFavourites }?.let { ctx.app.db.catalog().series(it.sourceId, it.categoryId) } ?: flowOf(emptyList())
     }.collectAsState(initial = emptyList())
@@ -232,7 +236,7 @@ fun SeriesScreen(vm: MainViewModel, profile: Profile) {
             PosterGrid(
                 series.map { g ->
                     val on = showFavs.has(g)
-                    GridItem(g.key, g.title, g.poster, favourite = on, onFavourite = { toggleShowFavourite(ctx, g, on) })
+                    GridItem(g.key, g.title, g.poster, favourite = on, onFavourite = { toggleShowFavourite(ctx, g, on) }, isNew = g.hasNew(newKeys))
                 },
                 back = nav.back, state = grid,
             ) { idx -> nav.open = series[idx] }
@@ -251,6 +255,8 @@ private class GridItem(
     val onFavourite: (() -> Unit)? = null,
     /** Set for movies: the card gets a Trailer button (looked up when pressed). */
     val movie: MovieEntity? = null,
+    val onMenu: (() -> Unit)? = null,
+    val isNew: Boolean = false,
 )
 
 @Composable
@@ -277,6 +283,7 @@ private fun PosterGrid(
                 it.name, it.poster, entryPoint(if (hasBack) it.key == back else i == 0), width = null,
                 favourite = it.favourite, onFavourite = it.onFavourite, watched = it.watched, progress = it.progress,
                 onTrailer = if (it.movie != null && profile != null) movieTrailerAction(profile, it.movie) else null,
+                onMenu = it.onMenu, newBadge = it.isNew,
             ) { onClick(i) }
         }
     }
@@ -290,4 +297,4 @@ internal fun FavouritesHint(text: String) {
 
 private fun vodHint(form: FormFactor, what: String) =
     (if (form.touch) "Tap the heart on $what" else "Hold OK (or press Menu) on $what") +
-        " to add it here. With Trakt connected in Settings, favourite movies and series follow your Trakt watchlist on every device."
+        " to add it here (on a movie that also lets you mark it watched). With Trakt connected in Settings, favourite movies and series follow your Trakt watchlist on every device."
