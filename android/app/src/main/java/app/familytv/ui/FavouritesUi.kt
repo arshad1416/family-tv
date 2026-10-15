@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Favorite
@@ -24,7 +25,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Icon
+import androidx.tv.material3.Text
 import app.familytv.FamilyTvApp
 import app.familytv.app
 import app.familytv.iptv.SeriesTitles
@@ -137,6 +141,14 @@ fun FavouriteButton(on: Boolean, onClick: () -> Unit, modifier: Modifier = Modif
     }
 }
 
+/** "NEW" on a favourite show's poster while it has episodes the family hasn't opened yet. */
+@Composable
+fun NewBadge(modifier: Modifier = Modifier) {
+    Box(modifier.padding(6.dp).background(Tv.Accent, RoundedCornerShape(6.dp)).padding(horizontal = 7.dp, vertical = 2.dp)) {
+        Text("NEW", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Tv.Bg)
+    }
+}
+
 /** A small marker on artwork: a heart for favourites, a tick for watched. */
 @Composable
 fun MarkBadge(modifier: Modifier = Modifier, favourite: Boolean = false, watched: Boolean = false, size: Dp = 22.dp) {
@@ -162,6 +174,29 @@ fun rememberFavouriteShowRows(favs: List<FavouriteEntity> = rememberFavourites()
     return rows
 }
 
+/** "sourceId/seriesId" of every show with episodes added since the family last opened it. */
+@Composable
+fun rememberNewEpisodeKeys(): Set<String> {
+    val ctx = LocalContext.current
+    val rows by remember { ctx.app.userDb.user().newEpisodes() }.collectAsState(initial = emptyList())
+    return remember(rows) { rows.mapTo(LinkedHashSet()) { "${it.sourceId}/${it.seriesId}" } }
+}
+
+/** Those shows as posters, newest first, minus any in hidden or locked categories. */
+@Composable
+fun rememberNewEpisodeShows(keys: Set<String>, visible: List<CategoryEntity>): List<SeriesGroup> {
+    val dao = LocalContext.current.app.db.catalog()
+    var shows by remember { mutableStateOf(emptyList<SeriesGroup>()) }
+    LaunchedEffect(keys, visible) {
+        val ok = visible.mapTo(HashSet()) { it.sourceId to it.categoryId }
+        val rows = keys.mapNotNull { k -> k.split('/', limit = 2).let { (s, id) -> dao.seriesItem(s, id) } }.filter { (it.sourceId to it.categoryId) in ok }
+        shows = groupSeries(rows)
+    }
+    return shows
+}
+
+fun SeriesGroup.hasNew(keys: Set<String>) = keys.isNotEmpty() && copies.any { it.key in keys }
+
 /** Whether a grouped show is a favourite: any copy of it is (same row, same TMDB id or same title). */
 class ShowFavourites(private val rows: List<SeriesEntity>) {
     private val keys = rows.mapTo(HashSet()) { it.key }
@@ -184,7 +219,7 @@ fun toggleShowFavourite(ctx: Context, group: SeriesGroup, isFavourite: Boolean, 
         val copies = app.db.allCopies(group)
         if (isFavourite) {
             val dao = app.db.catalog()
-            val favs = app.userDb.user().allFavouriteRows().filter { it.kind == Kind.SERIES && it.pending != Pending.REMOVE }
+            val favs = app.userDb.user().allFavouriteRows().filter { it.kind == Kind.SERIES && it.pending != Pending.REMOVE && it.pending != Pending.HIDDEN }
             for (f in favs) {
                 val row = dao.seriesItem(f.sourceId, f.itemId)
                 val match = copies.any { c -> c.sourceId == f.sourceId && c.seriesId == f.itemId } ||

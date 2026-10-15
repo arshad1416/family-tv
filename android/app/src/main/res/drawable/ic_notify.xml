@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Status bar icon: a screen with a play mark, white on transparent as Android requires. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M3,5h18a1,1 0,0 1,1 1v11a1,1 0,0 1,-1 1h-7v2h3v1H7v-1h3v-2H3a1,1 0,0 1,-1 -1V6a1,1 0,0 1,1 -1zM4,7v9h16V7zM10,8.5l5,3 -5,3z" />
+</vector>

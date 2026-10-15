@@ -22,10 +22,19 @@ passwords on a remote, and when a TV goes black the portal tells you why.
 - **Favourites:** hold OK (or press Menu) on any channel, movie or series to add or remove it; on a
   phone or tablet tap the heart. Live TV, Movies and Series each get a *Favourites* category at the
   top, and Home a *Favourites* row. Favourites survive channel reloads.
+- **Watched marks:** hold OK (or Menu, or a long press on touch) on a movie to mark it watched or
+  unwatched. On a show's page, the season button marks the whole season, and holding OK on an
+  episode marks it, or every episode up to it. Marking clears the resume point.
+- **New episodes:** every 6 hours the background check-in looks at favourite shows (up to 60, one at a
+  time). A new episode puts the show in a *New episodes* row on Home with a NEW badge until its page
+  is opened, and posts a notification (on Android 13+ the app asks once for permission).
 - **Trakt (optional):** connect a Trakt account in Settings with a code and a QR (no typing on the
   remote). Favourite movies and series follow the Trakt watchlist both ways, and watched marks and
-  resume points sync through Trakt scrobbling, so every device on the same Trakt account agrees.
-  Channel favourites stay on the device, since Trakt has no live TV.
+  resume points sync through Trakt scrobbling and history, so every device on the same Trakt account
+  agrees. Every show in the Trakt history (and any with an episode in progress) is added to Favourites
+  with its watched episodes and resume points; those stay on the device, and one removed here isn't
+  added back. Titles are matched by id, else by title and year. Channel favourites stay on the
+  device, since Trakt has no live TV.
 - Captions, audio/video tracks and stream info in the player. Live TV: D-pad right opens Options;
   movies and episodes: press up from the player controls for the CC, audio & video and info buttons;
   phones and tablets: tap the video. The remote's Info, Captions and Menu keys work too.

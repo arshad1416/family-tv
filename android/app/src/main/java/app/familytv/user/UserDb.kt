@@ -1,6 +1,8 @@
 package app.familytv.user
 
 import android.content.Context
+import androidx.room.AutoMigration
+import androidx.room.ColumnInfo
 import androidx.room.Dao
 import androidx.room.Database
 import androidx.room.Entity
@@ -27,15 +29,23 @@ data class FavouriteEntity(
     val itemId: String,
     val name: String,
     val addedAt: Long,
-    /** Change not yet sent to Trakt: [Pending.ADD], [Pending.REMOVE] (row kept as a tombstone) or null. */
+    /** Change not yet sent to Trakt: [Pending.ADD], [Pending.REMOVE] (row kept as a tombstone), [Pending.HIDDEN] or null. */
     val pending: String? = null,
     /** On the Trakt watchlist as of the last sync; if it disappears there, it was removed elsewhere. */
     val onTrakt: Boolean = false,
+    /**
+     * Added because the show is in the family's Trakt history, not by hand. It stays on this
+     * device (never pushed to the watchlist); removing it leaves a [Pending.HIDDEN] row so the
+     * next sync doesn't add it back.
+     */
+    @ColumnInfo(defaultValue = "0") val fromHistory: Boolean = false,
 )
 
 object Pending {
     const val ADD = "add"
     const val REMOVE = "remove"
+    /** A [FavouriteEntity.fromHistory] favourite the family removed. */
+    const val HIDDEN = "hidden"
 }
 
 /** Where playback stopped, and whether it was watched. One row per movie or per episode. */
@@ -79,9 +89,26 @@ data class MediaIdsEntity(
     val checkedAt: Long,
 )
 
+/**
+ * The newest episode seen for a favourite show, so the background check can tell when another
+ * one arrives. [newCount] and [newSince] stay set until the show's page is opened.
+ */
+@Entity(tableName = "episode_watch", primaryKeys = ["sourceId", "seriesId"])
+data class EpisodeWatchEntity(
+    val sourceId: String,
+    val seriesId: String,
+    val name: String,
+    val latestSeason: Int,
+    val latestEpisode: Int,
+    val checkedAt: Long,
+    val newCount: Int = 0,
+    /** When the unseen new episodes appeared; 0 when there are none. */
+    val newSince: Long = 0,
+)
+
 @Dao
 interface UserDao {
-    @Query("SELECT * FROM favourites WHERE pending IS NULL OR pending <> 'remove' ORDER BY addedAt DESC")
+    @Query("SELECT * FROM favourites WHERE pending IS NULL OR pending NOT IN ('remove', 'hidden') ORDER BY addedAt DESC")
     fun favourites(): Flow<List<FavouriteEntity>>
     @Query("SELECT * FROM favourites") suspend fun allFavouriteRows(): List<FavouriteEntity>
     @Query("SELECT * FROM favourites WHERE kind = :kind AND sourceId = :sourceId AND itemId = :itemId")
@@ -91,7 +118,7 @@ interface UserDao {
     @Query("DELETE FROM favourites WHERE kind = :kind AND sourceId = :sourceId AND itemId = :itemId")
     suspend fun deleteFavourite(kind: String, sourceId: String, itemId: String)
     @Query("DELETE FROM favourites WHERE pending = 'remove'") suspend fun dropTombstones()
-    @Query("UPDATE favourites SET onTrakt = 0, pending = 'add' WHERE kind <> 'live'") suspend fun markAllUnsynced()
+    @Query("UPDATE favourites SET onTrakt = 0, pending = 'add' WHERE kind <> 'live' AND fromHistory = 0") suspend fun markAllUnsynced()
 
     @Query("SELECT * FROM progress") fun progress(): Flow<List<ProgressEntity>>
     @Query("SELECT * FROM progress WHERE `key` = :key") suspend fun progress(key: String): ProgressEntity?
@@ -101,6 +128,13 @@ interface UserDao {
     @Upsert suspend fun upsertProgressRows(p: List<ProgressEntity>)
     @Query("UPDATE progress SET pendingHistory = 0 WHERE `key` IN (:keys)") suspend fun clearPendingHistory(keys: List<String>)
 
+    @Query("SELECT * FROM episode_watch") suspend fun episodeWatches(): List<EpisodeWatchEntity>
+    @Query("SELECT * FROM episode_watch WHERE newSince > 0 ORDER BY newSince DESC") fun newEpisodes(): Flow<List<EpisodeWatchEntity>>
+    @Upsert suspend fun upsertEpisodeWatch(w: EpisodeWatchEntity)
+    @Query("UPDATE episode_watch SET newCount = 0, newSince = 0 WHERE sourceId = :sourceId AND seriesId = :seriesId")
+    suspend fun clearNewEpisodes(sourceId: String, seriesId: String)
+    @Query("DELETE FROM episode_watch WHERE sourceId = :sourceId AND seriesId = :seriesId") suspend fun deleteEpisodeWatch(sourceId: String, seriesId: String)
+
     @Query("SELECT * FROM media_ids WHERE kind = :kind AND sourceId = :sourceId AND itemId = :itemId")
     suspend fun ids(kind: String, sourceId: String, itemId: String): MediaIdsEntity?
     @Query("SELECT * FROM media_ids WHERE kind = :kind AND (tmdb IN (:tmdb) OR imdb IN (:imdb) OR trakt IN (:trakt))")
@@ -108,7 +142,12 @@ interface UserDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun putIds(e: MediaIdsEntity)
 }
 
-@Database(entities = [FavouriteEntity::class, ProgressEntity::class, MediaIdsEntity::class], version = 1, exportSchema = true)
+@Database(
+    entities = [FavouriteEntity::class, ProgressEntity::class, MediaIdsEntity::class, EpisodeWatchEntity::class],
+    version = 2,
+    exportSchema = true,
+    autoMigrations = [AutoMigration(from = 1, to = 2)],
+)
 abstract class UserDb : RoomDatabase() {
     abstract fun user(): UserDao
 

@@ -64,6 +64,7 @@ private data class Results(
 @Composable
 fun SearchScreen(vm: MainViewModel, profile: Profile) {
     val ctx = LocalContext.current
+    val menus = LocalItemMenus.current
     val dao = ctx.app.db.catalog()
     val scope = rememberCoroutineScope()
     val nav = rememberSeriesNav()
@@ -141,12 +142,14 @@ fun SearchScreen(vm: MainViewModel, profile: Profile) {
                     Shelf("Movies") {
                         itemsIndexed(r.movies, key = { _, m -> "${m.sourceId}/${m.streamId}" }) { _, m ->
                             val p = progress[ProgressKey.movie(m.sourceId, m.streamId)]
+                            val fav = Favourites.key(Kind.MOVIE, m.sourceId, m.streamId) in favKeys
                             PosterCard(
                                 m.name, m.poster,
-                                favourite = Favourites.key(Kind.MOVIE, m.sourceId, m.streamId) in favKeys,
+                                favourite = fav,
                                 onFavourite = { toggleFavourite(ctx, Kind.MOVIE, m.sourceId, m.streamId, m.name) },
                                 watched = p?.watched == true, progress = ProgressRules.bar(p),
                                 onTrailer = movieTrailerAction(profile, m),
+                                onMenu = { menus.open = movieMenu(ctx, m, fav, p?.watched == true) },
                             ) { scope.launch { playMovieNow(ctx, profile, m) } }
                         }
                     }
