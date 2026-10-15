@@ -30,7 +30,6 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
-import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
@@ -98,7 +97,6 @@ private val RAIL = 76.dp
 
 enum class Page(val label: String, val icon: ImageVector) {
     Home("Home", Icons.Filled.Home),
-    Guide("Guide", Icons.Filled.DateRange),
     Live("Live TV", Icons.Filled.PlayArrow),
     Movies("Movies", Icons.Filled.Star),
     Series("Series", Icons.AutoMirrored.Filled.List),
@@ -142,8 +140,8 @@ fun pageEntry(): PageEntry = LocalPageEntry.current
 private fun PageBody(page: Page, vm: MainViewModel, config: DeviceConfig, profile: Profile, onNavigate: (Page) -> Unit) {
     when (page) {
         Page.Home -> HomePage(vm, profile, onNavigate)
-        Page.Guide -> GuideScreen(vm, profile)
-        Page.Live -> LiveScreen(vm, profile)
+        // Live TV is the guide grid on every device.
+        Page.Live -> GuideScreen(vm, profile)
         Page.Movies -> MoviesScreen(vm, profile)
         Page.Series -> SeriesScreen(vm, profile)
         Page.Search -> SearchScreen(vm, profile)
@@ -194,7 +192,7 @@ private fun Rail(page: Page, requesters: Map<Page, FocusRequester>, nickname: St
     var hovered by remember { mutableStateOf<Page?>(null) }
     val select by rememberUpdatedState(onSelect)
     val width by animateDpAsState(if (open) 240.dp else RAIL, label = "rail")
-    // Follow focus like the old tabs did, but only once it rests, so passing over Guide doesn't load it.
+    // Follow focus like the old tabs did, but only once it rests, so passing over Live TV doesn't load the guide.
     LaunchedEffect(hovered) { hovered?.let { delay(350); select(it) } }
     Column(
         Modifier
@@ -237,7 +235,7 @@ private fun Rail(page: Page, requesters: Map<Page, FocusRequester>, nickname: St
 
 // ---- Phone and tablet ----
 
-/** The bottom tabs on a phone and the side rail on a tablet; Live TV is the guide grid there, and Settings lives in the header. */
+/** The bottom tabs on a phone and the side rail on a tablet; Settings lives in the header. */
 private val TOUCH_TABS = listOf(Page.Home, Page.Live, Page.Movies, Page.Series, Page.Search)
 private val TOUCH_RAIL = 88.dp
 
@@ -257,7 +255,7 @@ private fun TouchHome(vm: MainViewModel, config: DeviceConfig, form: FormFactor)
             TouchHeader(page, config.nickname, Modifier.padding(horizontal = if (phone) 16.dp else 24.dp)) { page = it }
             CompositionLocalProvider(LocalPageEntry provides entry) {
                 Box(Modifier.weight(1f).fillMaxWidth().padding(horizontal = if (phone) 16.dp else 24.dp)) {
-                    PageBody(if (page == Page.Live) Page.Guide else page, vm, config, profile) { page = if (it == Page.Guide) Page.Live else it }
+                    PageBody(page, vm, config, profile) { page = it }
                 }
             }
         }

@@ -62,22 +62,6 @@ private fun selectedCategory(cats: List<CategoryEntity>): Pair<CategoryEntity?, 
     return cat to { c: CategoryEntity -> cat = c }
 }
 
-@OptIn(ExperimentalComposeUiApi::class)
-@Composable
-private fun CategoryColumn(cats: List<CategoryEntity>, selected: CategoryEntity?, onSelect: (CategoryEntity) -> Unit) {
-    LazyColumn(Modifier.width(if (LocalFormFactor.current.touch) 220.dp else 270.dp).fillMaxHeight().focusRestorer(), verticalArrangement = Arrangement.spacedBy(4.dp), contentPadding = PaddingValues(bottom = 32.dp)) {
-        items(cats, key = { "${it.sourceId}/${it.categoryId}" }) { c ->
-            FocusBox(onClick = { onSelect(c) }, selected = c == selected, color = Color.Transparent, modifier = Modifier.fillMaxWidth()) { focused ->
-                Text(
-                    c.name, Modifier.padding(horizontal = 16.dp, vertical = 12.dp), maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 16.sp,
-                    color = if (c == selected && !focused) Tv.Accent else Tv.Text,
-                    fontWeight = if (c == selected) FontWeight.SemiBold else FontWeight.Normal,
-                )
-            }
-        }
-    }
-}
-
 /** Category shortcuts across the top of Movies, Series and the Guide. */
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
@@ -91,76 +75,6 @@ fun CategoryChips(cats: List<CategoryEntity>, selected: CategoryEntity?, onSelec
                     color = if (c == selected && !focused) Tv.Accent else Tv.Text,
                 )
             }
-        }
-    }
-}
-
-@Composable
-fun LiveScreen(vm: MainViewModel, profile: Profile) {
-    val ctx = LocalContext.current
-    val visible = categories(vm, profile, Kind.LIVE)
-    val cats = remember(visible) { if (visible.isEmpty()) visible else listOf(favouritesCategory(Kind.LIVE)) + visible }
-    val (cat, select) = selectedCategory(cats)
-    val favs = rememberFavourites()
-    val favKeys = rememberFavouriteKeys(favs)
-    val favChannels = rememberFavouriteChannels(favs, visible)
-    val inCategory by remember(cat) {
-        cat?.takeUnless { it.isFavourites }?.let { ctx.app.db.catalog().channels(it.sourceId, it.categoryId) } ?: flowOf(emptyList())
-    }.collectAsState(initial = emptyList())
-    val showingFavourites = cat?.isFavourites == true
-    val channels = if (showingFavourites) favChannels else inCategory
-    val progs = rememberProgrammes(channels)
-    if (cats.isEmpty()) return EmptyState(PlaybackStatus.lastRefreshError?.let { "Couldn't load channels: $it. Open Settings and run a check." } ?: "No channels yet.")
-    // Phone: category chips over one column of channels. TV and tablet: categories beside channels.
-    val form = LocalFormFactor.current
-    val phone = form == FormFactor.Phone
-    val list: @Composable () -> Unit = {
-        if (showingFavourites && channels.isEmpty()) {
-            FavouritesHint(
-                (if (form.touch) "Tap the heart on a channel" else "Hold OK (or press Menu) on a channel") + " to add it here. " +
-                    "Favourite channels stay on this device: Trakt has no live TV, so they don't sync.",
-            )
-        } else LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(6.dp), contentPadding = PaddingValues(bottom = 32.dp)) {
-            itemsIndexed(channels, key = { _, c -> "${c.sourceId}/${c.streamId}" }) { i, c ->
-                val p = c.epgId?.let { progs[it] }.orEmpty()
-                val now = p.firstOrNull()
-                val next = p.getOrNull(1)
-                val favourite = Favourites.key(Kind.LIVE, c.sourceId, c.streamId) in favKeys
-                val onFavourite = { toggleFavourite(ctx, Kind.LIVE, c.sourceId, c.streamId, c.name) }
-                FocusBox(
-                    onClick = { if (showingFavourites) playLive(ctx, c.sourceId, c.categoryId, 0, c.streamId) else playLive(ctx, c.sourceId, c.categoryId, i) },
-                    onLongClick = onFavourite,
-                    modifier = Modifier.fillMaxWidth().height(if (phone) 72.dp else 80.dp).then(entryPoint(i == 0)),
-                ) { focused ->
-                    Row(Modifier.fillMaxSize().padding(start = if (phone) 10.dp else 14.dp, end = if (form.touch) 4.dp else 14.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text("${c.num}", Modifier.width(if (phone) 40.dp else 52.dp), fontSize = if (phone) 15.sp else 17.sp, color = if (focused) Tv.Text else Tv.Muted)
-                        Logo(c.logo, if (phone) 44 else 54)
-                        Spacer(Modifier.width(16.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text(c.name, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text(now?.title ?: "No guide information", fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, color = if (focused) Tv.Text else Tv.Muted)
-                            if (now != null) ProgressLine(progress(now.start, now.stop), Modifier.padding(top = 6.dp).widthIn(max = 220.dp), fill = if (focused) Tv.Text else Tv.Accent)
-                        }
-                        if (next != null && !phone) Column(Modifier.width(240.dp).padding(start = 16.dp)) {
-                            Text("Next · ${time(next.start)}", fontSize = 12.sp, color = if (focused) Tv.Text else Tv.Muted)
-                            Text(next.title, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
-                        if (form.touch) FavouriteButton(favourite, onFavourite) else MarkBadge(favourite = favourite, size = 20.dp)
-                    }
-                }
-            }
-        }
-    }
-    if (phone) {
-        Column {
-            CategoryChips(cats, cat, select)
-            Spacer(Modifier.height(12.dp))
-            list()
-        }
-    } else {
-        Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-            CategoryColumn(cats, cat, select)
-            list()
         }
     }
 }
