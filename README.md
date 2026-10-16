@@ -49,6 +49,11 @@ passwords on a remote, and when a TV goes black the portal tells you why.
   and plot (for movies, the plot, genres and running time come from TMDB once focus rests, when the
   portal has a TMDB key). Each page remembers its category, scroll and last card when you switch
   pages.
+- **One poster per title:** a show or movie the provider lists once per language ("EN - Dune",
+  "FR - Dune", or in 4K beside HD) is one poster. A show's page has a Language choice; for a movie,
+  OK plays the copy already part-watched, else the language last picked for that film (or any film,
+  or show, then the device language), and holding OK lists "Play in English", "Play in French" and
+  so on, remembering the pick. Same-titled films released years apart stay separate.
 - **Watched marks:** hold OK (or Menu, or a long press on touch) on a movie to mark it watched or
   unwatched. On a show's page, the season button marks the whole season, and holding OK on an
   episode marks it, or every episode up to it. Marking clears the resume point.

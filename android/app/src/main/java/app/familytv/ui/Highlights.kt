@@ -30,7 +30,8 @@ import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Text
 import app.familytv.app
 import app.familytv.data.CategoryEntity
-import app.familytv.data.MovieEntity
+import app.familytv.iptv.SeriesTitles
+import app.familytv.iptv.language
 import app.familytv.data.SeriesEntity
 import app.familytv.trailer.MovieMeta
 import app.familytv.trakt.ProgressRules
@@ -87,15 +88,17 @@ fun Spotlight(spot: Spot?, fallback: String) {
  * provider, which throttles bursts of calls.
  */
 @Composable
-fun MovieSpotlight(movie: MovieEntity?, progress: ProgressEntity?) {
+fun MovieSpotlight(movie: MovieGroup?, progress: ProgressEntity?, visible: Set<Pair<String, String>>) {
     val ctx = LocalContext.current
-    var meta by remember(movie) { mutableStateOf<MovieMeta?>(null) }
-    LaunchedEffect(movie) {
+    var meta by remember(movie?.key) { mutableStateOf<MovieMeta?>(null) }
+    var languages by remember(movie?.key) { mutableStateOf(emptyList<String>()) }
+    LaunchedEffect(movie?.key) {
         if (movie == null) return@LaunchedEffect
         delay(450)
-        meta = ctx.app.extras.movieMeta(movie)
+        languages = ctx.app.db.allCopies(movie, visible).map { SeriesTitles.languageName(it.language) }.distinct()
+        meta = ctx.app.extras.movieMeta(pickCopy(ctx, movie.copies, emptyMap()))
     }
-    Spotlight(movie?.let { movieSpot(it, progress, meta) }, "Movies")
+    Spotlight(movie?.let { movieSpot(it, progress, meta, languages) }, "Movies")
 }
 
 @Composable
@@ -103,13 +106,14 @@ fun SeriesSpotlight(show: SeriesGroup?, newCount: Int) {
     Spotlight(show?.let { seriesSpot(it, newCount) }, "Series")
 }
 
-fun movieSpot(m: MovieEntity, p: ProgressEntity?, meta: MovieMeta?): Spot = Spot(
-    title = m.name,
+fun movieSpot(g: MovieGroup, p: ProgressEntity?, meta: MovieMeta?, languages: List<String>): Spot = Spot(
+    title = g.title,
     meta = details(
-        m.year?.toString(),
-        ratingText(m.rating),
+        g.year?.toString(),
+        ratingText(g.copies.firstNotNullOfOrNull { it.rating?.takeIf { r -> ratingText(r) != null } }),
         meta?.genres?.take(2)?.joinToString(", ")?.takeIf { it.isNotEmpty() },
         meta?.runtimeMin?.let(::runtimeText),
+        languages.takeIf { it.size > 1 }?.joinToString(", "),
         when {
             p?.watched == true -> "Watched"
             ProgressRules.bar(p) > 0f -> "${(ProgressRules.bar(p) * 100).toInt()}% watched"
@@ -117,7 +121,7 @@ fun movieSpot(m: MovieEntity, p: ProgressEntity?, meta: MovieMeta?): Spot = Spot
         },
     ),
     blurb = meta?.overview,
-    art = m.poster,
+    art = g.poster,
 )
 
 fun seriesSpot(g: SeriesGroup, newCount: Int): Spot = Spot(

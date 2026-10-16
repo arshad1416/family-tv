@@ -84,7 +84,7 @@ fun toggleFavourite(ctx: Context, kind: String, sourceId: String, itemId: String
     }
 }
 
-private fun favouriteMessage(app: FamilyTvApp, kind: String, on: Boolean) = when {
+internal fun favouriteMessage(app: FamilyTvApp, kind: String, on: Boolean) = when {
     !on -> "Removed from Favourites"
     kind == Kind.LIVE && app.trakt.signedIn -> "Added to Favourites on this device (Trakt has no live channels)"
     kind != Kind.LIVE && app.trakt.signedIn -> "Added to Favourites and your Trakt watchlist"

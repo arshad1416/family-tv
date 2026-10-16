@@ -84,9 +84,7 @@ import app.familytv.portal.Profile
 import app.familytv.sync.NewEpisodes
 import app.familytv.sync.PlaybackStatus
 import app.familytv.trakt.PlayItem
-import app.familytv.trakt.ProgressRules
 import app.familytv.user.Favourites
-import app.familytv.user.ProgressKey
 import coil.compose.AsyncImage
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.flowOf
@@ -398,9 +396,9 @@ private fun HomePage(vm: MainViewModel, profile: Profile, onNavigate: (Page) -> 
     val progs = rememberProgrammes(onNow)
 
     val movieCats = categories(profile, Kind.MOVIE)
-    val movieKeys = remember(movieCats) { movieCats.map { it.sourceId to it.categoryId }.toSet() }
-    var recent by remember { mutableStateOf(emptyList<MovieEntity>()) }
-    LaunchedEffect(movieKeys) { recent = dao.recentMovies(300).filter { (it.sourceId to it.categoryId) in movieKeys }.take(30) }
+    val movieKeys = remember(movieCats) { categoryKeys(movieCats) }
+    var recent by remember { mutableStateOf(emptyList<MovieGroup>()) }
+    LaunchedEffect(movieKeys) { recent = groupMovies(dao.recentMovies(300).filter { (it.sourceId to it.categoryId) in movieKeys }).take(30) }
     val seriesCats = categories(profile, Kind.SERIES)
     val seriesCat = seriesCats.firstOrNull()
     val seriesRows by remember(seriesCat) { seriesCat?.let { dao.series(it.sourceId, it.categoryId) } ?: flowOf(emptyList()) }.collectAsState(initial = emptyList())
@@ -416,13 +414,12 @@ private fun HomePage(vm: MainViewModel, profile: Profile, onNavigate: (Page) -> 
     val favRow: List<Pair<String, Any>> = remember(favs, favChannels, favMovies, favSeries) {
         val byKey = HashMap<String, Pair<String, Any>>()
         favChannels.forEach { val k = Favourites.key(Kind.LIVE, it.sourceId, it.streamId); byKey[k] = k to it }
-        favMovies.forEach { val k = Favourites.key(Kind.MOVIE, it.sourceId, it.streamId); byKey[k] = k to it }
-        // Copies of one show in several languages are one entry.
+        // Copies of one show or film in several languages are one entry.
+        groupMovies(favMovies).forEach { g -> g.copies.forEach { byKey[Favourites.key(Kind.MOVIE, it.sourceId, it.streamId)] = "movie/${g.key}" to g } }
         groupSeries(favSeries).forEach { g -> g.copies.forEach { byKey[Favourites.key(Kind.SERIES, it.sourceId, it.seriesId)] = "series/${g.key}" to g } }
         favs.mapNotNull { f -> byKey[Favourites.key(f.kind, f.sourceId, f.itemId)] }.distinctBy { it.first }
     }
     val progress = rememberProgress()
-    val rdIndex = rememberRdIndex()
     var openedFromFavourites by remember { mutableStateOf(false) }
     val newKeys = rememberNewEpisodeKeys()
     val newShows = rememberNewEpisodeShows(newKeys, seriesCats)
@@ -435,14 +432,14 @@ private fun HomePage(vm: MainViewModel, profile: Profile, onNavigate: (Page) -> 
     }
     val firstRow = when { nav.back != null -> -1; favRow.isNotEmpty() -> 3; onNow.isNotEmpty() -> 0; recent.isNotEmpty() -> 1; else -> 2 }
     // Touch: a swipeable hero of what's on and what's new, since there's no focus to follow.
-    val heroes = remember(touch, onNow, progs, recent) {
+    val heroes = remember(touch, onNow, progs, recent, progress) {
         if (!touch) emptyList() else buildList {
             onNow.take(3).forEachIndexed { i, c ->
                 val p = c.epgId?.let { progs[it] }?.firstOrNull()
                 add(HeroItem(p?.title ?: c.name, "Live now  ·  ${c.num}  ${c.name}", c.logo, poster = false) { playLive(ctx, c.sourceId, c.categoryId, i) })
             }
-            recent.take(3).forEach { m ->
-                add(HeroItem(m.name, "New movie", m.poster, poster = true) { scope.launch { playMovieNow(ctx, profile, m) } })
+            recent.take(3).forEach { g ->
+                add(HeroItem(g.title, "New movie", g.poster, poster = true) { scope.launch { playMovie(ctx, profile, g, movieKeys, progress) } })
             }
         }
     }
@@ -472,17 +469,10 @@ private fun HomePage(vm: MainViewModel, profile: Profile, onNavigate: (Page) -> 
                                     onFavourite = { toggleFavourite(ctx, Kind.LIVE, x.sourceId, x.streamId, x.name) },
                                     onFocus = { hero.value = Hero(x.name, "Favourite channel  ·  ${x.num}", null) },
                                 ) { playLive(ctx, x.sourceId, x.categoryId, 0, x.streamId) }
-                                is MovieEntity -> {
-                                    val p = progress[ProgressKey.movie(x.sourceId, x.streamId)]
-                                    PosterCard(
-                                        x.name, x.poster, entryPoint(entry), favourite = true, watched = p?.watched == true, progress = ProgressRules.bar(p),
-                                        onTrailer = movieTrailerAction(profile, x),
-                                        onFavourite = { toggleFavourite(ctx, Kind.MOVIE, x.sourceId, x.streamId, x.name) },
-                                        rd = rdIndex.movie(x.name, x.year) != null,
-                                        onMenu = { menus.open = movieMenu(ctx, x, true, p?.watched == true, rdIndex.movie(x.name, x.year), scope) { scope.launch { playMovieNow(ctx, profile, x) } } },
-                                        onFocus = { hero.value = Hero(x.name, "Favourite movie", null) },
-                                    ) { scope.launch { playMovieNow(ctx, profile, x) } }
-                                }
+                                is MovieGroup -> MovieCard(
+                                    x, entryPoint(entry), profile = profile, visible = movieKeys, favKeys = favKeys, progress = progress,
+                                    onFocus = { hero.value = Hero(x.title, "Favourite movie", null) },
+                                )
                                 is SeriesGroup -> PosterCard(
                                     x.title, x.poster, entryPoint(entry), favourite = true, newBadge = x.hasNew(newKeys), newCount = x.newCount(newKeys),
                                     onFavourite = { toggleShowFavourite(ctx, x, true) },
@@ -506,21 +496,11 @@ private fun HomePage(vm: MainViewModel, profile: Profile, onNavigate: (Page) -> 
                 }
                 if (recent.isNotEmpty()) item("movies") {
                     Shelf("Recently added movies", viewAll(Page.Movies)) {
-                        itemsIndexed(recent, key = { _, m -> "${m.sourceId}/${m.streamId}" }) { i, m ->
-                            val p = progress[ProgressKey.movie(m.sourceId, m.streamId)]
-                            val fav = Favourites.key(Kind.MOVIE, m.sourceId, m.streamId) in favKeys
-                            PosterCard(
-                                m.name, m.poster, entryPoint(firstRow == 1 && i == 0),
-                                favourite = fav,
-                                onFavourite = { toggleFavourite(ctx, Kind.MOVIE, m.sourceId, m.streamId, m.name) },
-                                watched = p?.watched == true, progress = ProgressRules.bar(p),
-                                onTrailer = movieTrailerAction(profile, m),
-                                rd = rdIndex.movie(m.name, m.year) != null,
-                                        onMenu = { menus.open = movieMenu(ctx, m, fav, p?.watched == true, rdIndex.movie(m.name, m.year), scope) { scope.launch { playMovieNow(ctx, profile, m) } } },
-                                onFocus = { hero.value = Hero(m.name, "Movie", m.rating?.takeIf { it.isNotBlank() && it != "0" }?.let { "Rating $it" }) },
-                            ) {
-                                scope.launch { playMovieNow(ctx, profile, m) }
-                            }
+                        itemsIndexed(recent, key = { _, g -> g.key }) { i, g ->
+                            MovieCard(
+                                g, entryPoint(firstRow == 1 && i == 0), profile = profile, visible = movieKeys, favKeys = favKeys, progress = progress,
+                                onFocus = { hero.value = Hero(g.title, "Movie", g.first.rating?.takeIf { it.isNotBlank() && it != "0" }?.let { "Rating $it" }) },
+                            )
                         }
                     }
                 }

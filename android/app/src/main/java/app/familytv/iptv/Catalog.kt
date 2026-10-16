@@ -104,6 +104,7 @@ class Catalog(private val db: AppDb) {
         val gen = System.currentTimeMillis()
         dao.upsertSource(SourceEntity(s.id, s.name, s.type, server, gen, gen))
 
+        var movieCats: Map<String, String> = emptyMap()
         var seriesCats: Map<String, String> = emptyMap()
         for ((kind, catAction) in listOf(
             Kind.LIVE to "get_live_categories",
@@ -113,6 +114,7 @@ class Catalog(private val db: AppDb) {
             val cats = get(XtreamUrls.api(server, user, pass, catAction)) { XtreamParser.categories(it) }
             dao.upsertCategories(cats.mapIndexed { i, c -> CategoryEntity(s.id, kind, c.id, c.name, i, gen) })
             dao.pruneCategories(s.id, kind, gen)
+            if (kind == Kind.MOVIE) movieCats = cats.associate { it.id to it.name }
             if (kind == Kind.SERIES) seriesCats = cats.associate { it.id to it.name }
         }
 
@@ -124,7 +126,11 @@ class Catalog(private val db: AppDb) {
 
         t.step("Loading movies", 0.35f)
         streamBatches(XtreamUrls.api(server, user, pass, "get_vod_streams"), { dao.upsertMovies(it) }, { t.rows(it, 20_000, "movies") }) { st ->
-            MovieEntity(s.id, st.id, st.name, st.icon, st.categoryId, st.rating, st.ext, null, st.added, gen, st.tmdb, st.year)
+            val parsed = SeriesTitles.parse(st.name)
+            MovieEntity(
+                s.id, st.id, st.name, st.icon, st.categoryId, st.rating, st.ext, null, st.added, gen, st.tmdb, st.year,
+                titleKey = parsed.key, lang = parsed.lang ?: SeriesTitles.fromCategory(movieCats[st.categoryId]) ?: SeriesTitles.ORIGINAL,
+            )
         }
         dao.pruneMovies(s.id, gen)
 
@@ -160,7 +166,11 @@ class Catalog(private val db: AppDb) {
                 val id = e.url.hashCode().toUInt().toString(16)
                 if (isVod) {
                     movieCats.getOrPut(e.group) { movieCats.size }
-                    movies += MovieEntity(s.id, id, e.name, e.logo, e.group, null, null, e.url, 0, gen)
+                    val parsed = SeriesTitles.parse(e.name)
+                    movies += MovieEntity(
+                        s.id, id, e.name, e.logo, e.group, null, null, e.url, 0, gen,
+                        titleKey = parsed.key, lang = parsed.lang ?: SeriesTitles.fromCategory(e.group) ?: SeriesTitles.ORIGINAL,
+                    )
                     if (movies.size >= BATCH) { runBlocking { dao.upsertMovies(movies.toList()) }; movies.clear() }
                 } else {
                     liveCats.getOrPut(e.group) { liveCats.size }
