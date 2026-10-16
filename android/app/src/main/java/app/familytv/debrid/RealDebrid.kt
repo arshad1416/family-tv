@@ -144,10 +144,12 @@ class RealDebrid(private val app: FamilyTvApp) {
     }
 
     /** Signs the whole profile out (every TV in it) and forgets the files here. */
+    /** Signs every TV in the profile out; this one only once the portal has dropped the account, or it would come back with the next config. */
     suspend fun disconnect() {
         linkJob?.cancel()
-        runCatching { app.portal.realDebridUnlink() }
-        signedOut(null)
+        if (runCatching { app.portal.realDebridUnlink() }.isSuccess) return signedOut(null)
+        prefs.edit().putString(MESSAGE, "Couldn't reach the portal to disconnect. Try again.").apply()
+        refreshState()
     }
 
     private suspend fun signedOut(message: String?) {
@@ -221,7 +223,20 @@ class RealDebrid(private val app: FamilyTvApp) {
             }
         }
         withContext(Dispatchers.IO) { libraryFile.writeText(gson.toJson(out)) }
-        return out.flatMap { it.files }
+        val fromTorrents = out.flatMap { it.files }
+        val known = fromTorrents.mapTo(HashSet()) { it.link }
+        return fromTorrents + fetchDownloads().filter { known.add(it.link) }
+    }
+
+    /** Files unrestricted from other hosters (Downloads). Playing a torrent file adds it there too, hence the de-duplication above. */
+    private suspend fun fetchDownloads(): List<RdFile> {
+        val out = mutableListOf<RdFile>()
+        for (page in 1..MAX_PAGES) {
+            val batch: List<Download> = gson.fromJson(call("/downloads?limit=$PAGE&page=$page").ifBlank { "[]" }, object : TypeToken<List<Download>>() {}.type) ?: emptyList()
+            batch.mapNotNullTo(out) { d -> d.link?.let { RdFile(d.filename, "", d.filesize, it) } }
+            if (batch.size < PAGE) break
+        }
+        return out.filter { RdNames.isVideo(it.name) && !RdNames.isExtra(it.name) && it.bytes >= MIN_BYTES }
     }
 
     /** A torrent's chosen files pair up with its links in file order; a torrent packed into one archive has nothing playable. */
@@ -335,6 +350,7 @@ class RealDebrid(private val app: FamilyTvApp) {
     private data class TorrentFile(val id: Int, val path: String = "", val bytes: Long = 0, val selected: Int = 0)
     private data class TorrentInfo(val files: List<TorrentFile>? = null)
     private data class CachedTorrent(val id: String, val links: List<String>, val files: List<RdFile>)
+    private data class Download(val filename: String = "", val filesize: Long = 0, val link: String? = null)
     private data class Unrestricted(val download: String?)
     private data class ApiError(@SerializedName("error_code") val errorCode: Int?)
 

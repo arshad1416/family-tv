@@ -463,6 +463,7 @@ async function rdLink(req: Request, env: Env) {
   };
   const expiresIn = Number(b.expiresIn) > 0 ? Number(b.expiresIn) : 3600;
   await rdSave(env, d.profile_id, secret, clip(typeof b.username === "string" ? b.username : null), Date.now() + expiresIn * 1000, d.id);
+  await refreshProfileTvs(env, d.profile_id);
   return json({ ok: true });
 }
 
@@ -491,6 +492,7 @@ async function rdToken(req: Request, env: Env) {
   }
   if ([400, 401, 403].includes(res.status)) {
     await env.DB.prepare("DELETE FROM profile_debrid WHERE profile_id = ?").bind(profileId).run();
+    await refreshProfileTvs(env, profileId);
     return json({ error: "signed out" }, 410);
   }
   const t = res.ok ? ((await res.json().catch(() => null)) as { access_token?: string; refresh_token?: string; expires_in?: number } | null) : null;
@@ -505,10 +507,10 @@ async function rdToken(req: Request, env: Env) {
   return json({ accessToken: next.accessToken, expiresAt, username: row.username });
 }
 
-/** Signs the whole profile out of Real-Debrid. */
-async function rdUnlink(req: Request, env: Env) {
-  const profileId = await requirePaired(req, env);
+/** Signs the whole profile out of Real-Debrid, from a TV or the admin page. */
+async function rdDisconnect(env: Env, profileId: string) {
   await env.DB.prepare("DELETE FROM profile_debrid WHERE profile_id = ?").bind(profileId).run();
+  await refreshProfileTvs(env, profileId);
   return json({ ok: true });
 }
 
@@ -600,9 +602,14 @@ async function adminPreferServer(req: Request, env: Env, id: string) {
     throw new HttpError(400, (e as Error).message);
   }
   await env.DB.prepare("UPDATE profiles SET data_enc = ?, updated_at = ? WHERE id = ?").bind(await sealJson(env.CONFIG_KEY, profile), Date.now(), id).run();
-  const { results } = await env.DB.prepare("SELECT id FROM devices WHERE profile_id = ?").bind(id).all<{ id: string }>();
-  for (const d of results) await queueCommand(env, d.id, "refresh", null);
+  await refreshProfileTvs(env, id);
   return json({ ok: true });
+}
+
+/** Tells every TV on the profile to fetch its config now. */
+async function refreshProfileTvs(env: Env, profileId: string) {
+  const { results } = await env.DB.prepare("SELECT id FROM devices WHERE profile_id = ?").bind(profileId).all<{ id: string }>();
+  for (const d of results) await queueCommand(env, d.id, "refresh", null);
 }
 
 async function adminProfiles(env: Env) {
@@ -613,7 +620,13 @@ async function adminProfiles(env: Env) {
     updated_at: number;
   }>();
   const out = await Promise.all(
-    results.map(async (r) => ({ id: r.id, name: r.name, updated_at: r.updated_at, data: maskSecrets(await openJson<ProfileData>(env.CONFIG_KEY, r.data_enc)) })),
+    results.map(async (r) => ({
+      id: r.id,
+      name: r.name,
+      updated_at: r.updated_at,
+      data: maskSecrets(await openJson<ProfileData>(env.CONFIG_KEY, r.data_enc)),
+      realDebrid: await rdAccount(env, r.id),
+    })),
   );
   return json({ profiles: out });
 }
@@ -1044,7 +1057,7 @@ export async function handle(req: Request, env: Env): Promise<Response> {
   if (m === "POST" && p === "/api/device/trakt/revoke") return traktRevoke(req, env);
   if (m === "POST" && p === "/api/device/realdebrid/link") return rdLink(req, env);
   if ((m === "GET" || m === "POST") && p === "/api/device/realdebrid/token") return rdToken(req, env);
-  if (m === "POST" && p === "/api/device/realdebrid/unlink") return rdUnlink(req, env);
+  if (m === "POST" && p === "/api/device/realdebrid/unlink") return rdDisconnect(env, await requirePaired(req, env));
   let mm = p.match(/^\/api\/device\/commands\/([a-f0-9]+)\/ack$/);
   if (m === "POST" && mm) return deviceAck(req, env, mm[1]);
 
@@ -1065,6 +1078,7 @@ export async function handle(req: Request, env: Env): Promise<Response> {
     if (m === "POST" && p === "/api/admin/lines/sorter") return adminLineSorter(req, env);
     if (m === "GET" && (mm = p.match(/^\/api\/admin\/profiles\/([a-f0-9]+)\/categories$/))) return adminProfileCategories(env, mm[1]);
     if (m === "POST" && (mm = p.match(/^\/api\/admin\/profiles\/([a-f0-9]+)\/primary-server$/))) return adminPreferServer(req, env, mm[1]);
+    if (m === "DELETE" && (mm = p.match(/^\/api\/admin\/profiles\/([a-f0-9]+)\/realdebrid$/))) return rdDisconnect(env, mm[1]);
     if ((mm = p.match(/^\/api\/admin\/profiles\/([a-f0-9]+)$/))) {
       if (m === "PUT") return adminSaveProfile(req, env, mm[1]);
       if (m === "DELETE") {

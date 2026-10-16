@@ -115,6 +115,27 @@ describe("real-debrid account per profile", () => {
     expect((await res.json<{ accessToken: string }>()).accessToken).toBe("a1");
   });
 
+  it("tells the profile's TVs to reload, and shows and disconnects the account on the admin page", async () => {
+    const env = await setup();
+    const commands = async () =>
+      (await env.DB.prepare("SELECT device_id FROM commands WHERE type = 'refresh' ORDER BY device_id").all<{ device_id: string }>()).results.map((r) => r.device_id);
+    await link(env);
+    expect(await commands()).toEqual(["bedroom", "lounge"]);
+
+    await env.DB.prepare("INSERT INTO profiles (id, name, data_enc, created_at, updated_at) VALUES ('ab12', 'den', ?, 0, 0)").bind(await sealJson(KEY, { sources: [] })).run();
+    await env.DB.prepare("UPDATE devices SET profile_id = 'ab12' WHERE id = 'lounge'").run();
+    await link(env);
+    const admin = (method: string, path: string) =>
+      worker.fetch(new Request(`https://portal.test${path}`, { method, headers: { authorization: "Bearer admin" } }), env);
+    const { profiles } = await (await admin("GET", "/api/admin/profiles")).json<{ profiles: { id: string; realDebrid: unknown }[] }>();
+    expect(profiles.find((x) => x.id === "ab12")!.realDebrid).toEqual({ username: "arshad" });
+    expect(JSON.stringify(profiles)).not.toContain("csecret");
+
+    expect((await admin("DELETE", "/api/admin/profiles/ab12/realdebrid")).status).toBe(200);
+    expect((await call(env, "lounge", "GET", "/api/device/realdebrid/token")).status).toBe(404);
+    expect((await call(env, "bedroom", "GET", "/api/device/realdebrid/token")).status).toBe(200); // other profile untouched
+  });
+
   it("refuses unpaired devices and incomplete credentials", async () => {
     const env = await setup();
     await env.DB.prepare("INSERT INTO devices (id, token_hash, created_at) VALUES ('new', ?, 0)").bind(await sha256Hex("new-token")).run();

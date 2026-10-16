@@ -67,8 +67,8 @@ passwords on a remote, and when a TV goes black the portal tells you why.
   added back. Titles are matched by id, else by title and year. Channel favourites stay on the
   device, since Trakt has no live TV.
 - **Real-Debrid (optional):** connect a Real-Debrid account in Settings with a code; one TV signs in and
-  every TV in that profile uses the account (Disconnect signs them all out). Movies and episodes already
-  in the account's torrents get an RD tag and a "Play from Real-Debrid" choice showing quality and size,
+  every TV in that profile uses the account (Disconnect, on a TV or the profile's admin page, signs them
+  all out). Movies and episodes already in the account's Torrents or Downloads get an RD tag and a "Play from Real-Debrid" choice showing quality and size,
   and when the TV stream keeps stalling the player switches to the Real-Debrid copy at the same spot
   (OK goes back). It never searches for or adds torrents. Real-Debrid allows one connection at a time,
   so two TVs in different homes playing at once may be refused.
@@ -226,7 +226,8 @@ the Trakt section. No database migration is needed; Trakt tokens live on each de
 
 ### 5. Real-Debrid (optional)
 Nothing to configure: the TV signs in with Real-Debrid's device code, and the portal keeps that
-profile's account (sealed with `CONFIG_KEY`) and refreshes its token for every TV. It needs the
+profile's account (sealed with `CONFIG_KEY`) and refreshes its token for every TV. The profile page
+shows which account is connected, with a Disconnect button. It needs the
 `profile_debrid` table, so run `npm run db:migrate:remote` and `npm run deploy` once in `portal/`.
 
 ## Develop
