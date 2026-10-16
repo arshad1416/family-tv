@@ -119,10 +119,12 @@ function guideLine(g) {
   const unmatchedCount = count(g.unmatchedCount);
   let html = '<div class="small" style="margin-top:6px">Guide: ' + count(g.switched) + " of " + count(g.thin) + " thin channels now use an extra guide; " +
     linked + " channels linked in all";
-  const unmatched = Array.isArray(g.unmatched) ? g.unmatched : [];
+  const textList = (v) => Array.isArray(v) ? v.filter((s) => typeof s === "string").slice(0, 100).map((s) => s.slice(0, 1000)) : [];
+  const unmatched = textList(g.unmatched);
   if (unmatchedCount) html += '<details><summary>' + unmatchedCount + " thin channels with no match (pin them in the profile)</summary>" + esc(unmatched.join(", ")) +
     (unmatchedCount > unmatched.length ? " …" : "") + "</details>";
-  if (Array.isArray(g.errors)) html += '<span class="err">' + esc(g.errors.join("; ")) + "</span>";
+  const errors = textList(g.errors);
+  if (errors.length) html += '<span class="err">' + esc(errors.join("; ")) + "</span>";
   return html + "</div>";
 }
 

@@ -100,6 +100,9 @@ test('old stored names/errors escape and malformed list fields do not crash',()=
   assert.ok(render({unmatchedCount:3,unmatched:[hostile],errors:[hostile]}).includes('&lt;img'));
   assert.ok(!render({unmatchedCount:3,unmatched:{},errors:{}}).includes('<img'));
   assert.ok(render({switched:2,thin:3,linked:{a:4,b:5}}).includes('9 channels linked'));
+  const html=render({unmatchedCount:3,unmatched:[{toString:null},'Good channel',['ignored'],null],errors:[{toString:1},'Good error',42]});
+  assert.ok(html.includes('Good channel'));assert.ok(html.includes('Good error'));assert.ok(!html.includes('ignored'));assert.ok(!html.includes('[object Object]'));
+  assert.ok(render({unmatchedCount:1,unmatched:['x'.repeat(2000)],errors:Array(101).fill('bounded')}).length<3000);
 });
 test('new telemetry normalization independent of safe old-data renderer',()=>{
   assert.deepEqual(normalizeGuideStatus({playing:{title:hostile},guide:{switched:hostile,thin:[],unmatchedCount:{},linked:{a:hostile,b:2}}}),{playing:{title:hostile},guide:{switched:0,thin:0,unmatchedCount:0,linked:{a:0,b:2}}});

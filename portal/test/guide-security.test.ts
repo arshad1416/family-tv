@@ -23,6 +23,12 @@ describe("guide telemetry trust boundary", () => {
     expect(render({ switched: 1, thin: 2, unmatchedCount: 3, unmatched: [hostile], errors: [hostile] })).toContain("&lt;img");
     expect(render({ unmatchedCount: 3, unmatched: {}, errors: {} })).not.toContain("<img");
     expect(render({ switched: 2, thin: 3, linked: { a: 4, b: 5 } })).toContain("9 channels linked");
+    const html = render({ unmatchedCount: 3, unmatched: [{ toString: null }, "Good channel", ["ignored"], null], errors: [{ toString: 1 }, "Good error", 42] });
+    expect(html).toContain("Good channel");
+    expect(html).toContain("Good error");
+    expect(html).not.toContain("ignored");
+    expect(html).not.toContain("[object Object]");
+    expect(render({ unmatchedCount: 1, unmatched: ["x".repeat(2000)], errors: Array(101).fill("bounded") }).length).toBeLessThan(3000);
   });
   it("normalizes new count inputs separately while retaining safely rendered text", () => {
     expect(normalizeGuideStatus({ playing: { title: hostile }, guide: { switched: hostile, thin: [], unmatchedCount: {}, linked: { a: hostile, b: 2 } } })).toEqual({
