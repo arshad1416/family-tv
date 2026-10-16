@@ -447,6 +447,7 @@ async function requirePaired(req: Request, env: Env): Promise<string> {
 /** Separate from OAuth: explicitly entered API keys shared only by the owner's current-profile devices. */
 async function rdApiKey(req: Request, env: Env, url: URL): Promise<Response> {
   try {
+    if (url.protocol !== "https:") throw new HttpError(426, "HTTPS required");
     const d = await requireDevice(req, env);
     const b = req.method === "GET" ? null : await body<Record<string, unknown>>(req);
     const profileId = req.method === "GET" ? url.searchParams.get("profileId") : b?.profileId;

@@ -25,6 +25,15 @@ const req = (env, device='lounge', method='GET', body, profileId='ab12') => work
 const put = (env,revision,apiKey=FAKE,device='lounge') => req(env,device,'PUT',{profileId:'ab12',revision,apiKey});
 const del = (env,revision) => req(env,'lounge','DELETE',{profileId:'ab12',revision});
 
+test('API key reads and mutations require HTTPS without changing credential state',async()=>{
+  const env=await setup();await put(env,0);
+  for(const method of ['GET','PUT','DELETE']){
+    const response=await worker.fetch(new Request('http://portal.test/api/device/realdebrid/api-key?profileId=ab12',{method,headers:{authorization:'Bearer lounge-token','content-type':'application/json'},body:method==='GET'?undefined:JSON.stringify({profileId:'ab12',revision:1,apiKey:NEXT})}),env);
+    assert.equal(response.status,426);assert.deepEqual(await response.json(),{error:'HTTPS required'});
+  }
+  const current=await(await req(env,'bedroom')).json();assert.equal(current.revision,1);assert.equal(current.apiKey,FAKE);
+});
+
 test('absent state, same-profile sharing, no-store and no secret write response', async()=>{
   const env=await setup();
   assert.deepEqual(await(await req(env)).json(),{profileId:'ab12',revision:0,configured:false,apiKey:null});

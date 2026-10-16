@@ -25,6 +25,19 @@ const remove = (env: Env, revision: number) => request(env, "lounge", "DELETE", 
 afterEach(() => vi.restoreAllMocks());
 
 describe("profile API keys (synthetic fixtures only)", () => {
+  it("requires HTTPS for reads and mutations before touching credentials", async () => {
+    const env = await setup();
+    await put(env, 0);
+    for (const method of ["GET", "PUT", "DELETE"]) {
+      const res = await worker.fetch(new Request("http://portal.test/api/device/realdebrid/api-key?profileId=ab12", {
+        method, headers: { authorization: "Bearer lounge-token", "content-type": "application/json" },
+        body: method === "GET" ? undefined : JSON.stringify({ profileId: "ab12", revision: 1, apiKey: OTHER_KEY }),
+      }), env);
+      expect(res.status).toBe(426);
+      expect(await res.json()).toEqual({ error: "HTTPS required" });
+    }
+    expect(await (await request(env, "bedroom")).json()).toMatchObject({ revision: 1, apiKey: FAKE_KEY });
+  });
   it("returns absent revision zero, shares only within the paired profile, and never caches", async () => {
     const env = await setup();
     expect(await (await request(env, "bedroom")).json()).toEqual({ profileId: "ab12", revision: 0, configured: false, apiKey: null });

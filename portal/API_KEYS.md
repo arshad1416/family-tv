@@ -24,6 +24,11 @@ admin views, heartbeats and commands do not include it. API keys accept 16–512
 non-space ASCII characters; saving stores an encrypted profile-bound envelope without
 calling Real-Debrid to validate the credential.
 
+The endpoint rejects HTTP with 426 before reading or changing credentials. Clients must also
+reject non-HTTPS portal URLs before sending credentials: a server rejection cannot protect a
+key already transmitted over cleartext. HTTP mock clients require an explicit loopback-only
+test seam, and are not a production configuration.
+
 An absent key starts at revision zero. Replace/remove must supply the latest revision;
 success increments it. Removal keeps a tombstone. A stale change returns 409; wrong or
 changed profile membership returns 403. Clients must reload after conflict, discard responses
@@ -48,5 +53,5 @@ PORTAL_COMPILED_DIR="$(cd ../../validation/portal-compiled && pwd)" node --test 
 ```
 
 The preparation script changes import extensions only in disposable compiler output. The
-12 focused tests use synthetic keys, production handlers, migration-backed SQLite and the
+13 focused tests use synthetic keys, production handlers, migration-backed SQLite and the
 actual shipped guide renderer. They do not replace a full Vitest run or a deployed D1 check.
