@@ -110,3 +110,63 @@ dependencies {
     testImplementation("androidx.compose.ui:ui-test-junit4")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 }
+
+// Gson's reflective models must survive R8, not merely pass unshrunk debug tests.
+val releaseProbeLibraries = providers.provider {
+    configurations.getByName("releaseRuntimeClasspath").files.filter { it.name.startsWith("gson-") || it.name.startsWith("kotlin-stdlib-") }
+}
+val compileReleaseRdProbe by tasks.registering(JavaCompile::class) {
+    dependsOn("compileReleaseKotlin")
+    source("src/releaseRegression/java")
+    classpath = files(layout.buildDirectory.dir("tmp/kotlin-classes/release"), releaseProbeLibraries)
+    destinationDirectory.set(layout.buildDirectory.dir("releaseRdProbe/classes"))
+    sourceCompatibility = "17"
+    targetCompatibility = "17"
+}
+val releaseRdProbeJar by tasks.registering(Jar::class) {
+    dependsOn(compileReleaseRdProbe)
+    archiveFileName.set("input.jar")
+    destinationDirectory.set(layout.buildDirectory.dir("releaseRdProbe"))
+    from(compileReleaseRdProbe.flatMap { it.destinationDirectory })
+    from(layout.buildDirectory.dir("tmp/kotlin-classes/release")) { include("app/familytv/discovery/ProfileRdKey.class", "app/familytv/user/SharedProgressPage.class", "app/familytv/user/SharedProgressRow*.class", "app/familytv/user/ProgressEntity.class", "app/familytv/portal/DeviceConfig.class", "app/familytv/portal/Profile.class", "app/familytv/portal/Source.class", "app/familytv/portal/Command.class", "app/familytv/portal/LatestApp.class", "app/familytv/portal/TraktPortal.class", "app/familytv/portal/RealDebridPortal.class") }
+}
+tasks.register("verifyReleaseRdModel") {
+    group = "verification"
+    description = "Deserialize synthetic Worker responses after release R8 shrinking"
+    dependsOn(releaseRdProbeJar)
+    doLast {
+        val output = layout.buildDirectory.dir("releaseRdProbe/shrunk").get().asFile
+        output.deleteRecursively()
+        output.mkdirs()
+        val rules = layout.buildDirectory.file("releaseRdProbe/probe.pro").get().asFile
+        rules.writeText(file("proguard-rules.pro").readText() + """
+
+-keep class ProfileRdReleaseProbe { public static void main(java.lang.String[]); }
+-dontwarn androidx.compose.runtime.internal.StabilityInferred
+-dontwarn org.jetbrains.annotations.**
+-dontwarn kotlin.**
+-dontwarn app.familytv.**
+-dontwarn okhttp3.**
+-dontwarn android.**
+-dontwarn kotlinx.**
+""")
+        javaexec {
+            classpath = files(com.android.tools.r8.R8::class.java.protectionDomain.codeSource.location)
+            mainClass.set("com.android.tools.r8.R8")
+            args("--classfile", "--release", "--lib", System.getProperty("java.home"))
+            releaseProbeLibraries.get().forEach { args("--lib", it.absolutePath) }
+            args("--pg-conf", rules.absolutePath, "--output", output.absolutePath, releaseRdProbeJar.get().archiveFile.get().asFile.absolutePath)
+        }
+        javaexec {
+            classpath = files(output, releaseProbeLibraries)
+            mainClass.set("ProfileRdReleaseProbe")
+            args(file("src/test/resources/portal-rd-contract.json").absolutePath)
+        }
+    }
+}
+
+// All existing CI and release builds already assembleRelease; enforce the shrinker
+// regression there so publication cannot bypass it without changing workflow files.
+tasks.matching { it.name == "assembleRelease" }.configureEach {
+    dependsOn("verifyReleaseRdModel")
+}

@@ -2,6 +2,7 @@ package app.familytv.discovery
 
 import app.familytv.FamilyTvApp
 import app.familytv.portal.Profile
+import app.familytv.portal.PortalClient
 import com.google.gson.Gson
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -24,12 +25,14 @@ class DiscoverySession internal constructor(
     }
 
     companion object {
-        suspend fun open(app: FamilyTvApp, expected: Profile): DiscoverySession {
+        suspend fun open(app: FamilyTvApp, expected: Profile): DiscoverySession = open(app.portal, expected)
+
+        internal suspend fun open(portal: PortalClient, expected: Profile): DiscoverySession {
             suspend fun current(): DiscoveryIdentity? {
-                val config = app.portal.config()
+                val config = portal.config()
                 if (!config.paired || config.profile == null) return null
-                val id = app.portal.progressPull(0).profile?.takeIf { it.isNotBlank() } ?: return null
-                return DiscoveryIdentity(id, policyKey(config.profile), app.portal.deviceId)
+                val id = portal.progressPull(0).profile?.takeIf { it.isNotBlank() } ?: return null
+                return DiscoveryIdentity(id, policyKey(config.profile), portal.deviceId)
             }
             val identity = current() ?: throw SourceUnavailable("Cannot verify the current profile. Try again when the portal is available.")
             if (identity.policy != policyKey(expected)) throw SourceUnavailable("The TV profile changed. Reload the app before searching externally.")
