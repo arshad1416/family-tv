@@ -1,0 +1,37 @@
+import assert from 'node:assert/strict';
+import {writeFile} from 'node:fs/promises';
+import {resolve} from 'node:path';
+import {pathToFileURL} from 'node:url';
+const compiledPortal = process.argv[2];
+if (!compiledPortal) throw new Error('Usage: node generate-portal-rd-fixture.mjs <Node-compatible compiled portal directory> [output.json]');
+const load = path => import(pathToFileURL(resolve(compiledPortal, path)).href);
+const {default: worker} = await load('src/index.js');
+const {memoryD1} = await load('test/d1.js');
+const {sealJson,sha256Hex} = await load('src/crypto.js');
+const KEY=btoa(String.fromCharCode(...new Uint8Array(32).fill(11)));
+const env={DB:memoryD1(),CONFIG_KEY:KEY,ADMIN_TOKEN:'synthetic-admin',TMDB_API_KEY:'synthetic-tmdb-metadata-key'};
+const id='ab1234cd5678ef90';
+const fixtureKey='fixture-only-never-a-real-account-key';
+await env.DB.prepare('INSERT INTO profiles(id,name,data_enc,created_at,updated_at)VALUES(?,?,?,0,0)').bind(id,'Synthetic profile',await sealJson(KEY,{sources:[{id:'src-fixture',type:'m3u',name:'Lawful fixture',m3uUrl:'https://media.invalid/list.m3u'}],parentalPin:'1234'})).run();
+await env.DB.prepare('INSERT INTO devices(id,token_hash,profile_id,created_at)VALUES(?,?,?,0)').bind('device-fixture',await sha256Hex('fixture-device-token'),id).run();
+const exchanges=[];
+async function call(method,path,body){
+ const response=await worker.fetch(new Request('https://portal.test'+path,{method,headers:{authorization:'Bearer fixture-device-token','content-type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)}),env);
+ const text=await response.text();exchanges.push({method,path,status:response.status,body:text});assert.equal(response.status,200);return JSON.parse(text);
+}
+const config=await call('GET','/api/device/config');
+const progress=await call('GET','/api/device/progress?since=0');
+assert.equal(config.paired,true);assert.equal(progress.profile,id);
+assert.equal(JSON.stringify((await call('GET','/api/device/config')).profile),JSON.stringify(config.profile));
+const initial=await call('GET','/api/device/realdebrid/api-key?profileId='+progress.profile);
+assert.deepEqual(initial,{profileId:id,revision:0,configured:false,apiKey:null});
+const written=await call('PUT','/api/device/realdebrid/api-key',{profileId:progress.profile,revision:initial.revision,apiKey:fixtureKey});
+assert.equal(written.configured,true);assert.equal(written.revision,1);assert.equal('apiKey'in written,false);
+const current=await call('GET','/api/device/realdebrid/api-key?profileId='+progress.profile);
+assert.equal(current.apiKey,fixtureKey);assert.equal(current.configured,current.apiKey!==null);
+const removed=await call('DELETE','/api/device/realdebrid/api-key',{profileId:progress.profile,revision:current.revision});
+assert.equal(removed.configured,false);assert.equal(removed.revision,2);
+const tombstone=await call('GET','/api/device/realdebrid/api-key?profileId='+progress.profile);
+assert.equal(tombstone.apiKey,null);assert.equal(tombstone.revision,2);
+await writeFile(process.argv[3] ?? new URL('../app/src/test/resources/portal-rd-contract.json', import.meta.url),JSON.stringify({fixtureOnly:true,exchanges},null,2));
+console.log('PASS actual Worker/migration SQLite config→progress identity→key GET/PUT/GET/DELETE/GET boundary; JSON response fixtures exported for Android consumer. No network/account calls.');

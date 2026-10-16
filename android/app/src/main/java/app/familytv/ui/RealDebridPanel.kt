@@ -47,8 +47,8 @@ fun RealDebridPanel(modifier: Modifier = Modifier) {
     Panel(modifier) {
         Text("Real-Debrid", fontSize = 20.sp, fontWeight = FontWeight.Bold)
         Text(
-            "A backup copy of movies and episodes you've added to your Real-Debrid account: they get a second Play button, " +
-                "and the player switches to it when the TV stream keeps stopping. Connecting here connects every TV in this profile.",
+            "Manage the separate device-code connection to your Real-Debrid account. " +
+                "Catalog movies and episodes use the manual IPTV / Torrentio source chooser. Connecting here connects every TV in this profile.",
             fontSize = 14.sp, color = Tv.Muted,
         )
         when (val s = state) {
@@ -81,12 +81,7 @@ fun RealDebridPanel(modifier: Modifier = Modifier) {
                         },
                     )
                 }
-                val first by rd.playFirst.collectAsState()
-                TvButton(if (first) "✓  Play from Real-Debrid first: On" else "Play from Real-Debrid first: Off", { rd.setPlayFirst(!first) })
-                Text(
-                    "Movies and episodes in your account play from Real-Debrid in the best copy it has, and the TV service is the backup.",
-                    fontSize = 14.sp, color = Tv.Muted,
-                )
+                Text("Choose IPTV or Torrentio manually from a catalog movie or episode. The profile API key for Torrentio is configured separately in Settings.", fontSize = 14.sp, color = Tv.Muted)
             }
         }
     }

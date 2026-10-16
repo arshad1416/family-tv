@@ -54,6 +54,9 @@ import kotlinx.coroutines.launch
 class MainActivity : ComponentActivity() {
     private val vm: MainViewModel by viewModels()
     private var message by mutableStateOf<String?>(null)
+    internal var sourceChoice by mutableStateOf<CatalogSourceRequest?>(null)
+    internal fun chooseSource(request: CatalogSourceRequest) { sourceChoice = request }
+    internal fun sourceRequestCurrent(request: CatalogSourceRequest) = sourceChoice === request && vm.profile === request.profile
     private val exit = HoldBackToExit(this)
 
     // androidx marks this restricted, but overriding the platform method is fine.
@@ -92,6 +95,10 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                     menus.Host()
+                    sourceChoice?.let { request ->
+                        if (vm.profile === request.profile) CatalogSources(request) { sourceChoice = null }
+                        else LaunchedEffect(request) { sourceChoice = null }
+                    }
                     message?.let { text ->
                         Dialog(onDismissRequest = { message = null }) {
                             Column(
@@ -118,6 +125,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onStop() {
+        sourceChoice = null
         vm.stop()
         super.onStop()
     }
@@ -175,4 +183,11 @@ private fun PairingScreen(code: String) {
             }
         }
     }
+}
+
+/** Compose may provide a ContextWrapper; never silently drop a catalog selection. */
+internal tailrec fun android.content.Context.sourceActivity(): MainActivity? = when (this) {
+    is MainActivity -> this
+    is android.content.ContextWrapper -> if (baseContext !== this) baseContext.sourceActivity() else null
+    else -> null
 }

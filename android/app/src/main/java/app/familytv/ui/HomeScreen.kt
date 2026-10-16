@@ -722,5 +722,9 @@ fun play(ctx: Context, url: String, title: String, item: PlayItem? = null) {
 }
 
 suspend fun playMovieNow(ctx: Context, profile: Profile, m: MovieEntity) {
-    Streams(ctx.app.db, profile).movie(m)?.let { play(ctx, it, m.name, PlayItem.movie(m.sourceId, m.streamId, m.name)) }
+    ctx.sourceActivity()?.chooseSource(CatalogSourceRequest(profile, "movie", m.tmdb, m.name, m.year,
+        PlayItem.movie(m.sourceId, m.streamId, m.name), label = m.name, poster = m.poster,
+        iptv = IptvSourcePlayback({ Streams(ctx.app.db, profile).movie(m) }, { url ->
+            play(ctx, url, m.name, PlayItem.movie(m.sourceId, m.streamId, m.name))
+        })))
 }
