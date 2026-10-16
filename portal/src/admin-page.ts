@@ -246,6 +246,15 @@ function guidesCard(d) {
     '<p class="muted small">Each epgshare01 guide lists its channel ids in a .txt file next to it, such as epg_ripper_CA2.txt.</p></div>';
 }
 
+// The profile's Real-Debrid account: linked from Settings on any of its TVs, shared by all of them.
+function debridCard(draft) {
+  if (!draft.id) return "";
+  const rd = draft.realDebrid;
+  return '<div class="card row"><span><strong>Real-Debrid:</strong> ' +
+    (rd ? "connected as " + esc(rd.username || "an account") + '</span><button class="b" id="rdoff" style="margin-left:auto">Disconnect</button>'
+      : '<span class="muted">not connected. Connect it in Settings on any TV in this profile; every TV here then uses it.</span></span>') + "</div>";
+}
+
 // Category order and visibility, per kind. Rows are what the profile's TVs reported, saved order first.
 const KINDS = [["live", "Live TV"], ["movie", "Movies"], ["series", "TV Shows"]];
 let catKind = "live";
@@ -316,12 +325,19 @@ function editProfile(p) {
   const paint = () => {
     $("#app").innerHTML = '<div class="card"><label>Profile name</label><input id="pname" value="' + esc(draft.name) + '">' +
       '<label>Parental PIN (optional, asked before Adult Content opens on the Categories page)</label><input id="ppin" type="password" value="' + esc(draft.data.parentalPin) + '"></div>' +
-      draft.data.sources.map((s, i) => sourceForm(s, i, lineOf(s))).join("") + addLineCard(draft, lines, panel) + guidesCard(draft.data) + categoriesCard(draft, reported) +
+      draft.data.sources.map((s, i) => sourceForm(s, i, lineOf(s))).join("") + addLineCard(draft, lines, panel) + guidesCard(draft.data) + debridCard(draft) + categoriesCard(draft, reported) +
       '<div class="row"><button class="b" id="adds">Add source</button><button class="b p" id="save">Save</button>' +
       (draft.id ? '<button class="b" id="delp">Delete profile</button>' : "") + '<button class="b" id="back">Back</button><span id="perr" class="err"></span></div>';
     $("#adds").onclick = () => { collect(); draft.data.sources.push({ id: crypto.randomUUID(), type: "xtream", name: "Line " + (draft.data.sources.length + 1) }); paint(); };
     document.querySelectorAll("[data-rm]").forEach((b) => (b.onclick = () => { collect(); draft.data.sources.splice(+b.closest("[data-src]").dataset.src, 1); paint(); }));
     $("#back").onclick = () => renderProfiles();
+    if ($("#rdoff")) $("#rdoff").onclick = async () => {
+      if (!confirm("Disconnect Real-Debrid from every TV on this profile?")) return;
+      collect();
+      await api("/api/admin/profiles/" + draft.id + "/realdebrid", { method: "DELETE" });
+      draft.realDebrid = null;
+      paint();
+    };
     if ($("#useline")) $("#useline").onclick = () => {
       collect();
       const l = (lines.lines || []).find((x) => x.username === $("#pickline").value);

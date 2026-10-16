@@ -422,6 +422,7 @@ private fun HomePage(vm: MainViewModel, profile: Profile, onNavigate: (Page) -> 
         favs.mapNotNull { f -> byKey[Favourites.key(f.kind, f.sourceId, f.itemId)] }.distinctBy { it.first }
     }
     val progress = rememberProgress()
+    val rdIndex = rememberRdIndex()
     var openedFromFavourites by remember { mutableStateOf(false) }
     val newKeys = rememberNewEpisodeKeys()
     val newShows = rememberNewEpisodeShows(newKeys, seriesCats)
@@ -477,7 +478,8 @@ private fun HomePage(vm: MainViewModel, profile: Profile, onNavigate: (Page) -> 
                                         x.name, x.poster, entryPoint(entry), favourite = true, watched = p?.watched == true, progress = ProgressRules.bar(p),
                                         onTrailer = movieTrailerAction(profile, x),
                                         onFavourite = { toggleFavourite(ctx, Kind.MOVIE, x.sourceId, x.streamId, x.name) },
-                                        onMenu = { menus.open = movieMenu(ctx, x, true, p?.watched == true) },
+                                        rd = rdIndex.movie(x.name, x.year) != null,
+                                        onMenu = { menus.open = movieMenu(ctx, x, true, p?.watched == true, rdIndex.movie(x.name, x.year), scope) { scope.launch { playMovieNow(ctx, profile, x) } } },
                                         onFocus = { hero.value = Hero(x.name, "Favourite movie", null) },
                                     ) { scope.launch { playMovieNow(ctx, profile, x) } }
                                 }
@@ -513,7 +515,8 @@ private fun HomePage(vm: MainViewModel, profile: Profile, onNavigate: (Page) -> 
                                 onFavourite = { toggleFavourite(ctx, Kind.MOVIE, m.sourceId, m.streamId, m.name) },
                                 watched = p?.watched == true, progress = ProgressRules.bar(p),
                                 onTrailer = movieTrailerAction(profile, m),
-                                onMenu = { menus.open = movieMenu(ctx, m, fav, p?.watched == true) },
+                                rd = rdIndex.movie(m.name, m.year) != null,
+                                        onMenu = { menus.open = movieMenu(ctx, m, fav, p?.watched == true, rdIndex.movie(m.name, m.year), scope) { scope.launch { playMovieNow(ctx, profile, m) } } },
                                 onFocus = { hero.value = Hero(m.name, "Movie", m.rating?.takeIf { it.isNotBlank() && it != "0" }?.let { "Rating $it" }) },
                             ) {
                                 scope.launch { playMovieNow(ctx, profile, m) }
@@ -621,6 +624,8 @@ fun PosterCard(
     onMenu: (() -> Unit)? = null,
     newBadge: Boolean = false,
     newCount: Int = 0,
+    /** Also in the Real-Debrid account. */
+    rd: Boolean = false,
     onFocus: () -> Unit = {},
     onClick: () -> Unit,
 ) {
@@ -635,6 +640,7 @@ fun PosterCard(
             }
             MarkBadge(Modifier.align(Alignment.TopStart), watched = watched)
             if (newBadge) NewBadge(Modifier.align(Alignment.BottomEnd), newCount)
+            else if (rd) RdBadge(Modifier.align(Alignment.BottomEnd).padding(bottom = if (progress > 0f) 12.dp else 0.dp))
             if (heart) FavouriteButton(favourite, onFavourite!!, Modifier.align(Alignment.TopEnd))
             else MarkBadge(Modifier.align(Alignment.TopEnd), favourite = favourite)
             if (progress > 0f) ProgressLine(progress, Modifier.align(Alignment.BottomCenter).padding(8.dp), height = 4.dp)

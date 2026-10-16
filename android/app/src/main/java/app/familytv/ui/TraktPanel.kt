@@ -63,7 +63,7 @@ fun TraktPanel(modifier: Modifier = Modifier) {
                 s.message?.let { Text(it, fontSize = 15.sp, color = Tv.Warn) }
                 TvButton("Connect Trakt", { moveFocus = true; trakt.startLink() }, Modifier.focusRequester(primary))
             }
-            is Trakt.State.Linking -> LinkCode(s, touch) { TvButton("Cancel", { moveFocus = true; trakt.cancelLink() }, Modifier.focusRequester(primary)) }
+            is Trakt.State.Linking -> LinkCode(s.userCode, s.url, s.url.trimEnd('/') + "/" + s.userCode, s.expiresAt, touch) { TvButton("Cancel", { moveFocus = true; trakt.cancelLink() }, Modifier.focusRequester(primary)) }
             is Trakt.State.SignedIn -> {
                 Info("Account", s.name)
                 Info(
@@ -92,24 +92,23 @@ fun TraktPanel(modifier: Modifier = Modifier) {
 }
 
 /**
- * The sign-in code, where to enter it, and a QR with a countdown. The QR opens the activate page
- * with the code already filled in (Trakt keeps /activate/CODE through its sign-in page), so a
- * phone scan only needs Approve.
+ * A sign-in code, where to enter it, and a QR with a countdown. The QR ([qrUrl]) opens the page
+ * with the code already filled in (Trakt keeps /activate/CODE through its sign-in page; Real-Debrid
+ * has a direct link), so a phone scan only needs Approve.
  */
 @Composable
-private fun LinkCode(s: Trakt.State.Linking, touch: Boolean, actions: @Composable () -> Unit) {
+internal fun LinkCode(userCode: String, url: String, qrUrl: String, expiresAt: Long, touch: Boolean, actions: @Composable () -> Unit) {
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(s) { while (true) { now = System.currentTimeMillis(); delay(1_000) } }
-    val left = ((s.expiresAt - now) / 1000).coerceAtLeast(0)
-    val qrUrl = s.url.trimEnd('/') + "/" + s.userCode
+    LaunchedEffect(userCode) { while (true) { now = System.currentTimeMillis(); delay(1_000) } }
+    val left = ((expiresAt - now) / 1000).coerceAtLeast(0)
     val qr = remember(qrUrl) { qrImage(qrUrl, 300) }
     val words: @Composable () -> Unit = {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Scan the QR code with your phone, or", fontSize = 15.sp, color = Tv.Muted)
             Text(if (touch) "open this address in a browser:" else "on your phone or computer, go to", fontSize = 15.sp)
-            Text(s.url.removePrefix("https://"), fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Tv.Accent)
+            Text(url.removePrefix("https://"), fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Tv.Accent)
             Text("and enter this code:", fontSize = 15.sp)
-            Text(s.userCode, fontSize = 34.sp, fontWeight = FontWeight.Bold, letterSpacing = 4.sp)
+            Text(userCode, fontSize = 34.sp, fontWeight = FontWeight.Bold, letterSpacing = 4.sp)
             Text("Waiting for you to approve it · %d:%02d left".format(left / 60, left % 60), fontSize = 13.sp, color = Tv.Muted)
             actions()
         }

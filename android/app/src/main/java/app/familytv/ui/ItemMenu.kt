@@ -27,6 +27,9 @@ import androidx.tv.material3.Text
 import app.familytv.app
 import app.familytv.data.Kind
 import app.familytv.data.MovieEntity
+import app.familytv.debrid.RdCopy
+import app.familytv.trakt.PlayItem
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -61,13 +64,20 @@ class ItemMenus {
 
 val LocalItemMenus = compositionLocalOf { ItemMenus() }
 
-/** Favourite and watched actions for a movie. */
-fun movieMenu(ctx: Context, m: MovieEntity, favourite: Boolean, watched: Boolean) = ItemMenu(
+/**
+ * Favourite and watched actions for a movie. When the Real-Debrid account has it too ([rd]), the
+ * menu starts with both ways to play: the TV stream ([play]) and the Real-Debrid copy.
+ */
+fun movieMenu(ctx: Context, m: MovieEntity, favourite: Boolean, watched: Boolean, rd: RdCopy? = null, scope: CoroutineScope? = null, play: (() -> Unit)? = null) = ItemMenu(
     m.name,
-    listOf(
-        (if (watched) "Mark as unwatched" else "✓  Mark as watched") to { markMovie(ctx, m, !watched) },
-        (if (favourite) "♥  Remove from Favourites" else "♡  Add to Favourites") to { toggleFavourite(ctx, Kind.MOVIE, m.sourceId, m.streamId, m.name) },
-    ),
+    buildList {
+        if (rd != null && scope != null && play != null) {
+            add("▶  Play" to play)
+            add("▶  Play from Real-Debrid  ·  ${rd.label}" to { scope.launch { playFromRealDebrid(ctx, rd, m.name, PlayItem.movie(m.sourceId, m.streamId, m.name)) } })
+        }
+        add((if (watched) "Mark as unwatched" else "✓  Mark as watched") to { markMovie(ctx, m, !watched) })
+        add((if (favourite) "♥  Remove from Favourites" else "♡  Add to Favourites") to { toggleFavourite(ctx, Kind.MOVIE, m.sourceId, m.streamId, m.name) })
+    },
 )
 
 fun markMovie(ctx: Context, m: MovieEntity, watched: Boolean) {

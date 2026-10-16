@@ -126,13 +126,15 @@ internal fun MovieCard(m: MovieEntity, modifier: Modifier, width: Dp?, profile: 
     val scope = rememberCoroutineScope()
     val p = progress[ProgressKey.movie(m.sourceId, m.streamId)]
     val fav = Favourites.key(Kind.MOVIE, m.sourceId, m.streamId) in favKeys
+    val rdIndex = rememberRdIndex()
     PosterCard(
         m.name, m.poster, modifier, width = width,
         favourite = fav,
         onFavourite = { toggleFavourite(ctx, Kind.MOVIE, m.sourceId, m.streamId, m.name) },
         watched = p?.watched == true, progress = ProgressRules.bar(p),
         onTrailer = movieTrailerAction(profile, m),
-        onMenu = { menus.open = movieMenu(ctx, m, fav, p?.watched == true) },
+        rd = rdIndex.movie(m.name, m.year) != null,
+                                        onMenu = { menus.open = movieMenu(ctx, m, fav, p?.watched == true, rdIndex.movie(m.name, m.year), scope) { scope.launch { playMovieNow(ctx, profile, m) } } },
         onFocus = onFocus,
     ) { scope.launch { playMovieNow(ctx, profile, m) } }
 }

@@ -87,6 +87,24 @@ class PortalClient(context: Context, private val baseUrl: String = BuildConfig.P
     suspend fun trakt(call: String, body: Map<String, String> = emptyMap()): TraktProxyResult =
         post("/api/device/trakt/$call", body, TraktProxyResult::class.java)
 
+    /** Hands a new Real-Debrid sign-in to the portal, which shares it with the profile's other TVs. */
+    suspend fun realDebridLink(credentials: Map<String, Any?>) {
+        post("/api/device/realdebrid/link", credentials, Map::class.java)
+    }
+
+    /**
+     * The profile's Real-Debrid token; [rejected] is one Real-Debrid refused, so the portal refreshes it.
+     * Throws [PortalException] 404 when the profile has no account, 410 when it must sign in again.
+     */
+    suspend fun realDebridToken(rejected: String? = null): RealDebridToken =
+        if (rejected == null) get("/api/device/realdebrid/token", RealDebridToken::class.java)
+        else post("/api/device/realdebrid/token", mapOf("rejected" to rejected), RealDebridToken::class.java)
+
+    /** Signs every TV in the profile out of Real-Debrid. */
+    suspend fun realDebridUnlink() {
+        post("/api/device/realdebrid/unlink", emptyMap<String, String>(), Map::class.java)
+    }
+
     private suspend fun <T> get(path: String, type: Class<T>): T = call(Request.Builder().url(baseUrl + path).get(), type, true)
 
     private suspend fun <T> post(path: String, body: Any, type: Class<T>, auth: Boolean = true): T =
