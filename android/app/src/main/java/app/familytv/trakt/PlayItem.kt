@@ -14,13 +14,16 @@ data class PlayItem(
     val name: String,
     val season: Int = 0,
     val episode: Int = 0,
+    /** Explicit metadata identity for external playback; old catalog intents omit these. */
+    val tmdb: String? = null,
+    val imdb: String? = null,
 ) {
     val key: String
         get() = if (kind == ProgressKey.MOVIE) ProgressKey.movie(sourceId, itemId) else ProgressKey.episode(sourceId, itemId, season, episode)
 
     fun putInto(i: Intent): Intent = i
         .putExtra(KIND, kind).putExtra(SOURCE, sourceId).putExtra(ID, itemId).putExtra(NAME, name)
-        .putExtra(SEASON, season).putExtra(EPISODE, episode)
+        .putExtra(SEASON, season).putExtra(EPISODE, episode).putExtra(TMDB, tmdb).putExtra(IMDB, imdb)
 
     companion object {
         private const val KIND = "playItem.kind"
@@ -29,6 +32,8 @@ data class PlayItem(
         private const val NAME = "playItem.name"
         private const val SEASON = "playItem.season"
         private const val EPISODE = "playItem.episode"
+        private const val TMDB = "playItem.tmdb"
+        private const val IMDB = "playItem.imdb"
 
         fun movie(sourceId: String, streamId: String, name: String) = PlayItem(ProgressKey.MOVIE, sourceId, streamId, name)
         fun episode(sourceId: String, seriesId: String, seriesName: String, season: Int, episode: Int) =
@@ -43,6 +48,8 @@ data class PlayItem(
                 i.getStringExtra(NAME).orEmpty(),
                 i.getIntExtra(SEASON, 0),
                 i.getIntExtra(EPISODE, 0),
+                i.getStringExtra(TMDB),
+                i.getStringExtra(IMDB),
             )
         }
     }

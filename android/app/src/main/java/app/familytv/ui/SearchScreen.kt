@@ -19,6 +19,8 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -47,6 +49,14 @@ import app.familytv.data.MovieEntity
 import app.familytv.data.SeriesEntity
 import app.familytv.debrid.RdResume
 import app.familytv.debrid.RdTitle
+import app.familytv.discovery.DiscoveryPolicy
+import app.familytv.discovery.DiscoverySession
+import app.familytv.discovery.SourceUnavailable
+import app.familytv.debrid.RdCopy
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import kotlinx.coroutines.CancellationException
 import app.familytv.portal.Profile
 import app.familytv.trakt.TitleMatch
 import app.familytv.user.Favourites
@@ -74,6 +84,37 @@ fun SearchScreen(vm: MainViewModel, profile: Profile) {
     val keyboard = LocalSoftwareKeyboardController.current
     var query by rememberSaveable { mutableStateOf("") }
     var fieldFocused by remember { mutableStateOf(false) }
+    var external by remember(profile) { mutableStateOf(false) }
+    var protectedAction by remember(profile) { mutableStateOf<(() -> Unit)?>(null) }
+    var libraryGrant by remember(profile) { mutableStateOf<DiscoverySession?>(null) }
+    var libraryUnlocking by remember(profile) { mutableStateOf(false) }
+    val libraryUnlocked = profile.parentalPin.isNullOrEmpty() || libraryGrant != null
+    val rdIndex = rememberRdIndex()
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    suspend fun playLibrary(copy: RdCopy, title: RdTitle, label: String, resume: String) {
+        try {
+            val session = libraryGrant ?: if (profile.parentalPin.isNullOrEmpty()) DiscoverySession.open(ctx.app, profile) else throw SourceUnavailable("Unlock the library results again.")
+            playRdOnly(ctx, copy, label, resume) {
+                session.verify()
+                val blocked = CatalogDiscoveryGuard(dao, profile).blocked() ?: throw SourceUnavailable("Cannot verify the catalog policy.")
+                if (!DiscoveryPolicy.allowed(title.title, blocked)) throw SourceUnavailable("This title is hidden by the catalog policy.")
+                if (ctx.app.realDebrid.index.value !== rdIndex || !lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) throw CancellationException("The library or active screen changed")
+            }
+        } catch (e: CancellationException) { throw e }
+        catch (_: Exception) { toast(ctx, "Cannot verify this title or profile. Search again when the portal is available.") }
+    }
+    DisposableEffect(lifecycle, profile) {
+        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_STOP) { libraryGrant = null; protectedAction = null } }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
+    }
+    LaunchedEffect(libraryGrant) {
+        val grant = libraryGrant ?: return@LaunchedEffect
+        try {
+            while (true) { grant.verify(); delay(15_000) }
+        } catch (e: CancellationException) { throw e }
+        catch (_: Exception) { libraryGrant = null }
+    }
 
     // Results respect hidden categories and the parental lock, like the browse pages.
     fun keys(cats: List<CategoryEntity>) = cats.map { it.sourceId to it.categoryId }.toSet()
@@ -81,15 +122,26 @@ fun SearchScreen(vm: MainViewModel, profile: Profile) {
     val movies = keys(categories(profile, Kind.MOVIE))
     val series = keys(categories(profile, Kind.SERIES))
     val q = query.trim()
-    val results by produceState(Results(), q, live, movies, series) {
+    val results by produceState(Results(), q, live, movies, series, rdIndex, profile, libraryUnlocked, libraryGrant) {
+        // Clear only the external shelf immediately; a prior grant/query must not retain RD titles.
+        value = value.copy(rd = emptyList())
         delay(300) // let typing settle
         value = if (q.length < 2) Results() else {
             val m = dao.searchMovies(q, LIMIT * 3).filter { (it.sourceId to it.categoryId) in movies }.take(LIMIT)
             val s = dao.searchSeries(q, LIMIT * 3).filter { (it.sourceId to it.categoryId) in series }.take(LIMIT)
-            val found = (m.map { it.name } + s.map { it.name }).mapTo(HashSet()) { TitleMatch.key(TitleMatch.parse(it).title) }
+            val found = (m.map { it.name } + s.map { it.name }).flatMapTo(HashSet()) { DiscoveryPolicy.keys(it) }
+            val blocked = CatalogDiscoveryGuard(dao, profile).blocked(q)
+            val rd = if (!libraryUnlocked || blocked == null || rdIndex.fileCount == 0) emptyList() else try {
+                val grant = libraryGrant ?: if (profile.parentalPin.isNullOrEmpty()) DiscoverySession.open(ctx.app, profile) else throw SourceUnavailable("Unlock the library again.")
+                grant.verify()
+                val matches = rdIndex.search(q, found).filter { DiscoveryPolicy.allowed(it.title, blocked) }
+                grant.verify()
+                matches
+            } catch (e: CancellationException) { throw e }
+            catch (_: Exception) { emptyList() }
             Results(
                 dao.searchChannels(q, LIMIT * 3).filter { (it.sourceId to it.categoryId) in live }.take(LIMIT),
-                m, s, ctx.app.realDebrid.index.value.search(q, found),
+                m, s, rd,
             )
         }
     }
@@ -131,6 +183,21 @@ fun SearchScreen(vm: MainViewModel, profile: Profile) {
                 fontSize = 13.sp, color = Tv.Muted, modifier = Modifier.padding(start = 24.dp, top = 6.dp),
             )
             Spacer(Modifier.height(12.dp))
+            TvButton("Find movies & series online", { external = true }, enabled = q.length >= 2)
+            Text("Search TMDB and choose a Torrentio source using the Real-Debrid API key for this profile.", fontSize = 13.sp, color = Tv.Muted)
+            if (!libraryUnlocked && rdIndex.fileCount > 0) TvButton(if (libraryUnlocking) "Checking profile…" else "Unlock Real-Debrid library results", {
+                protectedAction = {
+                    scope.launch {
+                        libraryUnlocking = true
+                        try {
+                            val grant = DiscoverySession.open(ctx.app, profile)
+                            if (lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) libraryGrant = grant
+                        } catch (e: CancellationException) { throw e }
+                        catch (_: Exception) { toast(ctx, "Cannot verify the current profile. Try again later.") }
+                        finally { libraryUnlocking = false }
+                    }
+                }
+            }, enabled = !libraryUnlocking && q.length >= 2)
             val r = results
             if (q.length >= 2 && r.channels.isEmpty() && films.isEmpty() && shows.isEmpty() && r.rd.isEmpty()) Text("No matches for \"$q\".", fontSize = 17.sp, color = Tv.Muted)
             LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(bottom = 40.dp)) {
@@ -164,20 +231,33 @@ fun SearchScreen(vm: MainViewModel, profile: Profile) {
                         }
                     }
                 }
-                if (r.rd.isNotEmpty()) item("rd") {
+                if (libraryUnlocked && r.rd.isNotEmpty()) item("rd") {
                     Shelf("Real-Debrid") {
                         itemsIndexed(r.rd, key = { i, t -> "rd/$i/${t.title}" }) { _, t ->
                             val name = listOfNotNull(t.year?.let { "${t.title} ($it)" } ?: t.title, t.copy?.label ?: "${t.episodes.size} episodes")
                             PosterCard(name.joinToString("\n"), null, rd = true) {
+                                val action: () -> Unit = {
                                 val copy = t.copy
-                                if (copy != null) scope.launch { playRdOnly(ctx, copy, t.title, RdResume.key(t)) }
+                                if (copy != null) scope.launch { playLibrary(copy, t, t.title, RdResume.key(t)) }
                                 else menus.open = ItemMenu(t.title, t.episodes.map { e ->
-                                    "▶  ${e.label}" to { scope.launch { playRdOnly(ctx, e.copy, "${t.title}  S${e.season} E${e.episode}", RdResume.key(t, e)) } }
+                                    "▶  ${e.label}" to { scope.launch { playLibrary(e.copy, t, "${t.title}  S${e.season} E${e.episode}", RdResume.key(t, e)) } }
                                 })
+                                Unit
+                                }
+                                if (profile.parentalPin.isNullOrEmpty()) action() else protectedAction = action
                             }
                         }
                     }
                 }
+            }
+        }
+    }
+    if (external) ExternalDiscovery(profile, q, { external = false })
+    protectedAction?.let { action ->
+        androidx.compose.ui.window.Dialog(onDismissRequest = { protectedAction = null }) {
+            Column(Modifier.background(Tv.Raised, Tv.Shape).padding(24.dp)) {
+                PinPrompt(profile) { protectedAction = null; action() }
+                TvButton("Cancel", { protectedAction = null })
             }
         }
     }

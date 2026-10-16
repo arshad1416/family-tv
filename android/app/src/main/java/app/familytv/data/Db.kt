@@ -127,6 +127,11 @@ data class NowNext(val epgId: String, val title: String, val start: Long, val st
 
 @Dao
 interface CatalogDao {
+    /** Bounded projection of hidden catalog identities; punctuation-independent parental checks. */
+    @Query("SELECT name, tmdb FROM movies WHERE (length(CAST(sourceId AS BLOB)) || ':' || sourceId || categoryId) NOT IN (:visible) LIMIT :limit")
+    suspend fun restrictedMovieTitles(visible: List<String>, limit: Int): List<CatalogPolicyTitle>
+    @Query("SELECT name, tmdb FROM series WHERE (length(CAST(sourceId AS BLOB)) || ':' || sourceId || categoryId) NOT IN (:visible) LIMIT :limit")
+    suspend fun restrictedShowTitles(visible: List<String>, limit: Int): List<CatalogPolicyTitle>
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertSource(s: SourceEntity)
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertCategories(c: List<CategoryEntity>)
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertChannels(c: List<ChannelEntity>)
@@ -202,6 +207,8 @@ interface CatalogDao {
     @Query("SELECT * FROM movies WHERE titleKey IN (:titleKeys) OR tmdb IN (:tmdb) ORDER BY sourceId, name")
     suspend fun movieCopies(titleKeys: List<String>, tmdb: List<String>): List<MovieEntity>
 }
+
+data class CatalogPolicyTitle(val name: String, val tmdb: String?)
 
 @Database(
     entities = [SourceEntity::class, CategoryEntity::class, ChannelEntity::class, MovieEntity::class, SeriesEntity::class, ProgrammeEntity::class],

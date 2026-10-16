@@ -166,7 +166,7 @@ private fun Tiles(tiles: List<Tile>) {
 
 /** The parental PIN pad; [onOk] runs once the right PIN is entered. */
 @Composable
-private fun PinPrompt(profile: Profile, onOk: () -> Unit) {
+internal fun PinPrompt(profile: Profile, onOk: () -> Unit) {
     var pin by remember { mutableStateOf("") }
     var wrong by remember { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {

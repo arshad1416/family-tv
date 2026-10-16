@@ -82,8 +82,20 @@ passwords on a remote, and when a TV goes black the portal tells you why.
   account's best copy (4K, then surround sound, then the biggest file) with the TV stream as the
   backup. Search adds a *Real-Debrid* row of account titles the catalog doesn't have: a film plays its
   best copy, a show lists its episodes; their resume spots stay on that TV (no Trakt, no portal).
-  It never searches for or adds torrents. Real-Debrid allows one connection at a time,
+  This library-only path never searches for or adds torrents. Real-Debrid allows one connection at a time,
   so two TVs in different homes playing at once may be refused.
+- **External movie and series search:** Search → *Find movies & series online* explicitly searches
+  TMDB, then lists credentialless Torrentio sources for a selected movie or season/episode. Settings →
+  *External movie & series sources* accepts a masked Real-Debrid API key for the account owner's own
+  authorized devices in the same profile. Save/replace/remove applies to every device in that profile;
+  no key is shown in the admin page, routine config or telemetry, or sent to Torrentio. The Android app
+  keeps keys only in request/playback memory. A protected profile must enter its PIN before external
+  discovery or playback; adult metadata and known hidden catalog titles are excluded. TMDB's
+  `adult=false` flag is not an age rating. 1080p SDR AVC candidates appear first; other valid sources
+  remain available with an explicit compatibility warning. Only selecting Play adds a torrent, and
+  Cancel stops waiting rather than undoing an account mutation. External progress uses stable TMDB
+  title/season/episode identity, so choosing another source preserves resume and Trakt identity.
+  See [external source implementation and validation](docs/external-sources.md).
 - Live TV on a TV remote: OK shows the channel list; Back opens the full guide over the video, and
   Back again shrinks the video into a window at the top of the guide. OK on another channel plays it
   in that window, OK again goes full screen. A third Back opens the categories beside the guide
@@ -237,6 +249,12 @@ directly with its own token. Without `TRAKT_CLIENT_ID` the TVs hide
 the Trakt section. No database migration is needed; Trakt tokens live on each device.
 
 ### 5. Real-Debrid (optional)
+The external-source API-key feature additionally requires portal migration
+`0007_profile_rd_api_keys.sql` and the matching authenticated API endpoints/security fixes. Review
+and deploy those changes together before entering a real key. This implementation has only been
+tested with synthetic keys and loopback fixtures; no credential configuration or deployment is
+performed by the development tests. API-key synchronization requires an HTTPS portal.
+
 Nothing to configure: the TV signs in with Real-Debrid's device code, and the portal keeps that
 profile's account (sealed with `CONFIG_KEY`) and refreshes its token for every TV. The profile page
 shows which account is connected, with a Disconnect button. It needs the
