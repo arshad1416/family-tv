@@ -4,6 +4,7 @@ import app.familytv.debrid.RdCopy
 import app.familytv.debrid.RdFile
 import app.familytv.debrid.RdIndex
 import app.familytv.debrid.RdNames
+import app.familytv.iptv.QualityPref
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -95,6 +96,23 @@ class RealDebridTest {
         assertEquals(1080, RdIndex(files).movie("Heat", 1995)!!.quality) // the setting off keeps today's order
         val sameSound = listOf(file("Heat.1995.2160p.A.mkv", 10_000_000_000), file("Heat.1995.2160p.B.mkv", 30_000_000_000))
         assertEquals("Heat.1995.2160p.B.mkv", RdIndex(sameSound, bestFirst = true).movie("Heat", 1995)!!.file.name)
+    }
+
+    @Test
+    fun bestFirstFollowsTheStreamQualitySetting() {
+        val files = listOf(
+            file("Heat.1995.2160p.WEB.DDP5.1.mkv", 18_000_000_000),
+            file("Heat.1995.1080p.WEB.AAC.mkv", 9_000_000_000),
+            file("Heat.1995.1080p.BluRay.DTS.mkv", 12_000_000_000),
+            file("Show.S01E01.2160p.mkv", 8_000_000_000),
+            file("Show.S01E01.720p.mkv", 1_000_000_000),
+        )
+        val index = RdIndex(files, bestFirst = true, moviePref = QualityPref.FHD, seriesPref = QualityPref.P720)
+        // 1080p first, then surround among those.
+        assertEquals("Heat.1995.1080p.BluRay.DTS.mkv", index.movie("Heat", 1995)!!.file.name)
+        assertEquals(720, index.episode("Show", null, 1, 1)!!.quality)
+        // Off, the setting doesn't change anything.
+        assertEquals(1080, RdIndex(files, moviePref = QualityPref.UHD).movie("Heat", 1995)!!.quality)
     }
 
     @Test

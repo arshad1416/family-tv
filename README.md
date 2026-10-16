@@ -34,6 +34,12 @@ passwords on a remote, and when a TV goes black the portal tells you why.
 - **Search** finds channels, movies and series whose words start with what you type, ignoring case
   and accents ("pokemon" finds *Pokémon*, "star wa" finds *Star Wars*); names that only contain the
   text come after those.
+- **Stream quality** (Settings): one choice each for Live TV, Movies and Series: Auto, Always prefer
+  4K, HD, 1080p or 720p, kept on that TV. Movies and shows open the copy nearest that quality (after a
+  part-watched copy and the family's language), and Real-Debrid first follows it too. Live TV starts
+  HLS streams on the nearest picture size and plays the preferred version of a channel the line has
+  in several qualities ("CTV HD", "CTV 4K"); Up/Down steps past the other versions. Missing quality:
+  the nearest lower, then higher. Picture & sound in the player still changes it for one video.
 - **Favourites:** hold OK (or press Menu) on any channel, movie or series to add or remove it; on a
   phone or tablet tap the heart. Live TV, Movies and Series each get a *Favourites* category at the
   top, and Home a *Favourites* row. Favourites survive channel reloads.

@@ -3,6 +3,7 @@ package app.familytv.debrid
 import android.content.Context
 import app.familytv.FamilyTvApp
 import app.familytv.core.Http
+import app.familytv.data.Kind
 import app.familytv.portal.PortalException
 import app.familytv.portal.RealDebridPortal
 import app.familytv.trakt.PlayItem
@@ -65,10 +66,14 @@ class RealDebrid(private val app: FamilyTvApp) {
     fun setPlayFirst(on: Boolean) {
         settings.edit().putBoolean(PLAY_FIRST, on).apply()
         _playFirst.value = on
-        _index.value = index(_index.value.files)
+        reindex()
     }
 
-    private fun index(files: List<RdFile>) = if (files.isEmpty()) RdIndex.EMPTY else RdIndex(files, _playFirst.value)
+    /** Ranks the copies again after a setting that orders them changed. */
+    fun reindex() { _index.value = index(_index.value.files) }
+
+    private fun index(files: List<RdFile>) =
+        if (files.isEmpty()) RdIndex.EMPTY else RdIndex(files, _playFirst.value, app.quality[Kind.MOVIE], app.quality[Kind.SERIES])
 
     private val linked: Boolean get() = prefs.getBoolean(LINKED, false)
 

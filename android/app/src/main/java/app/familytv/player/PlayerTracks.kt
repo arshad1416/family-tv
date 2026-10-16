@@ -9,6 +9,8 @@ import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
+import app.familytv.iptv.QualityPref
+import app.familytv.iptv.StreamQuality
 import java.util.Locale
 
 /** One selectable track in a picker. */
@@ -56,12 +58,16 @@ class PlayerTracks(private val player: Player, private val prefs: CaptionPrefs) 
 
     private var autoPicked = false
     private var pendingTextId: String? = null
+    /** Settings' Stream quality for what is playing; not Auto starts on the nearest video rendition once per item. */
+    var preferredVideo = QualityPref.AUTO
+    private var videoPicked = false
 
     /** Audio or video has something to choose between. */
     val hasChoices get() = audio.size > 1 || video.size > 1
 
     fun onNewItem() {
         autoPicked = false
+        videoPicked = false
         cuesSeen = false
         videoAuto = true
         player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
@@ -101,6 +107,11 @@ class PlayerTracks(private val player: Player, private val prefs: CaptionPrefs) 
         audio = a
         video = v.sortedWith(compareByDescending<TrackChoice> { it.height }.thenByDescending { it.bitrate }).distinctBy { it.label }
         videoAuto = player.trackSelectionParameters.overrides.values.none { it.type == C.TRACK_TYPE_VIDEO }
+        if (!videoPicked && preferredVideo != QualityPref.AUTO && video.size > 1) {
+            videoPicked = true
+            // Picture & sound can still change it for this video.
+            selectVideo(video[StreamQuality.pick(video.map { StreamQuality.ofHeight(it.height) }, preferredVideo)])
+        }
 
         pendingTextId?.let { id ->
             t.firstOrNull { it.formatId == id || it.formatId?.endsWith(":$id") == true || it.label.contains(ONLINE_SUFFIX) }?.let { pendingTextId = null; selectText(it); return }

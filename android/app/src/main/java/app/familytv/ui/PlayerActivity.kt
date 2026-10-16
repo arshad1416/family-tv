@@ -62,7 +62,10 @@ import app.familytv.core.Http
 import app.familytv.debrid.RdCopy
 import app.familytv.debrid.RdResume
 import app.familytv.data.ChannelEntity
+import app.familytv.data.Kind
 import app.familytv.data.NowNext
+import app.familytv.iptv.QualityPref
+import app.familytv.iptv.StreamQuality
 import app.familytv.iptv.Streams
 import app.familytv.player.CaptionPrefs
 import app.familytv.player.ONLINE_SUFFIX
@@ -119,6 +122,8 @@ class PlayerActivity : ComponentActivity() {
     /** Which list [channels] is: the category it was opened from, or one picked in the big guide. */
     private var playingList by mutableStateOf<ListKey>("" to "")
     private var index = 0
+    /** The channel actually playing: [channels]`[index]`, or the version of it Settings' Stream quality prefers. */
+    private var tuned: ChannelEntity? = null
     private var triedHls = false
     private var profile: Profile? = null
     private var title = ""
@@ -534,6 +539,7 @@ class PlayerActivity : ComponentActivity() {
     private fun playChannel(delayMs: Long = 0) {
         val ch = channels.getOrNull(index) ?: return
         val p = profile ?: return
+        tuned = null
         triedHls = false
         retries = 0
         tunedAt = System.currentTimeMillis()
@@ -546,15 +552,36 @@ class PlayerActivity : ComponentActivity() {
         tune?.cancel()
         tune = lifecycleScope.launch {
             delay(delayMs)
-            val url = Streams(app.db, p).live(ch) ?: return@launch show("$title\nThis channel has no stream address.", 4000, isError = true)
+            val play = preferredVersion(ch, p)
+            tuned = play
+            if (play !== ch) title = "${ch.num}  ${play.name}"
+            val url = Streams(app.db, p).live(play) ?: return@launch show("$title\nThis channel has no stream address.", 4000, isError = true)
             start(url, title)
         }
+    }
+
+    /**
+     * [ch], or the version of it Settings' Stream quality prefers: the same channel under another
+     * quality tag ("CA: CTV 4K" for "CA: CTV HD"), in a category the family can see.
+     */
+    private suspend fun preferredVersion(ch: ChannelEntity, p: Profile): ChannelEntity {
+        val pref = app.quality[Kind.LIVE]
+        val key = StreamQuality.channelKey(ch.name)
+        if (pref == QualityPref.AUTO || key.isEmpty()) return ch
+        val dao = app.db.catalog()
+        val visible = visibleCategories(dao.categoryList(Kind.LIVE), p, adultLive = adultOpen(p, app.adultUnlocked.value))
+            .mapTo(HashSet()) { it.sourceId to it.categoryId }
+        val others = dao.channelsLike("% ${key.split(' ').maxBy { it.length }}%")
+            .filter { StreamQuality.channelKey(it.name) == key && (it.sourceId to it.categoryId) in visible }
+        val versions = (listOf(ch) + others).distinctBy { it.sourceId to it.streamId }
+        return versions[StreamQuality.pick(versions.map { StreamQuality.of(it.name) }, pref)]
     }
 
     private fun start(url: String, t: String, at: Long? = null) {
         PlaybackStatus.started(t)
         this.url = url
         stats.reset()
+        tracks.preferredVideo = if (live) app.quality[Kind.LIVE] else QualityPref.AUTO
         tracks.onNewItem()
         if (at != null) player.setMediaItem(MediaItem.fromUri(url), at) else player.setMediaItem(MediaItem.fromUri(url))
         player.prepare()
@@ -636,7 +663,7 @@ class PlayerActivity : ComponentActivity() {
         if (canSwitch()) return switchToRd()
         // The Real-Debrid copy failed after a switch: the TV stream may be back.
         if (!live && onRd && iptvUrl != null) return backToIptv()
-        val ch = channels.getOrNull(index)
+        val ch = tuned ?: channels.getOrNull(index)
         val p = profile
         // One-connection lines can refuse a new stream for a moment after the old one closes:
         // straight after a tune, try the same channel again (twice, backing off) before anything else.
@@ -870,7 +897,13 @@ class PlayerActivity : ComponentActivity() {
 
     private fun zap(delta: Int) {
         if (channels.isEmpty()) return
-        index = (index + delta + channels.size) % channels.size
+        // With a Stream quality set, versions of one channel ("CTV HD", "CTV 4K") play the same one: step past them.
+        val key = channels.getOrNull(index)?.takeIf { app.quality[Kind.LIVE] != QualityPref.AUTO }?.let { StreamQuality.channelKey(it.name) }.orEmpty()
+        var steps = 0
+        do {
+            index = (index + delta + channels.size) % channels.size
+            steps++
+        } while (key.isNotEmpty() && steps < channels.size && StreamQuality.channelKey(channels[index].name) == key)
         playChannel(delayMs = 600)
     }
 

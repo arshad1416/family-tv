@@ -174,6 +174,8 @@ interface CatalogDao {
     @Query("SELECT * FROM channels WHERE sourceId = :sourceId AND categoryId IN (:categoryIds)") suspend fun channelsIn(sourceId: String, categoryIds: List<String>): List<ChannelEntity>
     @Query("SELECT * FROM channels ORDER BY sourceId, num, name LIMIT :limit OFFSET :offset") suspend fun allChannels(limit: Int, offset: Int): List<ChannelEntity>
     @Query("SELECT * FROM channels WHERE sourceId = :sourceId LIMIT 1") suspend fun anyChannel(sourceId: String): ChannelEntity?
+    /** Channels whose [ChannelEntity.searchText] matches [pattern] ("% ctv%"), to find a channel's other versions. */
+    @Query("SELECT * FROM channels WHERE searchText LIKE :pattern LIMIT 500") suspend fun channelsLike(pattern: String): List<ChannelEntity>
     // Built by SearchText; call searchChannels/searchMovies/searchSeries instead.
     @RawQuery suspend fun rawChannels(q: SupportSQLiteQuery): List<ChannelEntity>
     @RawQuery suspend fun rawMovies(q: SupportSQLiteQuery): List<MovieEntity>
