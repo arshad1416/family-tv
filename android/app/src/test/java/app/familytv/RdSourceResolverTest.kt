@@ -2,6 +2,11 @@ package app.familytv
 
 import app.familytv.discovery.*
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.*
 import org.junit.Test
@@ -27,7 +32,7 @@ class RdSourceResolverTest {
             try { resolver.prepare(source, target, progress = reports::add) {}; fail("Wait must be bounded") }
             catch (e: SourceUnavailable) { assertTrue(e.message!!.contains("still preparing")) }
             val downloading = reports.filter { it.stage.contains("Downloading") }
-            assertEquals(12, downloading.size)
+            assertEquals(120, downloading.size)
             assertTrue(downloading.all { it.percent == if (raw == "25.5") 25.5 else null })
         }
     }
@@ -92,8 +97,8 @@ class RdSourceResolverTest {
             if (path == "/torrents/addMagnet") """{"id":"ABC"}""" else { infoCalls++; info("downloading") }
         }, {}, { waits += it })
         try { resolver.prepare(source, target) {}; fail("Unbounded wait") } catch (e: SourceUnavailable) { assertTrue(e.message!!.contains("still preparing")) }
-        assertEquals(12, infoCalls)
-        assertEquals(11, waits.size)
+        assertEquals(120, infoCalls)
+        assertEquals(119, waits.size)
         assertTrue(waits.all { it >= 2000 })
     }
 
@@ -105,6 +110,84 @@ class RdSourceResolverTest {
         }, {})
         try { resolver.prepare(source, target) {}; fail("Cancellation swallowed") } catch (_: CancellationException) {}
         assertEquals(1, addCalls)
+    }
+
+    @Test fun healthySelectedSourceCanFinishOnThirteenthPollWithoutReturningToStatus() = runTest {
+        var polls = 0
+        var now = 0L
+        val resolver = RdSourceResolver({ path, _ ->
+            when (path) {
+                "/torrents/addMagnet" -> """{"id":"ABC"}"""
+                "/torrents/info/ABC" -> { polls++; info(if (polls < 13) "downloading" else "downloaded", 1) }
+                "/unrestrict/link" -> """{"download":"https://cdn.example.test/selected.mkv"}"""
+                else -> error("Unexpected source request")
+            }
+        }, {}, { now += it }, { now })
+        assertEquals("https://cdn.example.test/selected.mkv", resolver.prepare(source, target) {})
+        assertEquals(13, polls)
+    }
+
+    @Test fun preparationDeadlineStopsBeforeAnotherRequestAfterEightMinutes() = runTest {
+        var calls = 0
+        var now = 0L
+        val resolver = RdSourceResolver({ path, _ ->
+            calls++
+            if (path == "/torrents/addMagnet") """{"id":"ABC"}""" else info("downloading")
+        }, {}, { now = 8 * 60_000L }, { now })
+        try { resolver.prepare(source, target) {}; fail("Expired preparation continued") }
+        catch (e: SourceUnavailable) { assertTrue(e.message!!.contains("still preparing")) }
+        assertEquals(2, calls)
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test fun cancellingSelectedPreparationDuringWaitMakesNoFurtherProviderRequest() = runTest {
+        var calls = 0
+        var resolved = false
+        val resolver = RdSourceResolver({ path, _ ->
+            calls++
+            if (path == "/torrents/addMagnet") """{"id":"ABC"}""" else info("downloading")
+        }, {}, { awaitCancellation() }, { 0L })
+        val job = launch { resolver.prepare(source, target) {}; resolved = true }
+        runCurrent()
+        assertEquals(2, calls)
+        job.cancelAndJoin()
+        runCurrent()
+        assertEquals(2, calls)
+        assertFalse(resolved)
+    }
+
+    @Test fun finalUnrestrictResponseCrossingDeadlineNeverReturnsAPlayableAddress() = runTest {
+        var now = 0L
+        var returned = false
+        val resolver = RdSourceResolver({ path, _ ->
+            when (path) {
+                "/torrents/addMagnet" -> """{"id":"ABC"}"""
+                "/torrents/info/ABC" -> info("downloaded", 1)
+                "/unrestrict/link" -> { now = 8 * 60_000L; """{"download":"https://cdn.example.test/late.mkv"}""" }
+                else -> error("Unexpected source request")
+            }
+        }, {}, {}, { now })
+        try { resolver.prepare(source, target) {}; returned = true }
+        catch (e: SourceUnavailable) { assertTrue(e.message!!.contains("still preparing")) }
+        assertFalse("A late final response must not reach player dispatch", returned)
+    }
+
+    @Test fun finalValidationCrossingDeadlineCannotLaunchEvenAfterResolutionSucceeds() = runTest {
+        var now = 0L
+        var returned = false
+        val resolver = RdSourceResolver({ path, _ ->
+            when (path) {
+                "/torrents/addMagnet" -> """{"id":"ABC"}"""
+                "/torrents/info/ABC" -> info("downloaded", 1)
+                "/unrestrict/link" -> """{"download":"https://cdn.example.test/selected.mkv"}"""
+                else -> error("Unexpected source request")
+            }
+        }, {}, {}, { now })
+        try {
+            resolver.prepare(source, target, {}, {}, beforeReturn = { now = 8 * 60_000L })
+            returned = true
+        } catch (e: SourceUnavailable) { assertTrue(e.message!!.contains("still preparing")) }
+        assertFalse("Final account/catalog validation must remain within the same deadline", returned)
     }
 
     @Test fun invalidIdentityNeverAddsTorrent() = runTest {

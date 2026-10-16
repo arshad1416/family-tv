@@ -17,6 +17,8 @@ import app.familytv.user.Pending
 import app.familytv.user.ProgressEntity
 import app.familytv.user.ProgressKey
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -96,12 +98,14 @@ class TraktSync(private val app: FamilyTvApp, private val trakt: Trakt) {
         val plan = WatchlistMerge.plan(local, remote)
 
         if (plan.pushAdd.isNotEmpty()) {
-            trakt.post("/sync/watchlist", idsBody(plan.pushAdd.map { it.kind to it.ids }))
-            user.upsertFavourites(plan.pushAdd.map { it.key.copy(pending = null, onTrakt = true) })
+            trakt.post("/sync/watchlist", idsBody(plan.pushAdd.map { it.kind to it.ids }), onAccepted = {
+                user.upsertFavourites(plan.pushAdd.map { it.key.copy(pending = null, onTrakt = true) })
+            })
         }
         if (plan.pushRemove.isNotEmpty()) {
-            trakt.post("/sync/watchlist/remove", idsBody(plan.pushRemove.map { it.kind to it.ids }))
-            plan.pushRemove.forEach { delete(it.key) }
+            trakt.post("/sync/watchlist/remove", idsBody(plan.pushRemove.map { it.kind to it.ids }), onAccepted = {
+                plan.pushRemove.forEach { delete(it.key) }
+            })
         }
         if (plan.markSynced.isNotEmpty()) user.upsertFavourites(plan.markSynced.map { it.copy(pending = null, onTrakt = true) })
         plan.deleteLocal.forEach { delete(it) }
@@ -143,8 +147,9 @@ class TraktSync(private val app: FamilyTvApp, private val trakt: Trakt) {
         val rows = user.pendingHistory()
         if (rows.isEmpty()) return
         val (add, remove) = rows.partition { it.watched }
-        val sent = historyCall("/sync/history", add, budget, dated = true) + historyCall("/sync/history/remove", remove, budget, dated = false)
-        sent.chunked(500).forEach { user.clearPendingHistory(it) }
+        historyCall("/sync/history", add, budget, dated = true)
+        currentCoroutineContext().ensureActive()
+        historyCall("/sync/history/remove", remove, budget, dated = false)
     }
 
     /** Posts [rows] to [path] and returns the keys it sent (rows with no Trakt match wait for a later sync). */
@@ -169,6 +174,7 @@ class TraktSync(private val app: FamilyTvApp, private val trakt: Trakt) {
                     mapOf("ids" to ids.toTrakt(), "seasons" to seasons.map { (n, eps) -> mapOf("number" to n, "episodes" to eps) })
                 },
             ),
+            onAccepted = { sent.chunked(500).forEach { user.clearPendingHistory(it) } },
         )
         return sent
     }

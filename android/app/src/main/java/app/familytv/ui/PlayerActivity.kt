@@ -56,6 +56,7 @@ import androidx.media3.extractor.DefaultExtractorsFactory
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import app.familytv.BuildConfig
+import app.familytv.core.ForegroundWork
 import app.familytv.app
 import app.familytv.core.Http
 import app.familytv.debrid.RdResume
@@ -175,7 +176,6 @@ class PlayerActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         profile = app.portal.cachedConfig?.profile
         val form = formFactor()
         touch = form.touch
@@ -195,6 +195,7 @@ class PlayerActivity : ComponentActivity() {
         captionPrefs = CaptionPrefs(this)
         tracks = PlayerTracks(player, captionPrefs)
         player.addListener(object : Player.Listener {
+            override fun onEvents(player: Player, events: Player.Events) = updateScreenAwake()
             override fun onPlayerError(error: PlaybackException) = onError(error)
             override fun onPlaybackStateChanged(state: Int) {
                 if (state == Player.STATE_BUFFERING) PlaybackStatus.bufferingEvents++
@@ -209,7 +210,7 @@ class PlayerActivity : ComponentActivity() {
 
         view = PlayerView(this).apply {
             player = this@PlayerActivity.player
-            keepScreenOn = true
+            keepScreenOn = false
             setShowBuffering(PlayerView.SHOW_BUFFERING_ALWAYS)
         }
         aspect = AspectPref(this)
@@ -254,14 +255,13 @@ class PlayerActivity : ComponentActivity() {
             online = onlineSubtitles()
             view.useController = true
             view.setControllerVisibilityListener(PlayerView.ControllerVisibilityListener { vodControls = it == View.VISIBLE })
-            start(vodUrl, title)
             tracker = PlaybackTracker.attach(this, intent, player)
             rdResume = RdResume.attach(this, intent, player)
         } else {
             view.useController = false
             view.isFocusable = false
             view.descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
-            lifecycleScope.launch {
+            initialLiveLoad = { playbackWork.launch {
                 val src = intent.getStringExtra(EXTRA_SOURCE) ?: return@launch finish()
                 val cat = intent.getStringExtra(EXTRA_CATEGORY) ?: return@launch finish()
                 channels = app.db.catalog().channels(src, cat).first()
@@ -270,8 +270,8 @@ class PlayerActivity : ComponentActivity() {
                 val stream = intent.getStringExtra(EXTRA_STREAM)
                 index = channels.indexOfFirst { it.streamId == stream }.takeIf { it >= 0 }
                     ?: intent.getIntExtra(EXTRA_INDEX, 0).coerceIn(0, (channels.size - 1).coerceAtLeast(0))
-                playChannel()
-            }
+                dispatch { playbackResume.liveLoaded(); playChannel() }
+            }; Unit }
         }
     }
 
@@ -350,7 +350,7 @@ class PlayerActivity : ComponentActivity() {
         val key = app.portal.cachedConfig?.subtitlesApiKey?.trim()?.takeIf { it.isNotEmpty() } ?: return null
         if (playItem == null) return null
         val client = OpenSubtitles(key, "FamilyTV v${BuildConfig.VERSION_NAME}", Http.client)
-        return OnlineSubtitles(client, lifecycleScope, File(cacheDir, "subtitles"), ::subtitleRequest, ::sideLoad)
+        return OnlineSubtitles(client, playbackWork.coroutineScope, File(cacheDir, "subtitles"), ::subtitleRequest, ::sideLoad, { player.currentMediaItem })
     }
 
     private suspend fun subtitleRequest(): SubtitleRequest {
@@ -389,8 +389,8 @@ class PlayerActivity : ComponentActivity() {
     }
 
     /** Adds the downloaded .srt to the playing item (keeping the position) and selects it. */
-    private fun sideLoad(file: File, hit: SubtitleHit) {
-        val item = player.currentMediaItem ?: return
+    private fun sideLoad(file: File, hit: SubtitleHit) = playbackWork.dispatch {
+        val item = player.currentMediaItem ?: return@dispatch
         val id = "online-${hit.fileId}"
         val lang = TrackLabels.language(hit.language) ?: hit.language
         val sub = MediaItem.SubtitleConfiguration.Builder(Uri.fromFile(file))
@@ -496,6 +496,9 @@ class PlayerActivity : ComponentActivity() {
 
     // ---------- live TV ----------
 
+    private val playbackWork by lazy { ForegroundWork(lifecycleScope, initiallyActive = false) }
+    private val playbackResume = PlaybackResume()
+    private var initialLiveLoad: (() -> Unit)? = null
     private var tune: Job? = null
 
     /**
@@ -506,6 +509,7 @@ class PlayerActivity : ComponentActivity() {
     private fun playChannel(delayMs: Long = 0) {
         val ch = channels.getOrNull(index) ?: return
         val p = profile ?: return
+        playbackResume.selected()
         triedHls = false
         retries = 0
         tunedAt = System.currentTimeMillis()
@@ -516,14 +520,15 @@ class PlayerActivity : ComponentActivity() {
         showBanner(index)
         player.stop()
         tune?.cancel()
-        tune = lifecycleScope.launch {
+        tune = playbackWork.launch {
             delay(delayMs)
             val url = Streams(app.db, p).live(ch) ?: return@launch show("$title\nThis channel has no stream address.", 4000, isError = true)
-            start(url, title)
+            dispatch { start(url, title) }
         }
     }
 
-    private fun start(url: String, t: String, at: Long? = null) {
+    private fun start(url: String, t: String, at: Long? = null) = playbackWork.dispatch {
+        playbackResume.dispatched()
         PlaybackStatus.started(t)
         this.url = url
         stats.reset()
@@ -542,21 +547,21 @@ class PlayerActivity : ComponentActivity() {
         if (ch != null && p != null && retries < 2 && System.currentTimeMillis() - tunedAt < 15_000) {
             retries++
             val attempt = index
-            lifecycleScope.launch {
+            playbackWork.launch {
                 delay(1_500L * retries)
-                if (attempt == index) Streams(app.db, p).live(ch, if (triedHls) "m3u8" else "ts")?.let { start(it, title) }
+                if (attempt == index) Streams(app.db, p).live(ch, if (triedHls) "m3u8" else "ts")?.let { dispatch { start(it, title) } }
             }
             return
         }
         // Some panels only serve HLS for live; retry once before telling anyone.
         if (ch != null && ch.url == null && !triedHls && p != null) {
             triedHls = true
-            lifecycleScope.launch { Streams(app.db, p).live(ch, "m3u8")?.let { start(it, title) } }
+            playbackWork.launch { Streams(app.db, p).live(ch, "m3u8")?.let { dispatch { start(it, title) } } }
             return
         }
         show("Can't play this right now. Checking why…", 0, isError = true)
         if (p == null) return
-        lifecycleScope.launch {
+        playbackWork.launch {
             val r = app.diagnoser.runAndReport(p, playingHere = false)
             show(r.verdict.tvMessage + if (touch) "\n(Tap to retry)" else "\n(Press OK to retry)", 0, isError = true)
         }
@@ -567,7 +572,7 @@ class PlayerActivity : ComponentActivity() {
         overlay.tag = if (isError) "error" else null
         overlay.visibility = TextView.VISIBLE
         hideOverlay?.cancel()
-        if (ms > 0) hideOverlay = lifecycleScope.launch { delay(ms); overlay.visibility = TextView.GONE }
+        if (ms > 0) hideOverlay = playbackWork.launch { delay(ms); overlay.visibility = TextView.GONE }
     }
 
     private val exit = HoldBackToExit(this)
@@ -626,7 +631,7 @@ class PlayerActivity : ComponentActivity() {
     private fun showControls() {
         controls = true
         controlsJob?.cancel()
-        controlsJob = lifecycleScope.launch { delay(4_000); controls = false }
+        controlsJob = playbackWork.launch { delay(4_000); controls = false }
     }
 
     private fun hideControls() {
@@ -638,7 +643,7 @@ class PlayerActivity : ComponentActivity() {
         banner = i
         refreshProgrammes()
         bannerJob?.cancel()
-        if (!guideOpen) bannerJob = lifecycleScope.launch { delay(4_000); banner = null }
+        if (!guideOpen) bannerJob = playbackWork.launch { delay(4_000); banner = null }
     }
 
     private fun openGuide() {
@@ -660,7 +665,7 @@ class PlayerActivity : ComponentActivity() {
 
     private fun closeGuideLater() {
         guideJob?.cancel()
-        guideJob = lifecycleScope.launch { delay(20_000); closeGuide() }
+        guideJob = playbackWork.launch { delay(20_000); closeGuide() }
     }
 
     private var bigGuideJob: Job? = null
@@ -690,7 +695,7 @@ class PlayerActivity : ComponentActivity() {
 
     private fun closeBigGuideLater() {
         bigGuideJob?.cancel()
-        bigGuideJob = lifecycleScope.launch { delay(30_000); closeBigGuide() }
+        bigGuideJob = playbackWork.launch { delay(30_000); closeBigGuide() }
     }
 
     /**
@@ -756,7 +761,7 @@ class PlayerActivity : ComponentActivity() {
         if (now - programmesAt < 5 * 60_000) return
         programmesAt = now
         val ids = channels.mapNotNull { it.epgId }.distinct()
-        lifecycleScope.launch {
+        playbackWork.launch {
             runCatching { ids.chunked(500).flatMap { app.db.catalog().programmes(it, now, now + 3 * 3_600_000L) }.groupBy { it.epgId } }
                 .onSuccess { programmes = it }
                 .onFailure { programmesAt = 0 }
@@ -769,14 +774,28 @@ class PlayerActivity : ComponentActivity() {
         playChannel(delayMs = 600)
     }
 
+    private fun updateScreenAwake() {
+        val awake = shouldKeepPlayerScreenOn(playbackWork.active, player.playWhenReady, player.playbackState, player.playerError != null)
+        if (::view.isInitialized) view.keepScreenOn = awake
+        if (awake) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+    }
+
     override fun onStart() {
         super.onStart()
-        if (::player.isInitialized && player.mediaItemCount > 0) player.play()
+        playbackWork.start()
+        if (::player.isInitialized) playbackResume.resume(live, player.mediaItemCount > 0,
+            load = { initialLiveLoad?.invoke() }, tune = { playChannel() },
+            vod = { intent.getStringExtra(EXTRA_URL)?.let { start(it, title) } }, play = { player.play() })
+        updateScreenAwake()
     }
 
     override fun onStop() {
-        super.onStop()
+        online?.cancel()
+        playbackWork.stop()
         player.pause()
+        updateScreenAwake()
+        super.onStop()
     }
 
     override fun onDestroy() {

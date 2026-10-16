@@ -261,6 +261,43 @@ function debridCard(draft) {
       : '<span class="muted">not connected. Connect it in Settings on any TV in this profile; every TV here then uses it.</span></span>') + "</div>";
 }
 
+// This card updates itself: profile form drafts and credentials never enter each other's state.
+function mountRdApiKey(draft, card) {
+  card.innerHTML = '<h3 style="margin-top:0">Real-Debrid API key</h3><p class="muted small">Shared with TVs on this profile. Saved separately from the profile and from the connected account above.</p>' +
+    '<label for="rdkey">API key (paste to add or replace)</label><input id="rdkey" type="password" autocomplete="off" spellcheck="false" autocapitalize="none" maxlength="512">' +
+    '<p class="row"><button class="b p" data-save disabled>Save API key</button><button class="b" data-remove disabled>Remove API key</button><button class="b" data-refresh>Refresh status</button></p><span data-status role="status" aria-live="polite">Loading API key status…</span>';
+  const input = card.querySelector("input"), status = card.querySelector("[data-status]");
+  const save = card.querySelector("[data-save]"), remove = card.querySelector("[data-remove]"), refresh = card.querySelector("[data-refresh]");
+  const path = "/api/admin/profiles/" + draft.id + "/realdebrid/api-key";
+  let revision = null, configured = false, busy = false;
+  const controls = () => { save.disabled = busy || revision === null; remove.disabled = busy || revision === null || !configured; refresh.disabled = busy; input.disabled = busy; };
+  const show = (result) => { revision = result.revision; configured = result.configured; status.textContent = configured ? "API key saved. Its value is never displayed." : "No API key saved."; };
+  const load = async () => {
+    if (busy) return;
+    busy = true; controls();
+    try { const result = await api(path); if (card.isConnected) show(result); }
+    catch { if (card.isConnected) { revision = null; status.textContent = "Could not load API key status. Refresh to try again."; } }
+    finally { busy = false; if (card.isConnected) controls(); }
+  };
+  const mutate = async (method) => {
+    if (busy || revision === null) return;
+    if (method === "DELETE" && !confirm("Remove the API key from every TV on this profile?")) return;
+    const value = method === "PUT" ? input.value.trim() : null;
+    input.value = "";
+    if (method === "PUT" && !/^[\\x21-\\x7e]{16,512}$/.test(value)) { status.textContent = "Enter an API key with 16 to 512 printable non-space ASCII characters."; return; }
+    busy = true; controls();
+    try {
+      const result = await api(path, { method, body: JSON.stringify(method === "PUT" ? { revision, apiKey: value } : { revision }) });
+      if (card.isConnected) show(result);
+    } catch {
+      // A failed write may have reached storage. Require a fresh revision and explicit retry.
+      if (card.isConnected) { revision = null; status.textContent = "Could not update the API key. Refresh status before trying again."; }
+    } finally { busy = false; if (card.isConnected) controls(); }
+  };
+  save.onclick = () => mutate("PUT"); remove.onclick = () => mutate("DELETE"); refresh.onclick = load;
+  void load();
+}
+
 // Category order and visibility, per kind. Rows are what the profile's TVs reported, saved order first.
 const KINDS = [["live", "Live TV"], ["movie", "Movies"], ["series", "TV Shows"]];
 let catKind = "live";
@@ -331,9 +368,10 @@ function editProfile(p) {
   const paint = () => {
     $("#app").innerHTML = '<div class="card"><label>Profile name</label><input id="pname" value="' + esc(draft.name) + '">' +
       '<label>Parental PIN (optional, asked before Adult Content opens on the Categories page)</label><input id="ppin" type="password" value="' + esc(draft.data.parentalPin) + '"></div>' +
-      draft.data.sources.map((s, i) => sourceForm(s, i, lineOf(s))).join("") + addLineCard(draft, lines, panel) + guidesCard(draft.data) + debridCard(draft) + categoriesCard(draft, reported) +
+      draft.data.sources.map((s, i) => sourceForm(s, i, lineOf(s))).join("") + addLineCard(draft, lines, panel) + guidesCard(draft.data) + debridCard(draft) + (draft.id ? '<div class="card" id="rd-api-key"></div>' : '<div class="card muted small">Save the profile to add a Real-Debrid API key.</div>') + categoriesCard(draft, reported) +
       '<div class="row"><button class="b" id="adds">Add source</button><button class="b p" id="save">Save</button>' +
       (draft.id ? '<button class="b" id="delp">Delete profile</button>' : "") + '<button class="b" id="back">Back</button><span id="perr" class="err"></span></div>';
+    if (draft.id) mountRdApiKey(draft, $("#rd-api-key"));
     $("#adds").onclick = () => { collect(); draft.data.sources.push({ id: crypto.randomUUID(), type: "xtream", name: "Line " + (draft.data.sources.length + 1) }); paint(); };
     document.querySelectorAll("[data-rm]").forEach((b) => (b.onclick = () => { collect(); draft.data.sources.splice(+b.closest("[data-src]").dataset.src, 1); paint(); }));
     $("#back").onclick = () => renderProfiles();

@@ -2,6 +2,7 @@ package app.familytv.trakt
 
 import android.content.Context
 import app.familytv.FamilyTvApp
+import app.familytv.core.consumeCancellable
 import app.familytv.core.Http
 import app.familytv.trakt.model.TDeviceCode
 import app.familytv.trakt.model.TSettings
@@ -9,6 +10,9 @@ import app.familytv.trakt.model.TToken
 import com.google.gson.Gson
 import com.google.gson.JsonElement
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -20,6 +24,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
+import okhttp3.OkHttpClient
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
 import java.lang.reflect.Type
@@ -31,7 +36,7 @@ class TraktException(val code: Int, message: String) : IOException(message)
  * which holds the client secret), and authenticated calls to api.trakt.tv.
  * Syncing itself is in [TraktSync].
  */
-class Trakt(private val app: FamilyTvApp) {
+class Trakt(private val app: FamilyTvApp, private val client: OkHttpClient = Http.client, private val apiBase: String = API) {
     sealed interface State {
         /** The portal has no Trakt credentials: the Settings section stays hidden. */
         data object Off : State
@@ -198,15 +203,19 @@ class Trakt(private val app: FamilyTvApp) {
 
     suspend fun <T> get(path: String, type: Type): T? = call("GET", path, null, type)
 
-    suspend fun post(path: String, body: Any) { call<Any>("POST", path, body, null) }
+    /** Commit only local bookkeeping at the known-success boundary, before cancellable IO returns. */
+    suspend fun post(path: String, body: Any, onAccepted: suspend () -> Unit = {}) {
+        call<Any>("POST", path, body, null, onAccepted)
+        currentCoroutineContext().ensureActive()
+    }
 
-    private suspend fun <T> call(method: String, path: String, body: Any?, type: Type?): T? = withContext(Dispatchers.IO) {
+    private suspend fun <T> call(method: String, path: String, body: Any?, type: Type?, onAccepted: suspend () -> Unit = {}): T? = withContext(Dispatchers.IO) {
         val id = clientId ?: throw TraktException(0, "Trakt is not set up")
         var token = token() ?: throw TraktException(401, "not signed in")
-        var (code, text) = exec(method, path, body, id, token)
+        var (code, text) = exec(method, path, body, id, token, onAccepted)
         if (code == 401) {
             token = token(rejected = token) ?: throw TraktException(401, "signed out")
-            val retry = exec(method, path, body, id, token)
+            val retry = exec(method, path, body, id, token, onAccepted)
             code = retry.first; text = retry.second
         }
         when {
@@ -216,16 +225,23 @@ class Trakt(private val app: FamilyTvApp) {
         }
     }
 
-    private fun exec(method: String, path: String, body: Any?, clientId: String, token: String): Pair<Int, String> {
+    private suspend fun exec(method: String, path: String, body: Any?, clientId: String, token: String, onAccepted: suspend () -> Unit): Pair<Int, String> {
         val req = Request.Builder()
-            .url(API + path)
+            .url(apiBase + path)
             .header("Content-Type", "application/json")
             .header("trakt-api-version", "2")
             .header("trakt-api-key", clientId)
             .header("Authorization", "Bearer $token")
             .method(method, body?.let { gson.toJson(it).toRequestBody(jsonType) })
             .build()
-        return Http.client.newCall(req).execute().use { it.code to it.body?.string().orEmpty() }
+        return client.newCall(req).consumeCancellable { response ->
+            val accepted = response.code in 200..299 || (response.code == 409 && path.startsWith("/scrobble"))
+            if (method == "POST" && accepted) {
+                // The mutation is already accepted. Shield this local commit only, never network IO.
+                withContext(NonCancellable) { onAccepted() }
+                response.code to "" // POST callers do not consume the body; close it promptly.
+            } else response.code to response.body?.string().orEmpty()
+        }
     }
 
     private companion object {

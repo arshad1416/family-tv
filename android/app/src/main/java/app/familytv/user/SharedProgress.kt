@@ -35,6 +35,10 @@ class SharedProgress(private val app: FamilyTvApp) {
         if (seq != null && seq > prefs.getLong(SEQ, 0)) soon(0)
     }
 
+    suspend fun syncIfNewer(sequence: Long) = lock.withLock {
+        if (sequence > prefs.getLong(SEQ, 0) && pull()) push()
+    }
+
     suspend fun sync() = lock.withLock {
         if (pull()) push()
     }

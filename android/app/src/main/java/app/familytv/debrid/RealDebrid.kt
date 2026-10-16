@@ -2,6 +2,7 @@ package app.familytv.debrid
 
 import android.content.Context
 import app.familytv.FamilyTvApp
+import app.familytv.core.consumeCancellable
 import app.familytv.core.Http
 import app.familytv.portal.PortalException
 import app.familytv.portal.RealDebridPortal
@@ -75,7 +76,6 @@ class RealDebrid(private val app: FamilyTvApp) {
     init {
         // The portal's config says whether another TV in the profile already signed in.
         if (app.portal.cachedConfig?.realDebrid != null) prefs.edit().putBoolean(LINKED, true).apply()
-        app.scope.launch { if (linked) loadCached() }
         refreshState()
     }
 
@@ -93,11 +93,15 @@ class RealDebrid(private val app: FamilyTvApp) {
 
     /** After each config from the portal: picks up a sign-in or sign-out made on another TV in the profile. */
     fun onConfig(account: RealDebridPortal?) {
-        when {
-            account != null && !linked -> { prefs.edit().putBoolean(LINKED, true).apply(); app.scope.launch { refresh(force = true) } }
-            account == null && linked -> app.scope.launch { token = null; refresh(force = true) }
-            else -> refreshSoon()
+        // Config describes account status only. Enumerate files solely after explicit Load files.
+        if (account == null) {
+            token = null
+            prefs.edit().clear().apply()
+            _index.value = RdIndex.EMPTY
+        } else {
+            prefs.edit().putBoolean(LINKED, true).putString(NAME, account.username).apply()
         }
+        refreshState()
     }
 
     // ---- sign-in ----
@@ -115,7 +119,6 @@ class RealDebrid(private val app: FamilyTvApp) {
             prefs.edit().putString(MESSAGE, message).apply()
             linkJob = null
             refreshState()
-            if (message == null) refresh(force = true)
         }
     }
 
@@ -176,11 +179,7 @@ class RealDebrid(private val app: FamilyTvApp) {
 
     // ---- the account's files ----
 
-    /** Fetches the file list again when it is older than six hours (or [force]), and notices a sign-in on another TV. */
-    fun refreshSoon() {
-        if (System.currentTimeMillis() - prefs.getLong(LAST_REFRESH, 0) > REFRESH_EVERY_MS) app.scope.launch { refresh(force = false) }
-    }
-
+    /** Enumerates account files only after the viewer explicitly requests a library refresh. */
     suspend fun refresh(force: Boolean) {
         if (!refreshLock.tryLock()) return
         try {
@@ -213,6 +212,8 @@ class RealDebrid(private val app: FamilyTvApp) {
             if (linked) prefs.edit().putString(MESSAGE, error).apply()
             refreshState()
         } finally {
+            refreshing = false
+            refreshState()
             refreshLock.unlock()
         }
     }
@@ -259,11 +260,6 @@ class RealDebrid(private val app: FamilyTvApp) {
         if (chosen.size != t.links.size) return emptyList()
         return chosen.zip(t.links).map { (f, link) -> RdFile(f.path.substringAfterLast('/'), t.filename, f.bytes, link) }
             .filter { RdNames.isVideo(it.name) && !RdNames.isExtra(it.name) && it.bytes >= MIN_BYTES }
-    }
-
-    private suspend fun loadCached() {
-        val files = readCache().flatMap { it.files }
-        if (files.isNotEmpty()) { _index.value = index(files); refreshState() }
     }
 
     private suspend fun readCache(): List<CachedTorrent> = withContext(Dispatchers.IO) {
@@ -326,7 +322,7 @@ class RealDebrid(private val app: FamilyTvApp) {
         send(Request.Builder().url(API + path).header("Authorization", "Bearer $access").apply { if (form != null) post(form) })
 
     private suspend fun send(b: Request.Builder): Pair<Int, String> = withContext(Dispatchers.IO) {
-        Http.client.newCall(b.build()).execute().use { it.code to it.body?.string().orEmpty() }
+        Http.client.newCall(b.build()).consumeCancellable { it.code to it.body?.string().orEmpty() }
     }
 
     private fun errorMessage(status: Int, text: String): String {

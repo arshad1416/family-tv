@@ -145,3 +145,49 @@ describe("profile API keys (synthetic fixtures only)", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 });
+
+const adminKey = (env: Env, method = "GET", value?: unknown, profile = "ab12", token = "admin", protocol = "https") => worker.fetch(new Request(
+  `${protocol}://portal.test/api/admin/profiles/${profile}/realdebrid/api-key`, {
+    method, headers: { authorization: "Bearer " + token, "content-type": "application/json" },
+    body: value === undefined ? undefined : JSON.stringify(value),
+  }), env);
+describe("portal API key control", () => {
+  it("only permits admin, returns status without decrypting, and isolates path profile", async () => {
+    const env = await setup();
+    for (const token of ["", "unknown", "lounge-token"]) for (const method of ["GET", "PUT", "DELETE"]) expect((await adminKey(env, method, method === "GET" ? undefined : { revision: 0, apiKey: FAKE_KEY }, "ab12", token)).status).toBe(401);
+    expect(await (await adminKey(env)).json()).toEqual({ profileId: "ab12", revision: 0, configured: false });
+    expect(await (await adminKey(env, "PUT", { revision: 0, apiKey: FAKE_KEY, profileId: "cd34" })).json()).toEqual({ profileId: "ab12", revision: 1, configured: true });
+    const decrypt = vi.spyOn(crypto.subtle, "decrypt").mockRejectedValue(new Error("no decrypt"));
+    const status = await adminKey(env); expect(status.headers.get("cache-control")).toBe("no-store");
+    expect(await status.json()).toEqual({ profileId: "ab12", revision: 1, configured: true }); expect(decrypt).not.toHaveBeenCalled();
+    expect(await (await adminKey(env, "GET", undefined, "cd34")).json()).toEqual({ profileId: "cd34", revision: 0, configured: false });
+    vi.restoreAllMocks(); expect(await (await request(env, "bedroom")).json()).toMatchObject({ apiKey: FAKE_KEY });
+  });
+  it("shares revision CAS and removal tombstones with devices", async () => {
+    const env = await setup(); await put(env, 0);
+    expect((await adminKey(env, "PUT", { revision: 0, apiKey: OTHER_KEY })).status).toBe(409);
+    expect(await (await adminKey(env, "DELETE", { revision: 1 })).json()).toEqual({ profileId: "ab12", revision: 2, configured: false });
+    expect((await put(env, 1)).status).toBe(409); expect((await adminKey(env, "DELETE", { revision: 1 })).status).toBe(409);
+    expect((await Promise.all([adminKey(env, "PUT", { revision: 2, apiKey: OTHER_KEY }), put(env, 2)])).map(r => r.status).sort()).toEqual([200,409]);
+  });
+  it("rejects missing profiles, insecure transport, invalid input and sanitizes crypto errors", async () => {
+    const env = await setup(); const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const network = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("no network"));
+    for (const method of ["GET", "PUT", "DELETE"]) {
+      const value = method === "GET" ? undefined : { revision: 0, apiKey: FAKE_KEY };
+      expect((await adminKey(env, method, value, "ffff")).status).toBe(404);
+      expect((await adminKey(env, method, value, "ab12", "admin", "http")).status).toBe(426);
+    }
+    for (const apiKey of ["short", "spaces are invalid", null, 123]) expect((await adminKey(env,"PUT",{revision:0,apiKey})).status).toBe(400);
+    for (const revision of [-1,"0",0.5,Number.MAX_SAFE_INTEGER]) expect((await adminKey(env,"DELETE",{revision})).status).toBe(400);
+    vi.spyOn(crypto.subtle,"encrypt").mockRejectedValue(new Error(FAKE_KEY));
+    const failed = await adminKey(env,"PUT",{revision:0,apiKey:FAKE_KEY}); expect(failed.status).toBe(500);
+    expect(await failed.text()).toBe('{"error":"credential unavailable"}'); expect(log).not.toHaveBeenCalled(); expect(network).not.toHaveBeenCalled();
+  });
+  it("does not create credentials if profile is deleted during encryption",async()=>{
+    const env=await setup();const encrypt=crypto.subtle.encrypt.bind(crypto.subtle);
+    vi.spyOn(crypto.subtle,"encrypt").mockImplementationOnce(async(...args)=>{const result=await encrypt(...args);await env.DB.prepare("DELETE FROM profiles WHERE id='ab12'").run();return result;});
+    expect((await adminKey(env,"PUT",{revision:0,apiKey:FAKE_KEY})).status).toBe(404);
+    expect(await env.DB.prepare("SELECT * FROM profile_rd_api_keys").first()).toBeNull();
+  });
+});

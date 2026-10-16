@@ -203,6 +203,15 @@ internal fun ExternalDiscovery(profile: Profile, query: String, onClose: () -> U
                             BasicTextField(enteredKey, { if (it.length <= 512) enteredKey = it }, Modifier.fillMaxWidth().background(Tv.Panel, Tv.Shape).padding(16.dp),
                                 textStyle = TextStyle(color = Tv.Text, fontSize = 18.sp), singleLine = true, visualTransformation = PasswordVisualTransformation(),
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false))
+                            TvButton("Paste API key", {
+                                val value = runCatching {
+                                    val clipboard = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+                                    val clip = clipboard?.primaryClip
+                                    pastedApiKey(clip?.takeIf { it.itemCount == 1 }?.getItemAt(0)?.text)
+                                }.getOrNull()
+                                if (value == null) message = "Clipboard must contain a 16–512 character API key without spaces."
+                                else { enteredKey = value; message = "API key pasted (hidden). Review and save when ready." }
+                            })
                             TvButton(if (connected) "Replace key for all profile devices" else "Save key for all profile devices", {
                                 val expected = keyStatus
                                 val value = enteredKey

@@ -2,12 +2,14 @@ package app.familytv.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -17,6 +19,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Text
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import kotlinx.coroutines.Job
 import app.familytv.app
 import app.familytv.debrid.RealDebrid
 import kotlinx.coroutines.delay
@@ -33,8 +39,18 @@ fun RealDebridPanel(modifier: Modifier = Modifier) {
     val ctx = LocalContext.current
     val rd = ctx.app.realDebrid
     val state by rd.state.collectAsState()
+    val scope = rememberCoroutineScope()
+    val owner = LocalLifecycleOwner.current
+    var refreshJob by remember { mutableStateOf<Job?>(null) }
+    DisposableEffect(owner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) { refreshJob?.cancel(); rd.cancelLink() }
+        }
+        owner.lifecycle.addObserver(observer)
+        onDispose { refreshJob?.cancel(); rd.cancelLink(); owner.lifecycle.removeObserver(observer) }
+    }
     val touch = LocalFormFactor.current.touch
-    LaunchedEffect(Unit) { rd.refreshState(); rd.refreshSoon() }
+    LaunchedEffect(Unit) { rd.refreshState() }
 
     val primary = remember { FocusRequester() }
     var moveFocus by remember { mutableStateOf(false) }
@@ -72,7 +88,7 @@ fun RealDebridPanel(modifier: Modifier = Modifier) {
                 )
                 s.error?.let { Text(it, fontSize = 15.sp, color = Tv.Warn) }
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    TvButton(if (s.refreshing) "Loading…" else "Load files again", { ctx.app.scope.launch { rd.refresh(force = true) } }, Modifier.focusRequester(primary), enabled = !s.refreshing)
+                    TvButton(if (s.refreshing) "Loading…" else "Load files again", { refreshJob = scope.launch { rd.refresh(force = true) } }, Modifier.focusRequester(primary), enabled = !s.refreshing)
                     TvButton(
                         if (confirmDisconnect) "Press again to disconnect all TVs" else "Disconnect",
                         {

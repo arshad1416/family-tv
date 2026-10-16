@@ -500,6 +500,41 @@ async function rdApiKey(req: Request, env: Env, url: URL): Promise<Response> {
   }
 }
 
+/** Admin can replace/remove a profile credential, but can only read its status. */
+async function adminRdApiKey(req: Request, env: Env, url: URL, profileId: string): Promise<Response> {
+  try {
+    if (url.protocol !== "https:") throw new HttpError(426, "HTTPS required");
+    const read = () => env.DB.prepare(
+      `SELECT COALESCE(k.revision, 0) AS revision, k.key_enc IS NOT NULL AS configured
+       FROM profiles p LEFT JOIN profile_rd_api_keys k ON k.profile_id = p.id WHERE p.id = ?`,
+    ).bind(profileId).first<{ revision: number; configured: number }>();
+    const row = await read();
+    if (!row) throw new HttpError(404, "profile not found");
+    if (req.method === "GET") return json({ profileId, revision: row.revision, configured: !!row.configured });
+    const b = await body<Record<string, unknown>>(req);
+    const revision = b.revision;
+    if (typeof revision !== "number" || !Number.isSafeInteger(revision) || revision < 0 || revision >= Number.MAX_SAFE_INTEGER) throw new HttpError(400, "valid revision required");
+    const apiKey = req.method === "PUT" ? b.apiKey : null;
+    if (req.method === "PUT" && !validRdApiKey(apiKey)) throw new HttpError(400, "API key must contain 16 to 512 printable non-space ASCII characters");
+    const sealed = apiKey === null ? null : await sealJson(env.CONFIG_KEY, { profileId, apiKey });
+    const changed = await env.DB.prepare(
+      `INSERT INTO profile_rd_api_keys (profile_id, revision, key_enc, updated_at)
+       SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM profiles WHERE id = ?)
+         AND (? = 0 OR EXISTS (SELECT 1 FROM profile_rd_api_keys WHERE profile_id = ? AND revision = ?))
+       ON CONFLICT (profile_id) DO UPDATE SET revision = excluded.revision, key_enc = excluded.key_enc, updated_at = excluded.updated_at
+       WHERE profile_rd_api_keys.revision = ? RETURNING revision`,
+    ).bind(profileId, revision + 1, sealed, Date.now(), profileId, revision, profileId, revision, revision).first<{ revision: number }>();
+    if (!changed) {
+      if (!await read()) throw new HttpError(404, "profile not found");
+      throw new HttpError(409, "credential changed; reload");
+    }
+    return json({ profileId, revision: changed.revision, configured: apiKey !== null });
+  } catch (e) {
+    if (e instanceof HttpError) throw e;
+    throw new HttpError(500, "credential unavailable");
+  }
+}
+
 function validRdApiKey(v: unknown): v is string {
   return typeof v === "string" && /^[\x21-\x7e]{16,512}$/.test(v);
 }
@@ -1251,6 +1286,7 @@ export async function handle(req: Request, env: Env): Promise<Response> {
     if (m === "POST" && p === "/api/admin/lines/add") return adminAddLines(req, env);
     if (m === "POST" && p === "/api/admin/lines/forget") return adminForgetLine(req, env);
     if (m === "POST" && p === "/api/admin/lines/sorter") return adminLineSorter(req, env);
+    if (["GET", "PUT", "DELETE"].includes(m) && (mm = p.match(/^\/api\/admin\/profiles\/([a-f0-9]+)\/realdebrid\/api-key$/))) return adminRdApiKey(req, env, url, mm[1]);
     if (m === "GET" && (mm = p.match(/^\/api\/admin\/profiles\/([a-f0-9]+)\/categories$/))) return adminProfileCategories(env, mm[1]);
     if (m === "POST" && (mm = p.match(/^\/api\/admin\/profiles\/([a-f0-9]+)\/primary-server$/))) return adminPreferServer(req, env, mm[1]);
     if (m === "DELETE" && (mm = p.match(/^\/api\/admin\/profiles\/([a-f0-9]+)\/realdebrid$/))) return rdDisconnect(env, mm[1]);

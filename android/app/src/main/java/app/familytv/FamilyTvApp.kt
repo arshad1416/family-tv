@@ -3,6 +3,8 @@ package app.familytv
 import android.app.Activity
 import android.app.Application
 import android.os.Bundle
+import androidx.work.Constraints
+import androidx.work.NetworkType
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
@@ -76,10 +78,14 @@ class FamilyTvApp : Application() {
         // Background check-in while the app is closed: picks up portal changes and keeps lists fresh.
         WorkManager.getInstance(this).enqueueUniquePeriodicWork(
             "sync",
-            ExistingPeriodicWorkPolicy.KEEP,
-            PeriodicWorkRequestBuilder<SyncWorker>(30, TimeUnit.MINUTES).build(),
+            ExistingPeriodicWorkPolicy.UPDATE,
+            backgroundSyncRequest(),
         )
     }
 }
 
 val android.content.Context.app: FamilyTvApp get() = applicationContext as FamilyTvApp
+
+internal fun backgroundSyncRequest() = PeriodicWorkRequestBuilder<SyncWorker>(30, TimeUnit.MINUTES)
+    .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).setRequiresBatteryNotLow(true).build())
+    .build()

@@ -119,6 +119,46 @@ class DiscoverySessionTest {
         assertEquals(0, gateway.writes)
     }
 
+    @Test fun successfulSelectedEpisodeResolutionDispatchesOnceWithNoStatusLoop() = runBlocking {
+        MockWebServer().use { server ->
+            val gateway = MemoryGateway()
+            val episodeSource = source.copy(fileIdx = 1, label = "Open Series S02E03 1080p x264")
+            val episodeTarget = DiscoveryTarget(DiscoveryTitle("tv", "42", "Open Series", imdb = "tt1234567"), 2, 3, "Selected Episode")
+            server.enqueue(MockResponse().setBody("""{"id":"ABC"}"""))
+            server.enqueue(MockResponse().setBody("""{"hash":"${source.hash}","filename":"Open Series S02","status":"downloaded","files":[{"id":1,"path":"Open.Series.S02E02.mkv","bytes":100,"selected":0},{"id":2,"path":"Open.Series.S02E03.mkv","bytes":200,"selected":1}],"links":["https://real-debrid.com/d/synthetic"]}"""))
+            server.enqueue(MockResponse().setBody("""{"download":"https://cdn.example.test/selected-episode.mkv"}"""))
+            val rd = ProfileRealDebrid(gateway, DiscoveryHttp(OkHttpClient()), server.url("/api").toString())
+            val launched = mutableListOf<Pair<DiscoveryTarget, String>>()
+            val status = mutableListOf<String>()
+            var validations = 0
+            rd.prepare(DiscoverySession(identity) { identity }, episodeSource, episodeTarget, status::add,
+                beforeOpen = { validations++ }) { url -> launched += episodeTarget to url }
+            assertEquals(listOf(episodeTarget to "https://cdn.example.test/selected-episode.mkv"), launched)
+            assertEquals(1, validations)
+            assertEquals(3, server.requestCount)
+            assertEquals("Resolving the selected video link…", status.last())
+            assertEquals(2, launched.single().first.season)
+            assertEquals(3, launched.single().first.episode)
+            assertEquals("Selected Episode", launched.single().first.episodeName)
+        }
+    }
+
+    @Test fun providerFailureIsExplicitAndNeverDispatchesPlayback() = runBlocking {
+        MockWebServer().use { server ->
+            server.enqueue(MockResponse().setResponseCode(403).setBody("synthetic provider body"))
+            val rd = ProfileRealDebrid(MemoryGateway(), DiscoveryHttp(OkHttpClient()), server.url("/api").toString())
+            var opens = 0
+            try {
+                rd.prepare(DiscoverySession(identity) { identity }, source, target, {}) { opens++ }
+                fail("Provider failure accepted")
+            } catch (e: SourceUnavailable) {
+                assertEquals("Real-Debrid requires an active premium account.", e.message)
+            }
+            assertEquals(0, opens)
+            assertEquals(1, server.requestCount)
+        }
+    }
+
     @Test fun removalDuringFinalCatalogValidationPreventsPlayerLaunch() = runBlocking {
         MockWebServer().use { server ->
             val gateway = MemoryGateway()

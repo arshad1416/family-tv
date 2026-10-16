@@ -3,6 +3,7 @@ package app.familytv.portal
 import android.content.Context
 import android.os.Build
 import app.familytv.BuildConfig
+import app.familytv.core.consumeCancellable
 import app.familytv.core.Http
 import app.familytv.user.SharedProgressPage
 import app.familytv.discovery.DiscoveryHttp
@@ -153,7 +154,7 @@ class PortalClient(context: Context, private val baseUrl: String = BuildConfig.P
 
     private suspend fun <T> call(b: Request.Builder, type: Class<T>, auth: Boolean): T = withContext(Dispatchers.IO) {
         if (auth) b.header("Authorization", "Bearer ${token ?: throw PortalException(401, "not registered")}")
-        Http.client.newCall(b.build()).execute().use { res ->
+        Http.client.newCall(b.build()).consumeCancellable { res ->
             val text = res.body?.string().orEmpty()
             if (!res.isSuccessful) throw PortalException(res.code, text.take(200))
             gson.fromJson(text, type)

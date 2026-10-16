@@ -1,5 +1,8 @@
 package app.familytv.ui
 
+import app.familytv.core.foregroundTicks
+import androidx.lifecycle.compose.LocalLifecycleOwner
+
 import android.annotation.SuppressLint
 import android.os.Bundle
 import android.view.KeyEvent
@@ -160,7 +163,8 @@ private fun SyncingScreen(s: Screen.Syncing) = Centered {
 private fun PairingScreen(code: String) {
     val qr = remember(code) { qrImage("${BuildConfig.PORTAL_URL.trimEnd('/')}/#pair=$code") }
     var dots by remember { mutableStateOf(0) }
-    LaunchedEffect(Unit) { while (true) { kotlinx.coroutines.delay(800); dots = (dots + 1) % 4 } }
+    val clockLifecycle = LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(clockLifecycle) { clockLifecycle.foregroundTicks(800) { dots = (dots + 1) % 4 } }
     val words: @Composable () -> Unit = {
         Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Text("Set up this TV", fontSize = 34.sp, fontWeight = FontWeight.Bold)

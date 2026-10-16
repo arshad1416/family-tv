@@ -6,6 +6,7 @@ import app.familytv.app
 import app.familytv.portal.Command
 import app.familytv.portal.Profile
 import app.familytv.update.Updater
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -21,19 +22,14 @@ class CommandRunner(private val context: Context) {
     private val _events = MutableSharedFlow<UiEvent>(extraBufferCapacity = 8)
     val events: SharedFlow<UiEvent> = _events
 
-    private val seen = LinkedHashSet<String>()
+    private val ledger = CommandLedger()
 
     suspend fun runAll(commands: List<Command>?, profile: Profile?) {
-        for (c in commands.orEmpty()) {
-            if (!seen.add(c.id)) continue
-            if (seen.size > 100) seen.remove(seen.first())
-            val result: Any? = try {
-                run(c, profile)
-            } catch (e: Exception) {
-                mapOf("error" to (e.message ?: e.javaClass.simpleName))
-            }
-            runCatching { context.app.portal.ack(c.id, result) }
-        }
+        for (c in commands.orEmpty()) ledger.run(c.id, action = {
+            try { run(c, profile) }
+            catch (e: CancellationException) { throw e }
+            catch (e: Exception) { mapOf("error" to (e.message ?: e.javaClass.simpleName)) }
+        }, acknowledge = { result -> context.app.portal.ack(c.id, result) })
     }
 
     private suspend fun run(c: Command, profile: Profile?): Any? = withContext(Dispatchers.IO) { runOnIo(c, profile) }
@@ -78,14 +74,16 @@ class CommandRunner(private val context: Context) {
         }
     }
 
-    suspend fun refreshCatalog(profile: Profile) {
+    suspend fun refreshCatalog(profile: Profile, onlyIfStale: Boolean = false) {
         try {
-            context.app.catalog.refresh(profile)
+            if (!context.app.catalog.refresh(profile, onlyIfStale)) return
             PlaybackStatus.lastRefresh = System.currentTimeMillis()
             PlaybackStatus.lastRefreshError = null
-            runCatching { CategoryReport.sendIfChanged(context.app) }
+            runCatching { CategoryReport.sendIfChanged(context.app) }.onFailure { if (it is CancellationException) throw it }
             // New lists can carry titles that are on the Trakt watchlist or history: pull again.
             context.app.trakt.sync.soon()
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             PlaybackStatus.lastRefreshError = e.message
             throw e

@@ -1,5 +1,8 @@
 package app.familytv.ui
 
+import app.familytv.core.foregroundTicks
+import androidx.lifecycle.compose.LocalLifecycleOwner
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -229,11 +232,9 @@ private fun LazyListScope.trackRows(tracks: PlayerTracks, aspect: Aspect, onAspe
 @Composable
 private fun InfoContent(stats: () -> StreamStats, wide: Boolean) {
     var sections by remember { mutableStateOf<List<InfoSection>>(emptyList()) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            sections = StreamInfo.sections(stats())
-            delay(1_000)
-        }
+    val clockLifecycle = LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(clockLifecycle) {
+        clockLifecycle.foregroundTicks(1_000) { sections = StreamInfo.sections(stats()) }
     }
     if (sections.isEmpty()) return Text("Waiting for the stream…", fontSize = 14.sp, color = Tv.Muted, modifier = Modifier.padding(start = 8.dp))
     val col: @Composable (List<InfoSection>, Modifier) -> Unit = { list, m ->

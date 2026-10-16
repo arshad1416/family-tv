@@ -91,9 +91,11 @@ class ProfileRealDebrid internal constructor(
                 else -> "Real-Debrid could not prepare this source (HTTP $code). Try another source."
             })
             text
-        }, ::verify).prepare(source, target, progress, status)
-        beforeOpen()
-        verify()
+        }, ::verify).prepare(source, target, progress, status, beforeReturn = {
+            beforeOpen()
+            verify()
+            currentCoroutineContext().ensureActive()
+        })
         currentCoroutineContext().ensureActive()
         open(url)
     }
