@@ -259,6 +259,10 @@ class TraktSync(private val app: FamilyTvApp, private val trakt: Trakt) {
      */
     fun record(item: PlayItem, action: String, positionMs: Long, durationMs: Long, percent: Float) {
         app.scope.launch {
+            if (item.sourceId == "tmdb" && item.tmdb?.matches(Regex("[1-9][0-9]{0,9}")) == true) {
+                user.putIds(MediaIdsEntity(if (item.kind == ProgressKey.MOVIE) Kind.MOVIE else Kind.SERIES,
+                    item.sourceId, item.itemId, item.tmdb, item.imdb, null, System.currentTimeMillis()))
+            }
             val old = user.progress(item.key)
             val finished = action == STOP && ProgressRules.isWatched(percent)
             val row = (old ?: ProgressEntity(item.key, item.kind, item.sourceId, item.itemId, item.season, item.episode)).copy(

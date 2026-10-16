@@ -15,6 +15,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -34,6 +37,8 @@ fun SettingsScreen(vm: MainViewModel, config: DeviceConfig) {
     val ctx = LocalContext.current
     val report by vm.diagnosis.collectAsState()
     val running by vm.diagnosing.collectAsState()
+    var localAccount by remember(config.profile) { mutableStateOf(false) }
+    if (localAccount) ExternalDiscovery(config.profile ?: Profile(), "", { localAccount = false }, accountOnly = true)
     Column(Modifier.verticalScroll(rememberScrollState())) {
         PageTitle("Settings", bottom = 18.dp)
         // TV: two columns sharing the width, so neither is squeezed. Phones and tablets: stacked.
@@ -71,6 +76,11 @@ fun SettingsScreen(vm: MainViewModel, config: DeviceConfig) {
                 // Only shown when the portal has Trakt set up.
                 if (config.trakt?.clientId != null) TraktPanel()
                 RealDebridPanel()
+                Panel {
+                    Text("External movie & series sources", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                    Text("Enter your Real-Debrid API key once for your own authorized devices in this profile. The key is masked and encrypted by the portal; replace or remove it for all profile devices here. External title search is in Search.", fontSize = 14.sp, color = Tv.Muted)
+                    TvButton("Manage profile Real-Debrid API key", { localAccount = true })
+                }
                 PackageSorterPanel(config.profile)
             }
         })
