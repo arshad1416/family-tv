@@ -13,9 +13,15 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -26,6 +32,7 @@ import app.familytv.app
 import app.familytv.portal.DeviceConfig
 import app.familytv.portal.Profile
 import app.familytv.sync.PlaybackStatus
+import kotlinx.coroutines.delay
 import java.text.DateFormat
 import java.util.Date
 
@@ -72,11 +79,42 @@ fun SettingsScreen(vm: MainViewModel, config: DeviceConfig) {
                 if (config.trakt?.clientId != null) TraktPanel()
                 RealDebridPanel()
                 PackageSorterPanel(config.profile)
+                ParentalPinPanel(config.profile)
             }
         })
         Spacer(Modifier.height(20.dp))
         Column(if (touch) Modifier.widthIn(max = 640.dp) else Modifier) { ArrangeCategoriesPanel(config.profile ?: Profile()) }
         Spacer(Modifier.height(32.dp))
+    }
+}
+
+/**
+ * Shown when the profile has a parental PIN: entering it here opens Categories' Adult Content
+ * (and adult live categories in Live TV) without asking until the app restarts.
+ */
+@Composable
+private fun ParentalPinPanel(profile: Profile?) {
+    if (profile == null || profile.parentalPin.isNullOrEmpty()) return
+    val ctx = LocalContext.current
+    val unlocked by ctx.app.adultUnlocked.collectAsState()
+    val touch = LocalFormFactor.current.touch
+    val entry = pageEntry()
+    var open by remember { mutableStateOf(false) }
+    val firstKey = remember { FocusRequester() }
+    LaunchedEffect(open) { if (open && !touch) { delay(50); runCatching { firstKey.requestFocus() } } }
+    Panel {
+        Text("Parental lock", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        Text("Adult Content in Categories asks for this PIN. Enter it here to stop asking until the app restarts.", fontSize = 14.sp, color = Tv.Muted)
+        when {
+            unlocked -> Text("Unlocked until the app restarts.", fontSize = 15.sp, color = Tv.Good)
+            open -> PinPrompt(profile, Modifier.focusRequester(firstKey)) {
+                ctx.app.adultUnlocked.value = true
+                open = false
+                // The pad is gone; send focus back to the top of Settings.
+                if (!touch) entry.focus()
+            }
+            else -> TvButton("Enter PIN", { open = true })
+        }
     }
 }
 

@@ -31,13 +31,18 @@ passwords on a remote, and when a TV goes black the portal tells you why.
 - Lists stream straight into SQLite in batches of 500, and the guide keeps only the next 48 hours for
   your channels. That keeps memory flat on 1 GB Fire TV Sticks.
 - D-pad up/down changes channel. A live stream that fails on `.ts` retries once as HLS (`.m3u8`).
+- **Search** finds channels, movies and series whose words start with what you type, ignoring case
+  and accents ("pokemon" finds *Pokémon*, "star wa" finds *Star Wars*); names that only contain the
+  text come after those.
 - **Favourites:** hold OK (or press Menu) on any channel, movie or series to add or remove it; on a
   phone or tablet tap the heart. Live TV, Movies and Series each get a *Favourites* category at the
   top, and Home a *Favourites* row. Favourites survive channel reloads.
 - **Categories** (next to Home): choose Live TV, Movies or Series, then one of its categories. Each
-  section ends with *Adult Content*, the only place adult categories appear (Live TV, Movies, Series,
-  search and Home never show them). It asks for the profile's parental PIN every time it opens, and
-  opens straight away when the profile has no PIN.
+  section ends with *Adult Content*, which holds the adult categories. It asks for the profile's
+  parental PIN, and once it's entered (there or under Settings' *Enter PIN*) it opens without asking
+  until the app restarts; with no PIN on the profile it never asks. Live TV (and the player's guide)
+  also shows adult live categories once unlocked, or always when the profile has no PIN. Movies,
+  Series, search and Home never show adult categories.
   *Sports* gathers the live channels of every sports category (general sports, PPV and league lists)
   and sorts them by sport: hockey, football (NFL & CFL), soccer, basketball, baseball, cricket,
   tennis, golf, motorsport, fighting, rugby and more. A channel goes by the sport its own name names,

@@ -2,6 +2,8 @@ package app.familytv.trakt
 
 import app.familytv.FamilyTvApp
 import app.familytv.data.Kind
+import app.familytv.data.searchMovies
+import app.familytv.data.searchSeries
 import app.familytv.trakt.model.TIds
 import app.familytv.trakt.model.TListItem
 import app.familytv.trakt.model.TMedia

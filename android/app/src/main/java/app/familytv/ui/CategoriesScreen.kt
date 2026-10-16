@@ -53,16 +53,17 @@ private const val SPORTS = "sports"
 
 /**
  * Pick Live TV, Movies or Series, then one of its categories. Each section ends with Adult Content,
- * holding the adult categories the other pages never show; it asks for the profile's parental PIN
- * each time it opens (and doesn't when the profile has none). Sports lists the live channels of
- * the sports categories by sport ([groupBySport]). Back steps up one level.
+ * holding the adult categories; it asks for the profile's parental PIN until it's entered once
+ * (here or in Settings, until the app restarts) and doesn't when the profile has none. Live TV
+ * also shows adult live categories once unlocked. Sports lists the live channels of the sports
+ * categories by sport ([groupBySport]). Back steps up one level.
  */
 @Composable
 fun CategoriesScreen(vm: MainViewModel, profile: Profile) {
     var kind by rememberSaveable { mutableStateOf<String?>(null) }
     var catKey by rememberSaveable { mutableStateOf<String?>(null) }
     var sport by rememberSaveable { mutableStateOf<Sport?>(null) }
-    // Not saveable: leaving the page locks Adult Content again.
+    // Not saveable: leaving the page closes Adult Content.
     var adult by remember { mutableStateOf(false) }
     var asking by remember { mutableStateOf(false) }
     val nav = rememberSeriesNav()
@@ -71,6 +72,7 @@ fun CategoriesScreen(vm: MainViewModel, profile: Profile) {
     val all by remember(listKind) { listKind?.let { ctx.app.db.catalog().categories(it) } ?: flowOf(emptyList()) }
         .collectAsState(initial = emptyList())
     val mine by ctx.app.myCategoryOrder.order.collectAsState()
+    val unlocked by ctx.app.adultUnlocked.collectAsState()
     val normal = remember(all, profile, mine) { visibleCategories(all, profile, mine[listKind].orEmpty()) }
     var sports by remember(kind, normal) { mutableStateOf<Map<Sport, List<ChannelEntity>>?>(null) }
     LaunchedEffect(kind, normal) {
@@ -116,12 +118,12 @@ fun CategoriesScreen(vm: MainViewModel, profile: Profile) {
                     }
                 }
                 cat != null -> CategoryPosters(profile, cat, nav)
-                asking -> PinPrompt(profile) { asking = false; adult = true }
+                asking -> PinPrompt(profile) { ctx.app.adultUnlocked.value = true; asking = false; adult = true }
                 else -> {
                     val list = if (adult) adults else normal
                     val tiles = list.map { c -> Tile(c.name) { catKey = c.chipKey } } +
                         listOfNotNull(Tile(ADULT_CONTENT, Icons.Filled.Lock) {
-                            if (profile.parentalPin.isNullOrEmpty()) adult = true else asking = true
+                            if (adultOpen(profile, unlocked)) adult = true else asking = true
                         }.takeIf { !adult && adults.isNotEmpty() })
                     if (tiles.isEmpty()) EmptyState(if (adult) "No adult categories on this line." else "No categories on this line.")
                     else Tiles(tiles)
@@ -164,9 +166,12 @@ private fun Tiles(tiles: List<Tile>) {
     }
 }
 
-/** The parental PIN pad; [onOk] runs once the right PIN is entered. */
+/**
+ * The parental PIN pad; [onOk] runs once the right PIN is entered. Its first key is the page's
+ * entry point unless [firstKey] is given.
+ */
 @Composable
-private fun PinPrompt(profile: Profile, onOk: () -> Unit) {
+internal fun PinPrompt(profile: Profile, firstKey: Modifier? = null, onOk: () -> Unit) {
     var pin by remember { mutableStateOf("") }
     var wrong by remember { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -184,7 +189,7 @@ private fun PinPrompt(profile: Profile, onOk: () -> Unit) {
                             }
                         },
                         color = Tv.Raised, contentAlignment = Alignment.Center,
-                        modifier = entryPoint(r == 0 && c == 0).width(68.dp).height(48.dp),
+                        modifier = (if (r == 0 && c == 0 && firstKey != null) firstKey else entryPoint(r == 0 && c == 0 && firstKey == null)).width(68.dp).height(48.dp),
                     ) { Text(k, fontSize = 18.sp) }
                 }
             }

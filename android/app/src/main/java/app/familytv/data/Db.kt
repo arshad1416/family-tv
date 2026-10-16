@@ -11,9 +11,11 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.PrimaryKey
 import androidx.room.Query
+import androidx.room.RawQuery
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.Update
+import androidx.sqlite.db.SupportSQLiteQuery
 import kotlinx.coroutines.flow.Flow
 
 /** One row per provider line in the profile. [activeServer] is the Xtream URL that answered last. */
@@ -60,6 +62,8 @@ data class ChannelEntity(
     val url: String?,
     val catchupDays: Int,
     val gen: Long,
+    /** [SearchText.index] of [name], what Search matches against ("" on rows from before it existed, until the next reload). */
+    @ColumnInfo(defaultValue = "") val searchText: String = SearchText.index(name),
 )
 
 @Entity(tableName = "movies", primaryKeys = ["sourceId", "streamId"], indices = [Index("categoryId"), Index("tmdb"), Index("titleKey")])
@@ -81,6 +85,8 @@ data class MovieEntity(
     @ColumnInfo(defaultValue = "") val titleKey: String = "",
     /** Language of this copy, from its title or category ([app.familytv.iptv.SeriesTitles.ORIGINAL] when neither says). */
     val lang: String? = null,
+    /** [SearchText.index] of [name], what Search matches against ("" on rows from before it existed, until the next reload). */
+    @ColumnInfo(defaultValue = "") val searchText: String = SearchText.index(name),
 )
 
 @Entity(tableName = "series", primaryKeys = ["sourceId", "seriesId"], indices = [Index("categoryId"), Index("tmdb"), Index("titleKey")])
@@ -99,6 +105,8 @@ data class SeriesEntity(
     val titleKey: String = "",
     /** Language of this copy, from its title or category ([app.familytv.iptv.SeriesTitles.ORIGINAL] when neither says). */
     val lang: String? = null,
+    /** [SearchText.index] of [name], what Search matches against ("" on rows from before it existed, until the next reload). */
+    @ColumnInfo(defaultValue = "") val searchText: String = SearchText.index(name),
 )
 
 @Entity(tableName = "programmes", indices = [Index(value = ["epgId", "start"])])
@@ -166,9 +174,10 @@ interface CatalogDao {
     @Query("SELECT * FROM channels WHERE sourceId = :sourceId AND categoryId IN (:categoryIds)") suspend fun channelsIn(sourceId: String, categoryIds: List<String>): List<ChannelEntity>
     @Query("SELECT * FROM channels ORDER BY sourceId, num, name LIMIT :limit OFFSET :offset") suspend fun allChannels(limit: Int, offset: Int): List<ChannelEntity>
     @Query("SELECT * FROM channels WHERE sourceId = :sourceId LIMIT 1") suspend fun anyChannel(sourceId: String): ChannelEntity?
-    @Query("SELECT * FROM channels WHERE name LIKE '%' || :q || '%' ORDER BY num, name LIMIT :limit") suspend fun searchChannels(q: String, limit: Int): List<ChannelEntity>
-    @Query("SELECT * FROM movies WHERE name LIKE '%' || :q || '%' ORDER BY name LIMIT :limit") suspend fun searchMovies(q: String, limit: Int): List<MovieEntity>
-    @Query("SELECT * FROM series WHERE name LIKE '%' || :q || '%' ORDER BY name LIMIT :limit") suspend fun searchSeries(q: String, limit: Int): List<SeriesEntity>
+    // Built by SearchText; call searchChannels/searchMovies/searchSeries instead.
+    @RawQuery suspend fun rawChannels(q: SupportSQLiteQuery): List<ChannelEntity>
+    @RawQuery suspend fun rawMovies(q: SupportSQLiteQuery): List<MovieEntity>
+    @RawQuery suspend fun rawSeries(q: SupportSQLiteQuery): List<SeriesEntity>
     @Query("SELECT * FROM movies ORDER BY added DESC LIMIT :limit") suspend fun recentMovies(limit: Int): List<MovieEntity>
     /** Best rated first; providers rate out of 10, so anything above that is junk and left out. */
     @Query("SELECT * FROM movies WHERE CAST(rating AS REAL) BETWEEN :min AND 10 ORDER BY CAST(rating AS REAL) DESC, added DESC LIMIT :limit")
@@ -205,9 +214,9 @@ interface CatalogDao {
 
 @Database(
     entities = [SourceEntity::class, CategoryEntity::class, ChannelEntity::class, MovieEntity::class, SeriesEntity::class, ProgrammeEntity::class],
-    version = 5,
+    version = 6,
     exportSchema = true,
-    autoMigrations = [AutoMigration(from = 3, to = 4), AutoMigration(from = 4, to = 5)],
+    autoMigrations = [AutoMigration(from = 3, to = 4), AutoMigration(from = 4, to = 5), AutoMigration(from = 5, to = 6)],
 )
 abstract class AppDb : RoomDatabase() {
     abstract fun catalog(): CatalogDao

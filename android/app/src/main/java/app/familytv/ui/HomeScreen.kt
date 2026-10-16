@@ -639,30 +639,39 @@ fun PosterCard(
 
 // ---- shared helpers ----
 
-/** Categories for [kind], minus hidden and adult ones (those live under Categories' Adult Content). */
+/**
+ * Categories for [kind], minus hidden and adult ones (those live under Categories' Adult Content).
+ * With [liveTv], adult live categories show too once unlocked, or when the profile has no PIN.
+ */
 @Composable
-fun categories(profile: Profile, kind: String): List<CategoryEntity> {
+fun categories(profile: Profile, kind: String, liveTv: Boolean = false): List<CategoryEntity> {
     val ctx = LocalContext.current
     val all by remember(kind) { ctx.app.db.catalog().categories(kind) }.collectAsState(initial = emptyList())
     val mine by ctx.app.myCategoryOrder.order.collectAsState()
-    return remember(all, profile, mine) { visibleCategories(all, profile, mine[kind].orEmpty()) }
+    val unlocked by ctx.app.adultUnlocked.collectAsState()
+    return remember(all, profile, mine, unlocked) { visibleCategories(all, profile, mine[kind].orEmpty(), liveTv && adultOpen(profile, unlocked)) }
 }
 
+/** True when adult content may show without asking: the PIN was entered this run, or the profile has none. */
+fun adultOpen(profile: Profile?, unlocked: Boolean): Boolean = unlocked || profile != null && profile.parentalPin.isNullOrEmpty()
+
 /**
- * [all] (one kind) minus the profile's hidden categories and adult ones. Categories named in [mine]
- * (this device's order, from Settings) come first, then those in the profile's order, then the rest
- * in the provider's order.
+ * [all] (one kind) minus the profile's hidden categories and adult ones; adult live categories stay
+ * when [adultLive]. Categories named in [mine] (this device's order, from Settings) come first, then
+ * those in the profile's order, then the rest in the provider's order.
  */
-fun visibleCategories(all: List<CategoryEntity>, profile: Profile?, mine: List<String> = emptyList()): List<CategoryEntity> =
-    arranged(all, profile, adult = false, mine)
+fun visibleCategories(all: List<CategoryEntity>, profile: Profile?, mine: List<String> = emptyList(), adultLive: Boolean = false): List<CategoryEntity> =
+    arranged(all, profile, mine) { c -> !isAdult(c) || adultLive && c.kind == Kind.LIVE }
 
 /** Only the adult categories of [all], arranged like [visibleCategories]. */
 fun adultCategories(all: List<CategoryEntity>, profile: Profile?, mine: List<String> = emptyList()): List<CategoryEntity> =
-    arranged(all, profile, adult = true, mine)
+    arranged(all, profile, mine, ::isAdult)
 
-private fun arranged(all: List<CategoryEntity>, profile: Profile?, adult: Boolean, mine: List<String>): List<CategoryEntity> {
+private fun isAdult(c: CategoryEntity) = ADULT.containsMatchIn(c.name)
+
+private fun arranged(all: List<CategoryEntity>, profile: Profile?, mine: List<String>, keep: (CategoryEntity) -> Boolean): List<CategoryEntity> {
     val hidden = profile?.hiddenCategories.orEmpty().map { it.lowercase() }.toSet()
-    val shown = all.filter { c -> c.name.lowercase() !in hidden && ADULT.containsMatchIn(c.name) == adult }
+    val shown = all.filter { c -> c.name.lowercase() !in hidden && keep(c) }
     fun rank(names: List<String>?) = names.orEmpty().withIndex().associate { (i, n) -> n.lowercase() to i }
     val own = rank(mine)
     val order = rank(profile?.categoryOrder?.get(all.firstOrNull()?.kind))
