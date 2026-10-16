@@ -94,7 +94,7 @@ internal data class GuideFocus(val channel: ChannelEntity, val prog: NowNext?)
 @Composable
 fun GuideScreen(vm: MainViewModel, profile: Profile) {
     val ctx = LocalContext.current
-    val visible = categories(profile, Kind.LIVE)
+    val visible = categories(profile, Kind.LIVE, liveTv = true)
     // Favourites leads the chips, as on the channel list; the guide still opens on the first real category.
     val cats = remember(visible) { if (visible.isEmpty()) visible else listOf(favouritesCategory(Kind.LIVE)) + visible }
     var cat by remember { mutableStateOf<CategoryEntity?>(null) }

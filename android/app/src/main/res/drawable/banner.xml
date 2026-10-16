@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- 320x180dp home-screen banner for Android TV / Google TV / Fire TV launchers. -->
-<vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="320dp" android:height="180dp" android:viewportWidth="320" android:viewportHeight="180">
-    <path android:fillColor="#1E3A8A" android:pathData="M0,0h320v180h-320z" />
-    <path android:fillColor="#FFFFFF" android:pathData="M110,50h100a6,6 0,0 1,6 6v56a6,6 0,0 1,-6 6h-100a6,6 0,0 1,-6 -6v-56a6,6 0,0 1,6 -6z" />
-    <path android:fillColor="#1E3A8A" android:pathData="M150,66l26,18l-26,18z" />
-    <path android:fillColor="#FFFFFF" android:pathData="M135,128h50v6h-50z" />
-</vector>

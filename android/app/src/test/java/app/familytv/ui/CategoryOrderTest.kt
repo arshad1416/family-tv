@@ -25,7 +25,7 @@ class CategoryOrderTest {
     }
 
     @Test
-    fun adultCategoriesOnlyShowUnderAdultContent() {
+    fun adultCategoriesStayOffOtherPagesUntilOpen() {
         val movies = cats(Kind.MOVIE, "Action", "FOR ADULTS", "XXX")
         val series = cats(Kind.SERIES, "Drama", "NETFLIX ADULT-SWIM", "HBO MAX (ADULT SWIM)", "Adult 18+")
         for (p in listOf(Profile(), Profile(parentalPin = "1234"), null)) {
@@ -35,6 +35,19 @@ class CategoryOrderTest {
             assertEquals(listOf("Adult 18+"), adultCategories(series, p).map { it.name })
             assertEquals(listOf("XXX Adult", "Adults 18+"), adultCategories(all, p).map { it.name })
         }
+    }
+
+    @Test
+    fun liveTvShowsAdultLiveCategoriesOnceOpen() {
+        val pin = Profile(parentalPin = "1234")
+        assertFalse(adultOpen(pin, unlocked = false))
+        assertTrue(adultOpen(pin, unlocked = true))
+        assertTrue(adultOpen(Profile(), unlocked = false))
+        assertFalse(adultOpen(null, unlocked = false))
+        assertEquals(listOf("News", "Sports", "Kids", "Movies", "XXX Adult", "Adults 18+"), visibleCategories(all, pin, adultLive = true).map { it.name })
+        // Never adult movie or series categories outside Adult Content, even when open.
+        val movies = cats(Kind.MOVIE, "Action", "XXX")
+        assertEquals(listOf("Action"), visibleCategories(movies, pin, adultLive = true).map { it.name })
     }
 
     @Test

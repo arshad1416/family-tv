@@ -26,6 +26,7 @@ import app.familytv.user.WatchedMarks
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
 import java.util.concurrent.TimeUnit
 
 class FamilyTvApp : Application() {
@@ -46,6 +47,8 @@ class FamilyTvApp : Application() {
     val sharedProgress by lazy { SharedProgress(this) }
     val newEpisodes by lazy { NewEpisodes(this) }
     val myCategoryOrder by lazy { MyCategoryOrder(this) }
+    /** The parental PIN was entered (Settings or Adult Content): adult content opens without it until the app restarts. */
+    val adultUnlocked = MutableStateFlow(false)
 
     /** For work that must outlive a screen, like the stop scrobble sent as the player closes. */
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)

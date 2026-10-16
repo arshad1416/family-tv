@@ -45,6 +45,9 @@ import app.familytv.data.ChannelEntity
 import app.familytv.data.Kind
 import app.familytv.data.MovieEntity
 import app.familytv.data.SeriesEntity
+import app.familytv.data.searchChannels
+import app.familytv.data.searchMovies
+import app.familytv.data.searchSeries
 import app.familytv.debrid.RdResume
 import app.familytv.debrid.RdTitle
 import app.familytv.portal.Profile
