@@ -76,11 +76,24 @@ class SourceDiscoveryTest {
     }
 
     @Test fun combinedEpisodesCannotMasqueradeAsOneEpisode() {
-        for (release in listOf("Northern.Lights.S02E03E04.mkv", "Northern.Lights.S02E03-04.mkv", "Northern.Lights.2x03-04.mkv", "Northern.Lights.2x03x04.mkv", "Northern.Lights.S02E03.S02E04.mkv")) {
+        for (release in listOf("Northern.Lights.S02E03E04.mkv", "Northern.Lights.S02E03-04.mkv", "Northern.Lights.2x03-04.mkv", "Northern.Lights.2x03x04.mkv", "Northern.Lights.S02E03.S02E04.mkv",
+            "Northern.Lights.S02E03.E04.mkv", "Northern.Lights.S02E03_E04.mkv", "Northern.Lights.S02E03.x04.mkv", "Northern.Lights.2x03.x04.mkv", "Northern.Lights.2x03.2x04.mkv")) {
             assertThrows(release, SourceUnavailable::class.java) {
                 SourceRules.select(SourceCandidate(hash, 0, "1080p x264", true), episode, listOf(RdSourceFile(1, release, 100)), "Northern Lights S02")
             }
         }
+        for (release in listOf("Northern.Lights.S02E03.x264.mkv", "Northern.Lights.S02E03.x265.mkv", "Northern.Lights.2x03.x264.mkv",
+            "Northern.Lights.S02E03-480p.x264.mkv", "Northern.Lights.S02E03-576p.x264.mkv", "Northern.Lights.S02E03-720p.x264.mkv", "Northern.Lights.S02E03-1080p.x264.mkv", "Northern.Lights.S02E03-x264.mkv", "Northern.Lights.S02E03-x265.mkv")) {
+            assertEquals(release, SourceRules.select(SourceCandidate(hash, 0, "1080p", true), episode, listOf(RdSourceFile(1, release, 100)), "Northern Lights S02").path)
+        }
+    }
+
+    @Test fun movieSelectionRejectsSeasonOnlyAndCompleteSeasonVideos() {
+        val source = SourceCandidate(hash, 0, "1080p", true)
+        for ((file, folder) in listOf("The.Matrix.S01.1080p.mkv" to "The Matrix", "The.Matrix.Season.1.Complete.mkv" to "The Matrix", "The.Matrix.1080p.mkv" to "The Matrix S01 Complete")) {
+            assertThrows(file, SourceUnavailable::class.java) { SourceRules.select(source, DiscoveryTarget(movie), listOf(RdSourceFile(1, file, 100)), folder) }
+        }
+        assertEquals(1, SourceRules.select(source, DiscoveryTarget(movie), listOf(RdSourceFile(1, "The.Matrix.1999.1080p.mkv", 100)), "The Matrix 1999").id)
     }
 
     @Test fun tmdbExcludesAdultPeopleAndMalformedResults() {

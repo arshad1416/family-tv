@@ -96,8 +96,7 @@ fun SearchScreen(vm: MainViewModel, profile: Profile) {
             val session = libraryGrant ?: if (profile.parentalPin.isNullOrEmpty()) DiscoverySession.open(ctx.app, profile) else throw SourceUnavailable("Unlock the library results again.")
             playRdOnly(ctx, copy, label, resume) {
                 session.verify()
-                val blocked = CatalogDiscoveryGuard(dao, profile).blocked() ?: throw SourceUnavailable("Cannot verify the catalog policy.")
-                if (!DiscoveryPolicy.allowed(title.title, blocked)) throw SourceUnavailable("This title is hidden by the catalog policy.")
+                if (!CatalogDiscoveryGuard(ctx.app.db, profile).allowedName(title.title)) throw SourceUnavailable("This title is hidden by the catalog policy.")
                 if (ctx.app.realDebrid.index.value !== rdIndex || !lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) throw CancellationException("The library or active screen changed")
             }
         } catch (e: CancellationException) { throw e }
@@ -122,29 +121,32 @@ fun SearchScreen(vm: MainViewModel, profile: Profile) {
     val movies = keys(categories(profile, Kind.MOVIE))
     val series = keys(categories(profile, Kind.SERIES))
     val q = query.trim()
+    val publication = remember { LatestSearchResults(Results()) }
     val results by produceState(Results(), q, live, movies, series, rdIndex, profile, libraryUnlocked, libraryGrant) {
-        // Clear only the external shelf immediately; a prior grant/query must not retain RD titles.
-        value = value.copy(rd = emptyList())
-        delay(300) // let typing settle
-        value = if (q.length < 2) Results() else {
-            val m = dao.searchMovies(q, LIMIT * 3).filter { (it.sourceId to it.categoryId) in movies }.take(LIMIT)
-            val s = dao.searchSeries(q, LIMIT * 3).filter { (it.sourceId to it.categoryId) in series }.take(LIMIT)
-            val found = (m.map { it.name } + s.map { it.name }).flatMapTo(HashSet()) { DiscoveryPolicy.keys(it) }
-            val blocked = CatalogDiscoveryGuard(dao, profile).blocked(q)
-            val rd = if (!libraryUnlocked || blocked == null || rdIndex.fileCount == 0) emptyList() else try {
+        publication.load(
+            local = {
+                delay(300) // let typing settle; old query rows have already been cleared
+                if (q.length < 2) Results() else Results(
+                    channels = dao.searchChannels(q, LIMIT * 3).filter { (it.sourceId to it.categoryId) in live }.take(LIMIT),
+                    movies = dao.searchMovies(q, LIMIT * 3).filter { (it.sourceId to it.categoryId) in movies }.take(LIMIT),
+                    series = dao.searchSeries(q, LIMIT * 3).filter { (it.sourceId to it.categoryId) in series }.take(LIMIT),
+                )
+            },
+            enrich = enrich@{ local ->
+                if (q.length < 2 || !libraryUnlocked || rdIndex.fileCount == 0) return@enrich local
                 val grant = libraryGrant ?: if (profile.parentalPin.isNullOrEmpty()) DiscoverySession.open(ctx.app, profile) else throw SourceUnavailable("Unlock the library again.")
                 grant.verify()
-                val matches = rdIndex.search(q, found).filter { DiscoveryPolicy.allowed(it.title, blocked) }
+                val found = (local.movies.map { it.name } + local.series.map { it.name }).flatMapTo(HashSet()) { DiscoveryPolicy.keys(it) }
+                val candidates = rdIndex.search(q, found)
+                val allowed = CatalogDiscoveryGuard(ctx.app.db, profile).filterNames(candidates.map { it.title })
+                val matches = candidates.filter { it.title in allowed }
                 grant.verify()
-                matches
-            } catch (e: CancellationException) { throw e }
-            catch (_: Exception) { emptyList() }
-            Results(
-                dao.searchChannels(q, LIMIT * 3).filter { (it.sourceId to it.categoryId) in live }.take(LIMIT),
-                m, s, rd,
-            )
-        }
+                local.copy(rd = matches)
+            },
+            publish = { value = it },
+        )
     }
+
     val progs = rememberProgrammes(results.channels)
     val favs = rememberFavourites()
     val favKeys = rememberFavouriteKeys(favs)

@@ -34,9 +34,11 @@ for that window, actual profile ID, device identity and profile policy. Before a
 playback, the app checks current portal profile, policy, key revision and key equality. Leaving the
 screen or closing the dialog cancels pending work. TMDB adult titles are excluded; `adult=false`
 does not certify an age rating. Known hidden/adult catalog identities are checked independently of
-the typed SQL query, including punctuation/accent normalization and TMDB identity. Policy query
-errors, more than 900 visible categories or more than 20,000 restricted identities per media kind
-fail closed for external/RD-only results. Ordinary IPTV browsing is unaffected by these bounds.
+the typed SQL query, including punctuation/accent normalization and TMDB identity. Policy checks match the finite current candidates against complete catalog snapshots in 1,000-row
+pages, with cancellation checks and processing off the UI thread. Large categories do not disable
+unrelated discovery, and restricted matches beyond the first page remain excluded. Policy query
+errors fail closed for external/RD-only results. Local IPTV search results appear before portal or
+RD authorization work, and late external results cannot replace a newer query.
 Unclassified titles in the existing RD library shelf also require an explicit profile-bound PIN
 unlock before appearing in protected profiles; leaving Search locks them again.
 

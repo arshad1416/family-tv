@@ -127,11 +127,13 @@ data class NowNext(val epgId: String, val title: String, val start: Long, val st
 
 @Dao
 interface CatalogDao {
-    /** Bounded projection of hidden catalog identities; punctuation-independent parental checks. */
-    @Query("SELECT name, tmdb FROM movies WHERE (length(CAST(sourceId AS BLOB)) || ':' || sourceId || categoryId) NOT IN (:visible) LIMIT :limit")
-    suspend fun restrictedMovieTitles(visible: List<String>, limit: Int): List<CatalogPolicyTitle>
-    @Query("SELECT name, tmdb FROM series WHERE (length(CAST(sourceId AS BLOB)) || ':' || sourceId || categoryId) NOT IN (:visible) LIMIT :limit")
-    suspend fun restrictedShowTitles(visible: List<String>, limit: Int): List<CatalogPolicyTitle>
+    /** Keyset pages keep policy matching complete without materializing the whole catalog. */
+    @Query("SELECT * FROM categories WHERE kind = :kind")
+    suspend fun policyCategories(kind: String): List<CategoryEntity>
+    @Query("SELECT rowid AS rowId, sourceId, categoryId, name, tmdb FROM movies WHERE rowid >= :from ORDER BY rowid LIMIT :limit")
+    suspend fun moviePolicyPage(from: Long, limit: Int): List<CatalogPolicyTitle>
+    @Query("SELECT rowid AS rowId, sourceId, categoryId, name, tmdb FROM series WHERE rowid >= :from ORDER BY rowid LIMIT :limit")
+    suspend fun showPolicyPage(from: Long, limit: Int): List<CatalogPolicyTitle>
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertSource(s: SourceEntity)
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertCategories(c: List<CategoryEntity>)
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertChannels(c: List<ChannelEntity>)
@@ -208,7 +210,7 @@ interface CatalogDao {
     suspend fun movieCopies(titleKeys: List<String>, tmdb: List<String>): List<MovieEntity>
 }
 
-data class CatalogPolicyTitle(val name: String, val tmdb: String?)
+data class CatalogPolicyTitle(val rowId: Long, val sourceId: String, val categoryId: String, val name: String, val tmdb: String?)
 
 @Database(
     entities = [SourceEntity::class, CategoryEntity::class, ChannelEntity::class, MovieEntity::class, SeriesEntity::class, ProgrammeEntity::class],

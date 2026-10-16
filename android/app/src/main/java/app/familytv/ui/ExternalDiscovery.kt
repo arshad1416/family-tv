@@ -62,7 +62,7 @@ internal fun ExternalDiscovery(profile: Profile, query: String, onClose: () -> U
     var job by remember { mutableStateOf<Job?>(null) }
     var generation by remember { mutableIntStateOf(0) }
     val client = remember { DiscoveryClient(Http.client, app.portal.cachedConfig?.tmdbApiKey.orEmpty()) }
-    val guard = remember(profile) { CatalogDiscoveryGuard(app.db.catalog(), profile) }
+    val guard = remember(profile) { CatalogDiscoveryGuard(app.db, profile) }
     val currentClose by rememberUpdatedState(onClose)
 
     fun cancel() {
@@ -101,7 +101,7 @@ internal fun ExternalDiscovery(profile: Profile, query: String, onClose: () -> U
         if (!accountOnly) {
             val results = client.search(query)
             s.verify()
-            titles = results.filter { guard.allowed(it) }
+            titles = guard.filterTitles(results)
             if (titles.isNullOrEmpty()) message = "No available movies or series matched."
         }
     }

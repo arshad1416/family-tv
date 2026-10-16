@@ -39,7 +39,11 @@ data class RdSourceFile(val id: Int, val path: String, val bytes: Long, val sele
 object DiscoveryPolicy {
     // Preserve meaningful country qualifiers as well as the legacy matcher form. A provider's
     // "The Office (US)" and a release named "The.Office.US" must share a policy identity.
-    fun keys(name: String) = setOf(TitleMatch.key(TitleMatch.parse(name).title), TitleMatch.key(SeriesTitles.parse(name).title)).filter { it.isNotEmpty() }.toSet()
+    fun keys(name: String): Set<String> {
+        val title = SeriesTitles.parse(name).title
+        return setOf(TitleMatch.key(TitleMatch.parse(name).title), TitleMatch.key(title),
+            SeriesTitles.key(title).removePrefix("the ").replace(" ", "")).filter { it.isNotEmpty() }.toSet()
+    }
     fun allowed(name: String, blocked: Set<String>) = keys(name).none { it in blocked }
 }
 
@@ -63,15 +67,35 @@ object TorrentioParse {
 }
 
 object SourceRules {
+    private val EPISODE_TOKEN = Regex("(?i)(?<![a-z0-9])(?:s\\d{1,2}[ ._-]?e\\d{1,3}|\\d{1,2}x\\d{1,3})(?!\\d)")
+    private val SHORTHAND = Regex("(?i)(?:^|[^a-z0-9])([ex])(\\d{1,3})(?![a-z0-9])")
+    private val RANGE = Regex("(?i)^\\s*(?:[-+&]|to\\b)\\s*([ex]?)(\\d{1,3})(?![a-z0-9])")
+
+    /** One full episode marker, with no second full/shorthand marker or numeric range. */
+    private fun singleEpisodeFile(path: String): Boolean {
+        val name = path.substringAfterLast('/').replace('.', ' ').replace('_', ' ')
+        val markers = EPISODE_TOKEN.findAll(name).take(2).toList()
+        if (markers.size != 1) return false
+        val marker = markers.single()
+        val before = name.substring(0, marker.range.first)
+        val after = name.substring(marker.range.last + 1)
+        fun extra(s: String) = SHORTHAND.findAll(s).any { m ->
+            // Release codecs are not shorthand episode numbers.
+            !(m.groupValues[1].equals("x", true) && m.groupValues[2].toIntOrNull() in setOf(264, 265))
+        }
+        val range = RANGE.find(after)?.let { m ->
+            !(m.groupValues[1].equals("x", true) && m.groupValues[2].toIntOrNull() in setOf(264, 265))
+        } == true
+        return !range && !extra(before) && !extra(after)
+    }
+
     fun select(source: SourceCandidate, target: DiscoveryTarget, files: List<RdSourceFile>, folder: String): RdSourceFile {
         if (!Regex("[a-f0-9]{40}").matches(source.hash) || files.size > 10000 || files.map { it.id }.distinct().size != files.size || files.any { it.id <= 0 }) throw SourceUnavailable("Invalid torrent file list.")
         fun matches(f: RdSourceFile): Boolean {
             if (f.bytes <= 0 || !RdNames.isVideo(f.path) || RdNames.isExtra(f.path)) return false
             val p = RdNames.parse(f.path, folder)
-            if (Regex("(?i)(?:S\\d{1,2}E\\d{1,3}(?:E\\d|[-+ ]E?\\d)|\\d{1,2}x\\d{1,3}(?:x\\d|[-+]\\d))").containsMatchIn(f.path)) return false
-            if (Regex("(?i)\\b(?:S\\d{1,2}E\\d{1,3}|\\d{1,2}x\\d{2})\\b").findAll(f.path).take(2).count() > 1) return false // combined episodes are not independently seekable
-            return if (target.isEpisode) p.season == target.season && p.episode == target.episode && TitleMatch.same(target.title.title, target.title.year, p.title, p.year)
-            else p.episode == null && TitleMatch.same(target.title.title, target.title.year, p.title, p.year)
+            return if (target.isEpisode) singleEpisodeFile(f.path) && p.season == target.season && p.episode == target.episode && TitleMatch.same(target.title.title, target.title.year, p.title, p.year)
+            else p.season == null && p.episode == null && RdNames.parse(folder).let { it.season == null && it.episode == null } && TitleMatch.same(target.title.title, target.title.year, p.title, p.year)
         }
         val chosen = source.fileIdx?.let { idx ->
             if (idx !in 0..9999) throw SourceUnavailable("Invalid source file index.")
