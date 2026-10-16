@@ -2,8 +2,6 @@ package app.familytv.ui
 
 import android.content.Intent
 import androidx.compose.foundation.background
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -17,12 +15,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -46,6 +42,7 @@ import kotlinx.coroutines.launch
 @Composable
 internal fun ExternalDiscovery(profile: Profile, query: String, onClose: () -> Unit, accountOnly: Boolean = false, initialTitle: DiscoveryTitle? = null) {
     val ctx = LocalContext.current
+    val keyboard = LocalSoftwareKeyboardController.current
     val app = ctx.app
     val scope = rememberCoroutineScope()
     var unlocked by remember(profile) { mutableStateOf(profile.parentalPin.isNullOrEmpty()) }
@@ -56,7 +53,8 @@ internal fun ExternalDiscovery(profile: Profile, query: String, onClose: () -> U
     var target by remember(profile) { mutableStateOf<DiscoveryTarget?>(null) }
     var sources by remember(profile) { mutableStateOf<List<SourceCandidate>?>(null) }
     var confirmSource by remember(profile) { mutableStateOf<SourceCandidate?>(null) }
-    var keyStatus by remember(profile) { mutableStateOf<ProfileRdStatus?>(null) }
+    val keyRequest = remember(profile) { ProfileKeyRequestState() }
+    var keyStatus by keyRequest.status
     var enteredKey by remember(profile) { mutableStateOf("") }
     var confirmRemove by remember(profile) { mutableStateOf(false) }
     var connected by remember(profile) { mutableStateOf(false) }
@@ -71,8 +69,9 @@ internal fun ExternalDiscovery(profile: Profile, query: String, onClose: () -> U
     val currentClose by rememberUpdatedState(onClose)
 
     fun cancel() {
+        keyboard?.hide()
         generation++
-        job?.cancel()
+        if (accountOnly) { keyRequest.cancel(job); connected = false } else job?.cancel()
         job = null
         busy = false
         preparationProgress = null
@@ -89,6 +88,7 @@ internal fun ExternalDiscovery(profile: Profile, query: String, onClose: () -> U
                 val s = session ?: DiscoverySession.open(app, profile).also { session = it }
                 s.verify()
                 if (accountOnly) {
+                    keyStatus = null
                     keyStatus = app.profileRealDebrid.status(s)
                     connected = keyStatus?.configured == true
                 } else connected = true // Key is checked only when a viewer selects a release.
@@ -98,6 +98,7 @@ internal fun ExternalDiscovery(profile: Profile, query: String, onClose: () -> U
                 throw e
             } catch (e: Exception) {
                 if (own == generation) {
+                    if (accountOnly) { keyStatus = null; connected = false; enteredKey = "" }
                     message = (e as? SourceUnavailable)?.message ?: if (e is PortalException) e.message else "This request could not be completed. Try again later."
                     if (e is PortalException && e.code == 409) { keyStatus = null; connected = false; enteredKey = "" }
                 }
@@ -163,15 +164,15 @@ internal fun ExternalDiscovery(profile: Profile, query: String, onClose: () -> U
     val owner = LocalLifecycleOwner.current
     DisposableEffect(owner, profile, query) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_STOP) { cancel(); unlocked = profile.parentalPin.isNullOrEmpty(); session = null; currentClose() }
+            if (event == Lifecycle.Event.ON_STOP) { enteredKey = ""; keyStatus = null; cancel(); unlocked = profile.parentalPin.isNullOrEmpty(); session = null; currentClose() }
         }
         owner.lifecycle.addObserver(observer)
-        onDispose { job?.cancel(); owner.lifecycle.removeObserver(observer) }
+        onDispose { enteredKey = ""; job?.cancel(); owner.lifecycle.removeObserver(observer) }
     }
     LaunchedEffect(unlocked, initialTitle) { if (unlocked) { if (initialTitle != null) openTitle(initialTitle) else search() } }
 
     val height = LocalConfiguration.current.screenHeightDp.dp * 0.92f
-    Dialog(onDismissRequest = { cancel(); onClose() }, properties = DialogProperties(usePlatformDefaultWidth = accountOnly)) {
+    Dialog(onDismissRequest = { enteredKey = ""; cancel(); onClose() }, properties = DialogProperties(usePlatformDefaultWidth = accountOnly)) {
         val content: @Composable ColumnScope.() -> Unit = {
             Text(if (accountOnly) "Real-Debrid API key for this profile" else "Choose a Torrentio release", fontSize = 22.sp, fontWeight = FontWeight.Bold)
             if (!unlocked) {
@@ -181,7 +182,7 @@ internal fun ExternalDiscovery(profile: Profile, query: String, onClose: () -> U
                 if (!accountOnly) Text("Online metadata result. For an IPTV link, choose the catalog movie or episode from Search.", fontSize = 13.sp, color = Tv.Muted)
                 Text("TMDB metadata · Torrentio sources · the account owner’s Real-Debrid account on devices in this profile. Only choose sources you are entitled to play.", fontSize = 13.sp, color = Tv.Muted)
                 val first = remember { FocusRequester() }
-                LaunchedEffect(titles, show, episodes, sources, busy, connected, confirmSource) { if (!busy) runCatching { first.requestFocus() } }
+                LaunchedEffect(titles, show, episodes, sources, busy, connected, confirmSource) { if (!busy && !accountOnly) runCatching { first.requestFocus() } }
                 message?.let { Text(it, color = if (busy) Tv.Muted else Tv.Warn, fontSize = 15.sp) }
                 if (busy) {
                     val progress = preparationProgress
@@ -196,25 +197,19 @@ internal fun ExternalDiscovery(profile: Profile, query: String, onClose: () -> U
                 } else {
                     if (accountOnly) {
                         Text(if (connected) "API key saved for this profile (hidden; authentication unverified)." else "No external-source API key is configured for this profile.", fontSize = 14.sp)
+                        keyStatus?.maskedPreview?.let { Text("Saved key: $it", fontSize = 14.sp) }
                         Text("Save, replace or remove affects all authorized devices in this same profile. Use your own devices only; Real-Debrid accounts must not be shared with other people. The existing library sign-in is separate.", fontSize = 13.sp, color = Tv.Muted)
                         if (accountOnly) Text("Remove deletes the saved profile key; it does not revoke the key at Real-Debrid or stop streams already playing.", fontSize = 13.sp, color = Tv.Muted)
                         if (accountOnly) {
                             Text("${if (connected) "Replacement" else "Real-Debrid"} API key", fontSize = 14.sp)
-                            BasicTextField(enteredKey, { if (it.length <= 512) enteredKey = it }, Modifier.fillMaxWidth().background(Tv.Panel, Tv.Shape).padding(16.dp),
-                                textStyle = TextStyle(color = Tv.Text, fontSize = 18.sp), singleLine = true, visualTransformation = PasswordVisualTransformation(),
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false))
-                            TvButton("Paste API key", {
-                                val value = runCatching {
-                                    val clipboard = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
-                                    val clip = clipboard?.primaryClip
-                                    pastedApiKey(clip?.takeIf { it.itemCount == 1 }?.getItemAt(0)?.text)
-                                }.getOrNull()
-                                if (value == null) message = "Clipboard must contain a 16–512 character API key without spaces."
-                                else { enteredKey = value; message = "API key pasted (hidden). Review and save when ready." }
-                            })
+                            key(profile) { ApiKeyEntry(enteredKey, { enteredKey = it }, {
+                                val clipboard = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+                                val clip = clipboard?.primaryClip
+                                clip?.takeIf { it.itemCount == 1 }?.getItemAt(0)?.text
+                            }) }
                             TvButton(if (connected) "Replace key for all profile devices" else "Save key for all profile devices", {
                                 val expected = keyStatus
-                                val value = enteredKey
+                                val value = pastedApiKey(enteredKey) ?: return@TvButton
                                 enteredKey = ""
                                 if (expected == null) { search(); message = "Review the refreshed account status and enter the key again." }
                                 else work { s ->
@@ -222,7 +217,7 @@ internal fun ExternalDiscovery(profile: Profile, query: String, onClose: () -> U
                                     connected = true
                                     message = "Key saved for the account owner’s devices in this profile; authentication is unverified."
                                 }
-                            }, Modifier.focusRequester(first), enabled = ProfileRealDebrid.validKey(enteredKey))
+                            }, enabled = pastedApiKey(enteredKey) != null)
                             if (connected) TvButton(if (confirmRemove) "Confirm removal from every profile device" else "Remove key from all profile devices", {
                                 if (!confirmRemove) confirmRemove = true
                                 else {
@@ -280,7 +275,7 @@ internal fun ExternalDiscovery(profile: Profile, query: String, onClose: () -> U
                     if (!accountOnly && titles == null) TvButton("Try search again", ::search)
                 }
             }
-            TvButton("Close", { cancel(); onClose() })
+            TvButton("Close", { enteredKey = ""; cancel(); onClose() })
         }
         if (accountOnly) Column(Modifier.widthIn(min = 300.dp, max = 760.dp).heightIn(max = height).background(Tv.Raised, Tv.Shape)
             .verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.spacedBy(10.dp), content = content)

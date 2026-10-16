@@ -81,6 +81,13 @@ class RealDebrid(private val app: FamilyTvApp) {
 
     fun refreshState() {
         if (linkJob?.isActive == true) return
+        // Old automatic library requests could persist normal cancellation as an error.
+        val oldMessage = prefs.getString(MESSAGE, null)
+        val prefix = "Couldn't load your Real-Debrid files: "
+        if (oldMessage?.startsWith(prefix) == true && oldMessage.removePrefix(prefix).trim().lowercase() in
+            setOf("canceled", "cancelled", "job was cancelled", "standalonecoroutine was cancelled")) {
+            prefs.edit().remove(MESSAGE).apply()
+        }
         _state.value = if (!linked) State.SignedOut(prefs.getString(MESSAGE, null)) else State.SignedIn(
             prefs.getString(NAME, null) ?: "your Real-Debrid account",
             prefs.getString(PREMIUM, null),

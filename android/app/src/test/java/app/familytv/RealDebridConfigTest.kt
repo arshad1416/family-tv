@@ -35,6 +35,21 @@ class RealDebridConfigTest {
         assertEquals(state, rd.state.value)
     }
 
+    @Test fun obsoleteLibraryCancellationClearedButRealErrorsRetained() {
+        val app = application()
+        val prefs = app.getSharedPreferences("realdebrid", Context.MODE_PRIVATE)
+        for (suffix in listOf("Canceled", "Cancelled", "Job was cancelled", "StandaloneCoroutine was cancelled")) {
+            prefs.edit().clear().putString("message", "Couldn't load your Real-Debrid files: $suffix").apply()
+            RealDebrid(app)
+            assertNull(prefs.getString("message", null))
+        }
+        for (error in listOf("Couldn't load your Real-Debrid files: HTTP 403", "Real-Debrid sign-in was cancelled", "Couldn't load your Real-Debrid files: account cancelled by provider")) {
+            prefs.edit().clear().putString("message", error).apply()
+            RealDebrid(app)
+            assertEquals(error, prefs.getString("message", null))
+        }
+    }
+
     @Test fun signOutConfigImmediatelyClearsLocalIndexAndStatus() {
         val app = application()
         app.getSharedPreferences("realdebrid", Context.MODE_PRIVATE).edit().clear().putBoolean("linked", true).apply()

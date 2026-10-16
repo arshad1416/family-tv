@@ -83,6 +83,93 @@ class DiscoverySessionTest {
         }
     }
 
+    @Test fun validatedStatusShowsOnlyMaskedPreviewAndReplacementUpdatesIt() = runTest {
+        val gateway = MemoryGateway()
+        val rd = ProfileRealDebrid(gateway, DiscoveryHttp(OkHttpClient()))
+        val session = DiscoverySession(identity) { identity }
+        val key = "ABCDsyntheticMIDDLE123WXYZ"
+        gateway.state.set(ProfileRdKey("profile-a", 1, true, key))
+        fun preview(status: ProfileRdStatus) = status.maskedPreview
+        val status = rd.status(session)
+        assertEquals("ABCD********WXYZ", preview(status))
+        assertFalse(status.toString().contains(key))
+        val saved = rd.replace(session, status, "EFGHsyntheticReplacementIJKL")
+        assertEquals("EFGH********IJKL", preview(saved))
+        assertNull(preview(rd.remove(session, saved)))
+        for (invalid in listOf("short", "x".repeat(513), "ABCDsynthetic keyWXYZ", "ABCDsyntheticékeyWXYZ")) {
+            assertNull(ProfileRealDebrid.maskedPreview(invalid))
+            gateway.state.set(ProfileRdKey("profile-a", 4, true, invalid))
+            try { rd.status(session); fail("Invalid key produced a preview") } catch (_: SourceUnavailable) {}
+        }
+        gateway.state.set(ProfileRdKey("profile-b", 5, true, key))
+        try { rd.status(session); fail("Wrong profile produced a preview") } catch (_: SourceUnavailable) {}
+    }
+
+    @Test fun mutationAcknowledgementsRequireExactlyNextRevisionProfileAndConfiguredState() = runTest {
+        for (remove in listOf(false, true)) {
+            for (badAck in listOf(
+                ProfileRdKey("profile-a", -1, !remove),
+                ProfileRdKey("profile-a", 0, !remove),
+                ProfileRdKey("profile-a", 1, !remove),
+                ProfileRdKey("profile-a", 3, !remove),
+                ProfileRdKey("profile-b", 2, !remove),
+                ProfileRdKey("profile-a", 2, remove))) {
+                var mutations = 0
+                val gateway = object : ProfileRdGateway {
+                    override suspend fun rdKeyRead(profileId: String) = ProfileRdKey("profile-a", 1, true, "ABCDsyntheticKey123WXYZ")
+                    override suspend fun rdKeyWrite(profileId: String, revision: Long, apiKey: String): ProfileRdKey { mutations++; return badAck }
+                    override suspend fun rdKeyRemove(profileId: String, revision: Long): ProfileRdKey { mutations++; return badAck }
+                }
+                val rd = ProfileRealDebrid(gateway, DiscoveryHttp(OkHttpClient()))
+                val session = DiscoverySession(identity) { identity }
+                val expected = rd.status(session)
+                try {
+                    if (remove) rd.remove(session, expected) else rd.replace(session, expected, "EFGHsyntheticNewKey123IJKL")
+                    fail("Invalid acknowledgement accepted: remove=$remove, revision=${badAck.revision}")
+                } catch (_: SourceUnavailable) {}
+                assertEquals(1, mutations)
+            }
+        }
+    }
+
+    @Test fun lastNonOverflowingRevisionAcceptsExactlyOneIncrement() = runTest {
+        for (remove in listOf(false, true)) {
+            var mutations = 0
+            val gateway = object : ProfileRdGateway {
+                override suspend fun rdKeyRead(profileId: String) = ProfileRdKey(profileId, Long.MAX_VALUE - 1, true, "ABCDsyntheticKey123WXYZ")
+                override suspend fun rdKeyWrite(profileId: String, revision: Long, apiKey: String): ProfileRdKey { mutations++; return ProfileRdKey(profileId, revision + 1, true) }
+                override suspend fun rdKeyRemove(profileId: String, revision: Long): ProfileRdKey { mutations++; return ProfileRdKey(profileId, revision + 1, false) }
+            }
+            val rd = ProfileRealDebrid(gateway, DiscoveryHttp(OkHttpClient()))
+            val session = DiscoverySession(identity) { identity }
+            val expected = rd.status(session)
+            val result = if (remove) rd.remove(session, expected) else rd.replace(session, expected, "EFGHsyntheticNewKey123IJKL")
+            assertEquals(Long.MAX_VALUE, result.revision)
+            assertEquals(!remove, result.configured)
+            assertEquals(if (remove) null else "EFGH********IJKL", result.maskedPreview)
+            assertEquals(1, mutations)
+        }
+    }
+
+    @Test fun invalidExpectedRevisionCannotIssueAnyGatewayCall() = runTest {
+        for (revision in listOf(-1L, Long.MIN_VALUE, Long.MAX_VALUE)) for (remove in listOf(false, true)) {
+            var calls = 0
+            val gateway = object : ProfileRdGateway {
+                override suspend fun rdKeyRead(profileId: String): ProfileRdKey { calls++; return ProfileRdKey(profileId, revision, true, "ABCDsyntheticKey123WXYZ") }
+                override suspend fun rdKeyWrite(profileId: String, revision: Long, apiKey: String): ProfileRdKey { calls++; error("Invalid revision written") }
+                override suspend fun rdKeyRemove(profileId: String, revision: Long): ProfileRdKey { calls++; error("Invalid revision removed") }
+            }
+            val rd = ProfileRealDebrid(gateway, DiscoveryHttp(OkHttpClient()))
+            val expected = ProfileRdStatus("profile-a", revision, true)
+            val session = DiscoverySession(identity) { identity }
+            try {
+                if (remove) rd.remove(session, expected) else rd.replace(session, expected, "EFGHsyntheticNewKey123IJKL")
+                fail("Invalid revision accepted")
+            } catch (_: SourceUnavailable) {}
+            assertEquals("Invalid revisions must fail before gateway access", 0, calls)
+        }
+    }
+
     @Test fun staleReplaceCannotRestoreRevokedProfileKey() = runTest {
         val gateway = MemoryGateway()
         val rd = ProfileRealDebrid(gateway, DiscoveryHttp(OkHttpClient()))
@@ -143,6 +230,76 @@ class DiscoverySessionTest {
         }
     }
 
+    @Test fun http451AtEveryPreparationStageStopsWithoutRetryOrSecretEcho() = runBlocking {
+        val info = """{"hash":"${source.hash}","filename":"Open Film","status":"downloaded","files":[{"id":1,"path":"Open.Film.1080p.mkv","bytes":100,"selected":1}],"links":["https://real-debrid.com/d/synthetic"]}"""
+        val cases = listOf(
+            "adding the selected torrent" to emptyList(),
+            "checking torrent status" to listOf("""{"id":"ABC"}"""),
+            "selecting the video file" to listOf("""{"id":"ABC"}""", info.replace("downloaded", "waiting_files_selection")),
+            "resolving the video link" to listOf("""{"id":"ABC"}""", info))
+        for ((stage, preceding) in cases) MockWebServer().use { server ->
+            preceding.forEach { server.enqueue(MockResponse().setBody(it)) }
+            server.enqueue(MockResponse().setResponseCode(451).setBody("synthetic-secret-body https://secret.example.test/?key=fixture"))
+            val rd = ProfileRealDebrid(MemoryGateway(), DiscoveryHttp(OkHttpClient()), server.url("/api").toString())
+            var opens = 0
+            try { rd.prepare(DiscoverySession(identity) { identity }, source, target, {}) { opens++ }; fail("451 accepted") }
+            catch (e: SourceUnavailable) {
+                assertTrue(e.message.orEmpty().contains("HTTP 451: unavailable for legal reasons"))
+                assertTrue(e.message.orEmpty().contains(stage))
+                assertFalse(e.message.orEmpty().contains("try again", true))
+                assertFalse(e.message.orEmpty().contains("synthetic-secret"))
+                assertFalse(e.message.orEmpty().contains("https://"))
+            }
+            assertEquals(preceding.size + 1, server.requestCount)
+            assertEquals(0, opens)
+        }
+    }
+
+    @Test fun allowlistedNumericProviderReasonsAreCanonicalAndNeverReflectBody() = runBlocking {
+        for ((providerCode, reason) in listOf(22 to "IP address not allowed", 28 to "File not allowed", 35 to "Infringing file", 37 to "Disabled endpoint")) {
+            for (httpCode in listOf(400, 451)) MockWebServer().use { server ->
+                server.enqueue(MockResponse().setResponseCode(httpCode).setBody("""{"error_code":$providerCode,"error":"synthetic-secret https://private.test/fixture"}"""))
+                val rd = ProfileRealDebrid(MemoryGateway(), DiscoveryHttp(OkHttpClient()), server.url("/api").toString())
+                try { rd.prepare(DiscoverySession(identity) { identity }, source, target, {}) { fail("Opened") }; fail("400 accepted") }
+                catch (e: SourceUnavailable) {
+                    assertTrue(e.message.orEmpty().contains("HTTP $httpCode"))
+                    if (httpCode == 451) {
+                        assertTrue(e.message.orEmpty().contains("unavailable for legal reasons"))
+                        assertTrue(e.message.orEmpty().contains("No automatic retry."))
+                    }
+                    assertTrue(e.message.orEmpty().contains("Provider code $providerCode: $reason."))
+                    assertFalse(e.message.orEmpty().contains("synthetic-secret"))
+                    assertFalse(e.message.orEmpty().contains("https://"))
+                }
+                assertEquals(1, server.requestCount)
+            }
+        }
+    }
+
+    @Test fun unknownMalformedOrNonNumericProviderReasonsAreIgnored() = runBlocking {
+        for (body in listOf("""{"error_code":451,"error":"synthetic-secret"}""", """{"error_code":"22"}""", """{"error_code":22.0}""", """{"error_code":220}""", """{"error_code":[22]}""", "not json synthetic-secret", """{"error_code":22,"error":"${"x".repeat(4096)}"}""")) {
+            MockWebServer().use { server ->
+                server.enqueue(MockResponse().setResponseCode(400).setBody(body))
+                val rd = ProfileRealDebrid(MemoryGateway(), DiscoveryHttp(OkHttpClient()), server.url("/api").toString())
+                try { rd.prepare(DiscoverySession(identity) { identity }, source, target, {}) { fail("Opened") }; fail("400 accepted") }
+                catch (e: SourceUnavailable) {
+                    assertEquals("Real-Debrid could not prepare this source (HTTP 400). Try another source.", e.message)
+                }
+                assertEquals(1, server.requestCount)
+            }
+        }
+    }
+
+    @Test fun providerJson451IsNotHttp451() = runBlocking {
+        MockWebServer().use { server ->
+            server.enqueue(MockResponse().setResponseCode(400).setBody("""{"error_code":451,"error":"synthetic-secret"}"""))
+            val rd = ProfileRealDebrid(MemoryGateway(), DiscoveryHttp(OkHttpClient()), server.url("/api").toString())
+            try { rd.prepare(DiscoverySession(identity) { identity }, source, target, {}) { fail("Opened") }; fail("400 accepted") }
+            catch (e: SourceUnavailable) { assertTrue(e.message.orEmpty().contains("HTTP 400")); assertFalse(e.message.orEmpty().contains("legal reasons")) }
+            assertEquals(1, server.requestCount)
+        }
+    }
+
     @Test fun providerFailureIsExplicitAndNeverDispatchesPlayback() = runBlocking {
         MockWebServer().use { server ->
             server.enqueue(MockResponse().setResponseCode(403).setBody("synthetic provider body"))
@@ -152,7 +309,7 @@ class DiscoverySessionTest {
                 rd.prepare(DiscoverySession(identity) { identity }, source, target, {}) { opens++ }
                 fail("Provider failure accepted")
             } catch (e: SourceUnavailable) {
-                assertEquals("Real-Debrid requires an active premium account.", e.message)
+                assertEquals("Real-Debrid denied this request (HTTP 403). Check account access or premium status.", e.message)
             }
             assertEquals(0, opens)
             assertEquals(1, server.requestCount)

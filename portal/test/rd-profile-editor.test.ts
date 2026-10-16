@@ -49,9 +49,14 @@ const profile = (id="ab12",name="Home") => ({id,name,data:{sources:[],extraGuide
 function editor(write?: (path:string, opts:RequestInit)=>Promise<unknown>) {
   const document=new Element("document",{},true);document.innerHTML='<main id="app"></main>';
   const calls:{path:string;opts:RequestInit}[]=[];
+  const states=new Map<string,{revision:number;configured:boolean;maskedPreview:string|null}>();
   const fetch=async(path:string,opts:RequestInit={})=>{
     calls.push({path,opts});let result:unknown;
-    if(path.endsWith("/api-key"))result=opts.method?write?await write(path,opts):{revision:2,configured:opts.method==="PUT"}:{revision:1,configured:true};
+    if(path.endsWith("/api-key")) {
+      const id=path.split("/")[4];let state=states.get(id)||{revision:1,configured:true,maskedPreview:id==="ab12"?"HOME********-123":"OTHR********-456"};
+      if(opts.method) {if(write)result=await write(path,opts);else {const b=JSON.parse(opts.body as string);state={revision:b.revision+1,configured:opts.method==="PUT",maskedPreview:opts.method==="PUT"?b.apiKey.slice(0,4)+"********"+b.apiKey.slice(-4):null};states.set(id,state);result={profileId:id,...state};}}
+      else result={profileId:id,...state};
+    }
     else if(path.endsWith("/categories"))result={reported:{}};
     else if(path==="/api/admin/lines")result={configured:false,lines:[]};
     else if(path==="/api/admin/profiles")result={profiles:[profile(),profile("cd34","Other")]};
@@ -65,6 +70,15 @@ function editor(write?: (path:string, opts:RequestInit)=>Promise<unknown>) {
 }
 
 describe("real profile editor credential integration",()=>{
+  it("shows only the confirmed saved preview, clears on removal, and isolates actual profile switches",async()=>{
+    const e=editor();e.open();await settle();expect(e.get('[data-preview]').textContent).toBe('HOME********-123');expect(e.get('#rdkey').value).toBe('');
+    const key='ABCDfixture-private-middleWXYZ';e.get('#rdkey').value=key;const pending=e.get('[data-save]').onclick!();expect(e.get('[data-preview]').textContent).toBe('');await pending;
+    expect(e.get('[data-preview]').textContent).toBe('ABCD********WXYZ');expect(e.get('#rdkey').value).toBe('');
+    expect(e.get('#app').innerHTML).not.toContain(key);expect(e.get('[data-preview]').textContent).not.toContain('fixture-private-middle');
+    await e.get('[data-refresh]').onclick!();expect(e.get('[data-preview]').textContent).toBe('ABCD********WXYZ');
+    e.open(profile('cd34','Other'));await settle();expect(e.get('[data-preview]').textContent).toBe('OTHR********-456');expect(e.get('#rdkey').value).toBe('');
+    await e.get('[data-remove]').onclick!();expect(e.get('[data-preview]').textContent).toBe('');await e.get('[data-refresh]').onclick!();expect(e.get('[data-preview]').textContent).toBe('');
+  });
   it("preserves unsaved profile fields through credential save, removal and status refresh",async()=>{
     const e=editor();e.open();await settle();
     e.get('#pname').value='Unsaved household';e.get('#ppin').value='4321';e.get('#xg').value='https://fixture.test/guide';e.get('#gp').value='News = fixture.news';

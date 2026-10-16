@@ -264,19 +264,28 @@ function debridCard(draft) {
 // This card updates itself: profile form drafts and credentials never enter each other's state.
 function mountRdApiKey(draft, card) {
   card.innerHTML = '<h3 style="margin-top:0">Real-Debrid API key</h3><p class="muted small">Shared with TVs on this profile. Saved separately from the profile and from the connected account above.</p>' +
-    '<label for="rdkey">API key (paste to add or replace)</label><input id="rdkey" type="password" autocomplete="off" spellcheck="false" autocapitalize="none" maxlength="512">' +
+    '<p data-preview aria-label="Saved API key preview"></p><label for="rdkey">API key (paste to add or replace)</label><input id="rdkey" type="password" autocomplete="off" spellcheck="false" autocapitalize="none" maxlength="512">' +
     '<p class="row"><button class="b p" data-save disabled>Save API key</button><button class="b" data-remove disabled>Remove API key</button><button class="b" data-refresh>Refresh status</button></p><span data-status role="status" aria-live="polite">Loading API key status…</span>';
-  const input = card.querySelector("input"), status = card.querySelector("[data-status]");
+  const input = card.querySelector("input"), status = card.querySelector("[data-status]"), preview = card.querySelector("[data-preview]");
   const save = card.querySelector("[data-save]"), remove = card.querySelector("[data-remove]"), refresh = card.querySelector("[data-refresh]");
   const path = "/api/admin/profiles/" + draft.id + "/realdebrid/api-key";
   let revision = null, configured = false, busy = false;
   const controls = () => { save.disabled = busy || revision === null; remove.disabled = busy || revision === null || !configured; refresh.disabled = busy; input.disabled = busy; };
-  const show = (result) => { revision = result.revision; configured = result.configured; status.textContent = configured ? "API key saved. Its value is never displayed." : "No API key saved."; };
+  const show = (result, expectedRevision = null) => {
+    if (!result || result.profileId !== draft.id || !Number.isSafeInteger(result.revision) || result.revision < 0 ||
+        (expectedRevision !== null && result.revision !== expectedRevision) || (revision !== null && result.revision < revision) ||
+        typeof result.configured !== "boolean" || (result.configured
+          ? typeof result.maskedPreview !== "string" || !/^[\\x21-\\x7e]{4}\\*{8}[\\x21-\\x7e]{4}$/.test(result.maskedPreview)
+          : result.maskedPreview !== null)) throw new Error("Invalid credential status");
+    revision = result.revision; configured = result.configured;
+    preview.textContent = configured ? result.maskedPreview : "";
+    status.textContent = configured ? "API key saved. Only the first and last 4 characters are shown." : "No API key saved.";
+  };
   const load = async () => {
     if (busy) return;
-    busy = true; controls();
+    busy = true; preview.textContent = ""; controls();
     try { const result = await api(path); if (card.isConnected) show(result); }
-    catch { if (card.isConnected) { revision = null; status.textContent = "Could not load API key status. Refresh to try again."; } }
+    catch { if (card.isConnected) { revision = null; preview.textContent = ""; status.textContent = "Could not load API key status. Refresh to try again."; } }
     finally { busy = false; if (card.isConnected) controls(); }
   };
   const mutate = async (method) => {
@@ -285,13 +294,13 @@ function mountRdApiKey(draft, card) {
     const value = method === "PUT" ? input.value.trim() : null;
     input.value = "";
     if (method === "PUT" && !/^[\\x21-\\x7e]{16,512}$/.test(value)) { status.textContent = "Enter an API key with 16 to 512 printable non-space ASCII characters."; return; }
-    busy = true; controls();
+    busy = true; preview.textContent = ""; controls();
     try {
       const result = await api(path, { method, body: JSON.stringify(method === "PUT" ? { revision, apiKey: value } : { revision }) });
-      if (card.isConnected) show(result);
+      if (card.isConnected) show(result, revision + 1);
     } catch {
       // A failed write may have reached storage. Require a fresh revision and explicit retry.
-      if (card.isConnected) { revision = null; status.textContent = "Could not update the API key. Refresh status before trying again."; }
+      if (card.isConnected) { revision = null; preview.textContent = ""; status.textContent = "Could not update the API key. Refresh status before trying again."; }
     } finally { busy = false; if (card.isConnected) controls(); }
   };
   save.onclick = () => mutate("PUT"); remove.onclick = () => mutate("DELETE"); refresh.onclick = load;

@@ -500,17 +500,29 @@ async function rdApiKey(req: Request, env: Env, url: URL): Promise<Response> {
   }
 }
 
-/** Admin can replace/remove a profile credential, but can only read its status. */
+/** Admin can replace/remove a profile credential, and read only a server-masked preview. */
 async function adminRdApiKey(req: Request, env: Env, url: URL, profileId: string): Promise<Response> {
   try {
     if (url.protocol !== "https:") throw new HttpError(426, "HTTPS required");
     const read = () => env.DB.prepare(
-      `SELECT COALESCE(k.revision, 0) AS revision, k.key_enc IS NOT NULL AS configured
+      `SELECT COALESCE(k.revision, 0) AS revision, k.key_enc
        FROM profiles p LEFT JOIN profile_rd_api_keys k ON k.profile_id = p.id WHERE p.id = ?`,
-    ).bind(profileId).first<{ revision: number; configured: number }>();
+    ).bind(profileId).first<{ revision: number; key_enc: string | null }>();
     const row = await read();
     if (!row) throw new HttpError(404, "profile not found");
-    if (req.method === "GET") return json({ profileId, revision: row.revision, configured: !!row.configured });
+    if (req.method === "GET") {
+      let maskedPreview: string | null = null;
+      if (row.key_enc !== null) {
+        const opened = await openJson<{ profileId: string; apiKey: string } | null>(env.CONFIG_KEY, row.key_enc);
+        if (!opened || opened.profileId !== profileId || !validRdApiKey(opened.apiKey)) throw new HttpError(500, "credential unavailable");
+        maskedPreview = maskRdApiKey(opened.apiKey);
+      }
+      // Decryption yields: never return a removed/replaced key or a deleted profile's preview.
+      const current = await read();
+      if (!current) throw new HttpError(404, "profile not found");
+      if (current.revision !== row.revision || current.key_enc !== row.key_enc) throw new HttpError(409, "credential changed; reload");
+      return json({ profileId, revision: row.revision, configured: maskedPreview !== null, maskedPreview });
+    }
     const b = await body<Record<string, unknown>>(req);
     const revision = b.revision;
     if (typeof revision !== "number" || !Number.isSafeInteger(revision) || revision < 0 || revision >= Number.MAX_SAFE_INTEGER) throw new HttpError(400, "valid revision required");
@@ -528,7 +540,7 @@ async function adminRdApiKey(req: Request, env: Env, url: URL, profileId: string
       if (!await read()) throw new HttpError(404, "profile not found");
       throw new HttpError(409, "credential changed; reload");
     }
-    return json({ profileId, revision: changed.revision, configured: apiKey !== null });
+    return json({ profileId, revision: changed.revision, configured: apiKey !== null, maskedPreview: apiKey === null ? null : maskRdApiKey(apiKey) });
   } catch (e) {
     if (e instanceof HttpError) throw e;
     throw new HttpError(500, "credential unavailable");
@@ -537,6 +549,11 @@ async function adminRdApiKey(req: Request, env: Env, url: URL, profileId: string
 
 function validRdApiKey(v: unknown): v is string {
   return typeof v === "string" && /^[\x21-\x7e]{16,512}$/.test(v);
+}
+
+function maskRdApiKey(key: unknown): string {
+  if (!validRdApiKey(key)) throw new HttpError(500, "credential unavailable");
+  return key.slice(0, 4) + "********" + key.slice(-4);
 }
 
 const rdRow = (env: Env, profileId: string) =>
