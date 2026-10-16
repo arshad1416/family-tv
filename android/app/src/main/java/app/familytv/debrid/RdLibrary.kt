@@ -36,6 +36,11 @@ object RdNames {
     )
     private val LEADING_SITE = Regex("^\\s*(?:\\[[^]]*]|www \\S+ \\S+)\\s*-?\\s*")
 
+    private val SURROUND = Regex("(?i)(?<![a-z])(atmos|truehd|dts|ddp|dd\\+|e-?ac-?3|ac-?3)(?![a-z])|(?<!\\d)[57][. ]1(?!\\d)")
+
+    /** The name says surround sound: Atmos, TrueHD, DTS, DD+ / DDP / EAC3, AC3 / DD5.1, 5.1 or 7.1. */
+    fun isSurround(name: String): Boolean = SURROUND.containsMatchIn(name)
+
     fun isVideo(name: String): Boolean = name.substringAfterLast('.', "").lowercase() in VIDEO
 
     /** Trailers and samples ride along in many torrents; they are never the film. */
@@ -70,12 +75,25 @@ object RdNames {
     }
 }
 
+/** A title in the account that Search found: a film (its best [copy]) or a show (its [episodes], best copy of each). */
+data class RdTitle(val title: String, val year: Int?, val copy: RdCopy?, val episodes: List<RdEpisode>) {
+    val isShow get() = copy == null
+}
+
+data class RdEpisode(val season: Int, val episode: Int, val copy: RdCopy) {
+    /** "S01E04 · 1080p · 1.2 GB" */
+    val label: String get() = listOf("S%02dE%02d".format(season, episode), copy.label).filter { it.isNotEmpty() }.joinToString(" · ")
+}
+
 /**
  * The account's files, indexed by title for the catalog to ask "is this movie or episode in Real-Debrid?".
  * Matching uses the same title rules as Trakt ([TitleMatch]): same title, year within one when both are known.
+ * [bestFirst] (the "Play from Real-Debrid first" setting) picks the best copy: 4K, then surround, then size.
  */
-class RdIndex(files: List<RdFile>) {
-    private data class Entry(val p: RdNames.Parsed, val file: RdFile)
+class RdIndex(val files: List<RdFile>, private val bestFirst: Boolean = false) {
+    private data class Entry(val p: RdNames.Parsed, val file: RdFile) {
+        val surround = RdNames.isSurround(file.name) || RdNames.isSurround(file.folder)
+    }
 
     private val movies: Map<String, List<Entry>>
     private val episodes: Map<String, List<Entry>>
@@ -109,9 +127,34 @@ class RdIndex(files: List<RdFile>) {
         return episodes[TitleMatch.key(c.title)].orEmpty().filter { TitleMatch.same(c.title, y, it.p.title, it.p.year) }
     }
 
-    /** 1080p and 720p first (what every TV plays smoothly), then 4K, then the rest; the biggest file of those. */
+    /**
+     * Titles in the account whose name holds [query], leaving out the ones in [skip] ([TitleMatch.key]s
+     * of what the catalog already found). Films are one per title and year; shows list their episodes.
+     */
+    fun search(query: String, skip: Set<String>, limit: Int = 20): List<RdTitle> {
+        val q = TitleMatch.key(query)
+        if (q.isEmpty()) return emptyList()
+        fun hit(key: String) = key !in skip && key.contains(q)
+        val films = movies.filterKeys(::hit).values.flatMap { e -> e.groupBy { it.p.year }.values }
+            .mapNotNull { e -> best(e)?.let { RdTitle(e.first().p.title, e.first().p.year, it, emptyList()) } }
+        val shows = episodes.filterKeys(::hit).values.map { e ->
+            val eps = e.groupBy { (it.p.season ?: 1) to it.p.episode!! }
+                .mapNotNull { (se, copies) -> best(copies)?.let { RdEpisode(se.first, se.second, it) } }
+                .sortedWith(compareBy({ it.season }, { it.episode }))
+            RdTitle(e.first().p.title, e.firstNotNullOfOrNull { it.p.year }, null, eps)
+        }
+        return (films + shows).sortedWith(compareBy({ !TitleMatch.key(it.title).startsWith(q) }, { it.title.lowercase() })).take(limit)
+    }
+
+    /**
+     * Normally 1080p and 720p first (what every TV plays smoothly), then 4K, then the rest; the biggest
+     * file of those. With [bestFirst]: 4K, 1080p, 720p, the rest; then surround sound; then the biggest.
+     */
     private fun best(entries: List<Entry>): RdCopy? = entries
-        .maxWithOrNull(compareBy<Entry>({ rank(it.p.quality) }, { it.file.bytes }))
+        .maxWithOrNull(
+            if (bestFirst) compareBy<Entry>({ bestRank(it.p.quality) }, { it.surround }, { it.file.bytes })
+            else compareBy<Entry>({ rank(it.p.quality) }, { it.file.bytes }),
+        )
         ?.let { RdCopy(it.file, it.p.quality) }
 
     private fun rank(q: Int?): Int = when {
@@ -119,6 +162,14 @@ class RdIndex(files: List<RdFile>) {
         q in 720..1080 -> 3 + q / 100
         q >= 2160 -> 2
         else -> 1
+    }
+
+    private fun bestRank(q: Int?): Int = when {
+        q == null -> 0
+        q >= 2160 -> 3
+        q >= 1080 -> 2
+        q >= 720 -> 1
+        else -> 0
     }
 
     companion object {

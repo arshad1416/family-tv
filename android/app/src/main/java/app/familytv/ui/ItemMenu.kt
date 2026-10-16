@@ -8,6 +8,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.compositionLocalOf
@@ -39,8 +41,9 @@ class ItemMenus {
         val menu = open ?: return
         val close = { open = null }
         Dialog(onDismissRequest = close) {
+            // Scrolls, for long lists such as a show's Real-Debrid episodes.
             Column(
-                Modifier.widthIn(min = 280.dp, max = 460.dp).background(Tv.Raised, Tv.Shape).padding(24.dp),
+                Modifier.widthIn(min = 280.dp, max = 460.dp).background(Tv.Raised, Tv.Shape).verticalScroll(rememberScrollState()).padding(24.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Text(menu.title, fontSize = 18.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)

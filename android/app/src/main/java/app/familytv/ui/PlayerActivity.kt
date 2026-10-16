@@ -60,6 +60,7 @@ import app.familytv.BuildConfig
 import app.familytv.app
 import app.familytv.core.Http
 import app.familytv.debrid.RdCopy
+import app.familytv.debrid.RdResume
 import app.familytv.data.ChannelEntity
 import app.familytv.data.NowNext
 import app.familytv.iptv.Streams
@@ -125,6 +126,7 @@ class PlayerActivity : ComponentActivity() {
     private var retries = 0
     /** Movies and episodes: resume point and Trakt scrobbles. */
     private var tracker: PlaybackTracker? = null
+    private var rdResume: RdResume? = null
     private var live = false
     private var url: String? = null
 
@@ -157,7 +159,8 @@ class PlayerActivity : ComponentActivity() {
     private var rdDeclined = false
     /** The TV stream's address while the Real-Debrid copy plays, for OK to go back. */
     private var iptvUrl: String? = null
-    private var rdNotice by mutableStateOf(false)
+    /** What the bottom notice says while it shows (OK goes back to the TV stream). */
+    private var rdNotice by mutableStateOf<String?>(null)
     private var rdNoticeJob: Job? = null
     private var everReady = false
     private var lastSeekAt = 0L
@@ -269,12 +272,18 @@ class PlayerActivity : ComponentActivity() {
             title = intent.getStringExtra(EXTRA_TITLE).orEmpty()
             playItem = PlayItem.from(intent)
             onRd = intent.getBooleanExtra(EXTRA_REAL_DEBRID, false)
-            if (!onRd) playItem?.let { item -> lifecycleScope.launch { rdCopy = app.realDebrid.copyFor(item) } }
             online = onlineSubtitles()
             view.useController = true
             view.setControllerVisibilityListener(PlayerView.ControllerVisibilityListener { vodControls = it == View.VISIBLE })
-            start(vodUrl, title)
+            val item = playItem
+            if (!onRd && item != null && app.realDebrid.playFirst.value) {
+                lifecycleScope.launch { startRdFirst(vodUrl, item) }
+            } else {
+                if (!onRd) item?.let { lifecycleScope.launch { rdCopy = app.realDebrid.copyFor(it) } }
+                start(vodUrl, title)
+            }
             tracker = PlaybackTracker.attach(this, intent, player)
+            rdResume = RdResume.attach(this, intent, player)
         } else {
             view.useController = false
             view.isFocusable = false
@@ -332,7 +341,7 @@ class PlayerActivity : ComponentActivity() {
                     repeat(5) { withFrameNanos { }; if (runCatching { buttonsFocus.requestFocus() }.isSuccess) return@LaunchedEffect }
                 }
             }
-            if (rdNotice) RdSwitchNotice(touch, ::backToIptv, Modifier.align(Alignment.BottomCenter).safeDrawingPadding().padding(bottom = 48.dp))
+            rdNotice?.let { RdSwitchNotice(it, touch, ::backToIptv, Modifier.align(Alignment.BottomCenter).safeDrawingPadding().padding(bottom = 48.dp)) }
             PlayerPanels(panel, tracks, online, live, touch, aspect.value, onAspect = ::pickAspect, stats = ::snapshot, onOpen = ::openPanel, onClose = ::closePanel)
         }
     }
@@ -556,6 +565,24 @@ class PlayerActivity : ComponentActivity() {
 
     private fun canSwitch() = !live && !onRd && !rdDeclined && rdCopy != null
 
+    /** "Play from Real-Debrid first": the account's best copy, with the TV stream ([iptv]) as the backup. */
+    private suspend fun startRdFirst(iptv: String, item: PlayItem) {
+        val copy = app.realDebrid.copyFor(item)
+        rdCopy = copy
+        val rdUrl = copy?.let { runCatching { app.realDebrid.streamUrl(it) }.getOrNull() }
+        if (rdUrl == null) return start(iptv, title)
+        onRd = true
+        iptvUrl = iptv
+        start(rdUrl, title)
+        showRdNotice("Playing your Real-Debrid copy (${copy.label}).")
+    }
+
+    private fun showRdNotice(text: String) {
+        rdNotice = text
+        rdNoticeJob?.cancel()
+        rdNoticeJob = lifecycleScope.launch { delay(12_000); rdNotice = null }
+    }
+
     /**
      * A movie or episode whose TV stream keeps stopping (three stalls in two minutes, or one that
      * lasts 15 seconds) moves to the Real-Debrid copy at the same spot. Seeking doesn't count.
@@ -589,16 +616,14 @@ class PlayerActivity : ComponentActivity() {
             PlaybackStatus.error("switched to Real-Debrid on $title")
             iptvUrl = url
             start(rdUrl, title, at)
-            rdNotice = true
-            rdNoticeJob?.cancel()
-            rdNoticeJob = lifecycleScope.launch { delay(12_000); rdNotice = false }
+            showRdNotice("The stream kept stopping, so it switched to your Real-Debrid copy.")
         }
     }
 
     /** OK on the notice: back to the TV stream at the same spot, and it stays there. */
     private fun backToIptv() {
         val u = iptvUrl ?: return
-        rdNotice = false
+        rdNotice = null
         rdNoticeJob?.cancel()
         rdDeclined = true
         onRd = false
@@ -651,7 +676,7 @@ class PlayerActivity : ComponentActivity() {
     // androidx marks this restricted, but overriding the platform method is fine.
     @SuppressLint("RestrictedApi")
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if (rdNotice && event.keyCode in OK_KEYS) {
+        if (rdNotice != null && event.keyCode in OK_KEYS) {
             if (event.action == KeyEvent.ACTION_UP) backToIptv()
             return true
         }
@@ -862,6 +887,7 @@ class PlayerActivity : ComponentActivity() {
     override fun onDestroy() {
         PlaybackStatus.stopped()
         tracker?.finish()
+        rdResume?.finish()
         player.release()
         super.onDestroy()
     }

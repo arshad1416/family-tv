@@ -56,6 +56,20 @@ class RealDebrid(private val app: FamilyTvApp) {
     /** The account's files by title; empty when the profile has no account. */
     val index: StateFlow<RdIndex> = _index
 
+    // This TV's own choice, kept when the account signs out (unlike [prefs]).
+    private val settings = app.getSharedPreferences("realdebrid_settings", Context.MODE_PRIVATE)
+    private val _playFirst = MutableStateFlow(settings.getBoolean(PLAY_FIRST, false))
+    /** "Play from Real-Debrid first": the account's best copy plays, and the TV stream is the backup. */
+    val playFirst: StateFlow<Boolean> = _playFirst
+
+    fun setPlayFirst(on: Boolean) {
+        settings.edit().putBoolean(PLAY_FIRST, on).apply()
+        _playFirst.value = on
+        _index.value = index(_index.value.files)
+    }
+
+    private fun index(files: List<RdFile>) = if (files.isEmpty()) RdIndex.EMPTY else RdIndex(files, _playFirst.value)
+
     private val linked: Boolean get() = prefs.getBoolean(LINKED, false)
 
     init {
@@ -187,7 +201,7 @@ class RealDebrid(private val app: FamilyTvApp) {
                     prefs.edit().putString(NAME, u.username).putString(PREMIUM, u.premiumUntil()).apply()
                 }
                 val files = fetchFiles()
-                _index.value = RdIndex(files)
+                _index.value = index(files)
                 prefs.edit().putLong(LAST_REFRESH, System.currentTimeMillis()).apply()
                 null
             } catch (e: CancellationException) {
@@ -249,7 +263,7 @@ class RealDebrid(private val app: FamilyTvApp) {
 
     private suspend fun loadCached() {
         val files = readCache().flatMap { it.files }
-        if (files.isNotEmpty()) { _index.value = RdIndex(files); refreshState() }
+        if (files.isNotEmpty()) { _index.value = index(files); refreshState() }
     }
 
     private suspend fun readCache(): List<CachedTorrent> = withContext(Dispatchers.IO) {
@@ -369,5 +383,6 @@ class RealDebrid(private val app: FamilyTvApp) {
         const val PREMIUM = "premiumUntil"
         const val LAST_REFRESH = "lastRefresh"
         const val MESSAGE = "message"
+        const val PLAY_FIRST = "playFirst"
     }
 }
