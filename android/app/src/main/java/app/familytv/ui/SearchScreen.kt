@@ -23,7 +23,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -35,7 +34,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -47,11 +45,8 @@ import app.familytv.data.Kind
 import app.familytv.data.MovieEntity
 import app.familytv.data.SeriesEntity
 import app.familytv.portal.Profile
-import app.familytv.trakt.ProgressRules
 import app.familytv.user.Favourites
-import app.familytv.user.ProgressKey
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 
 private const val LIMIT = 50
 
@@ -64,9 +59,7 @@ private data class Results(
 @Composable
 fun SearchScreen(vm: MainViewModel, profile: Profile) {
     val ctx = LocalContext.current
-    val menus = LocalItemMenus.current
     val dao = ctx.app.db.catalog()
-    val scope = rememberCoroutineScope()
     val nav = rememberSeriesNav()
     val focusManager = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
@@ -92,8 +85,8 @@ fun SearchScreen(vm: MainViewModel, profile: Profile) {
     val favKeys = rememberFavouriteKeys(favs)
     val showFavs = ShowFavourites(rememberFavouriteShowRows(favs))
     val shows = remember(results.series) { groupSeries(results.series) }
+    val films = remember(results.movies) { groupMovies(results.movies) }
     val progress = rememberProgress()
-    val rdIndex = rememberRdIndex()
 
     val touch = LocalFormFactor.current.touch
     nav.Host(vm, profile) {
@@ -126,7 +119,7 @@ fun SearchScreen(vm: MainViewModel, profile: Profile) {
             )
             Spacer(Modifier.height(12.dp))
             val r = results
-            if (q.length >= 2 && r.channels.isEmpty() && r.movies.isEmpty() && shows.isEmpty()) Text("No matches for \"$q\".", fontSize = 17.sp, color = Tv.Muted)
+            if (q.length >= 2 && r.channels.isEmpty() && films.isEmpty() && shows.isEmpty()) Text("No matches for \"$q\".", fontSize = 17.sp, color = Tv.Muted)
             LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(bottom = 40.dp)) {
                 if (r.channels.isNotEmpty()) item("ch") {
                     Shelf("Channels") {
@@ -139,20 +132,10 @@ fun SearchScreen(vm: MainViewModel, profile: Profile) {
                         }
                     }
                 }
-                if (r.movies.isNotEmpty()) item("mv") {
+                if (films.isNotEmpty()) item("mv") {
                     Shelf("Movies") {
-                        itemsIndexed(r.movies, key = { _, m -> "${m.sourceId}/${m.streamId}" }) { _, m ->
-                            val p = progress[ProgressKey.movie(m.sourceId, m.streamId)]
-                            val fav = Favourites.key(Kind.MOVIE, m.sourceId, m.streamId) in favKeys
-                            PosterCard(
-                                m.name, m.poster,
-                                favourite = fav,
-                                onFavourite = { toggleFavourite(ctx, Kind.MOVIE, m.sourceId, m.streamId, m.name) },
-                                watched = p?.watched == true, progress = ProgressRules.bar(p),
-                                onTrailer = movieTrailerAction(profile, m),
-                                rd = rdIndex.movie(m.name, m.year) != null,
-                                        onMenu = { menus.open = movieMenu(ctx, m, fav, p?.watched == true, rdIndex.movie(m.name, m.year), scope) { scope.launch { playMovieNow(ctx, profile, m) } } },
-                            ) { scope.launch { playMovieNow(ctx, profile, m) } }
+                        itemsIndexed(films, key = { _, g -> g.key }) { _, g ->
+                            MovieCard(g, profile = profile, visible = movies, favKeys = favKeys, progress = progress)
                         }
                     }
                 }

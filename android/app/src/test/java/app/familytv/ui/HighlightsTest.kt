@@ -35,16 +35,16 @@ class HighlightsTest {
     @Test
     fun movieSpotJoinsWhatIsKnown() {
         val half = ProgressEntity(ProgressKey.movie("s", "1"), ProgressKey.MOVIE, "s", "1", percent = 40f)
-        val s = movieSpot(movie(), half, MovieMeta("A detective investigates.", listOf("Comedy", "Crime", "Drama"), 130))
+        val s = movieSpot(MovieGroup("k", listOf(movie())), half, MovieMeta("A detective investigates.", listOf("Comedy", "Crime", "Drama"), 130), listOf("English", "French"))
         assertEquals("Knives Out", s.title)
-        assertEquals("2019  ·  ★ 7.8  ·  Comedy, Crime  ·  2 h 10 min  ·  40% watched", s.meta)
+        assertEquals("2019  ·  ★ 7.8  ·  Comedy, Crime  ·  2 h 10 min  ·  English, French  ·  40% watched", s.meta)
         assertEquals("A detective investigates.", s.blurb)
         assertEquals("http://img/p.jpg", s.art)
 
-        val bare = movieSpot(movie(rating = "0", year = null), null, null)
+        val bare = movieSpot(MovieGroup("k", listOf(movie(rating = "0", year = null))), null, null, listOf("English"))
         assertNull(bare.meta)
         assertNull(bare.blurb)
-        assertEquals("Watched", movieSpot(movie(rating = null, year = null), half.copy(percent = 95f, watched = true), null).meta)
+        assertEquals("Watched", movieSpot(MovieGroup("k", listOf(movie(rating = null, year = null))), half.copy(percent = 95f, watched = true), null, emptyList()).meta)
     }
 
     @Test

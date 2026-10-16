@@ -24,14 +24,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.tv.material3.Text
-import app.familytv.app
-import app.familytv.data.Kind
-import app.familytv.data.MovieEntity
-import app.familytv.debrid.RdCopy
-import app.familytv.trakt.PlayItem
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /** A short list of actions for one movie or episode, opened by hold-OK or Menu (TV) or a long press (touch). */
@@ -63,30 +56,6 @@ class ItemMenus {
 }
 
 val LocalItemMenus = compositionLocalOf { ItemMenus() }
-
-/**
- * Favourite and watched actions for a movie. When the Real-Debrid account has it too ([rd]), the
- * menu starts with both ways to play: the TV stream ([play]) and the Real-Debrid copy.
- */
-fun movieMenu(ctx: Context, m: MovieEntity, favourite: Boolean, watched: Boolean, rd: RdCopy? = null, scope: CoroutineScope? = null, play: (() -> Unit)? = null) = ItemMenu(
-    m.name,
-    buildList {
-        if (rd != null && scope != null && play != null) {
-            add("▶  Play" to play)
-            add("▶  Play from Real-Debrid  ·  ${rd.label}" to { scope.launch { playFromRealDebrid(ctx, rd, m.name, PlayItem.movie(m.sourceId, m.streamId, m.name)) } })
-        }
-        add((if (watched) "Mark as unwatched" else "✓  Mark as watched") to { markMovie(ctx, m, !watched) })
-        add((if (favourite) "♥  Remove from Favourites" else "♡  Add to Favourites") to { toggleFavourite(ctx, Kind.MOVIE, m.sourceId, m.streamId, m.name) })
-    },
-)
-
-fun markMovie(ctx: Context, m: MovieEntity, watched: Boolean) {
-    val app = ctx.app
-    app.scope.launch {
-        app.watched.movie(m.sourceId, m.streamId, watched)
-        toast(ctx, if (watched) "Marked as watched" else "Marked as unwatched")
-    }
-}
 
 suspend fun toast(ctx: Context, text: String) = withContext(Dispatchers.Main) {
     Toast.makeText(ctx.applicationContext, text, Toast.LENGTH_SHORT).show()

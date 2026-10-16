@@ -62,7 +62,7 @@ data class ChannelEntity(
     val gen: Long,
 )
 
-@Entity(tableName = "movies", primaryKeys = ["sourceId", "streamId"], indices = [Index("categoryId"), Index("tmdb")])
+@Entity(tableName = "movies", primaryKeys = ["sourceId", "streamId"], indices = [Index("categoryId"), Index("tmdb"), Index("titleKey")])
 data class MovieEntity(
     val sourceId: String,
     val streamId: String,
@@ -77,6 +77,10 @@ data class MovieEntity(
     /** From the provider's list when it has one; used to match Trakt. */
     val tmdb: String? = null,
     val year: Int? = null,
+    /** [app.familytv.iptv.SeriesTitles.key] of the cleaned title: copies of one film in other languages share it. */
+    @ColumnInfo(defaultValue = "") val titleKey: String = "",
+    /** Language of this copy, from its title or category ([app.familytv.iptv.SeriesTitles.ORIGINAL] when neither says). */
+    val lang: String? = null,
 )
 
 @Entity(tableName = "series", primaryKeys = ["sourceId", "seriesId"], indices = [Index("categoryId"), Index("tmdb"), Index("titleKey")])
@@ -193,13 +197,17 @@ interface CatalogDao {
     /** Every copy of a show, in any language: same TMDB id or same cleaned title. */
     @Query("SELECT * FROM series WHERE titleKey IN (:titleKeys) OR tmdb IN (:tmdb) ORDER BY sourceId, name")
     suspend fun seriesCopies(titleKeys: List<String>, tmdb: List<String>): List<SeriesEntity>
+
+    /** Every copy of a film, in any language: same TMDB id or same cleaned title. */
+    @Query("SELECT * FROM movies WHERE titleKey IN (:titleKeys) OR tmdb IN (:tmdb) ORDER BY sourceId, name")
+    suspend fun movieCopies(titleKeys: List<String>, tmdb: List<String>): List<MovieEntity>
 }
 
 @Database(
     entities = [SourceEntity::class, CategoryEntity::class, ChannelEntity::class, MovieEntity::class, SeriesEntity::class, ProgrammeEntity::class],
-    version = 4,
+    version = 5,
     exportSchema = true,
-    autoMigrations = [AutoMigration(from = 3, to = 4)],
+    autoMigrations = [AutoMigration(from = 3, to = 4), AutoMigration(from = 4, to = 5)],
 )
 abstract class AppDb : RoomDatabase() {
     abstract fun catalog(): CatalogDao
