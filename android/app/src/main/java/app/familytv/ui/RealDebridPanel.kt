@@ -81,6 +81,12 @@ fun RealDebridPanel(modifier: Modifier = Modifier) {
                         },
                     )
                 }
+                val first by rd.playFirst.collectAsState()
+                TvButton(if (first) "✓  Play from Real-Debrid first: On" else "Play from Real-Debrid first: Off", { rd.setPlayFirst(!first) })
+                Text(
+                    "Movies and episodes in your account play from Real-Debrid in the best copy it has, and the TV service is the backup.",
+                    fontSize = 14.sp, color = Tv.Muted,
+                )
             }
         }
     }

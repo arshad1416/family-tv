@@ -84,6 +84,47 @@ class RealDebridTest {
     }
 
     @Test
+    fun bestFirstPicks4kThenSurroundThenSize() {
+        val files = listOf(
+            file("Heat.1995.1080p.BluRay.DTS-HD.MA.5.1.mkv", 20_000_000_000),
+            file("Heat.1995.2160p.WEB.DDP5.1.mkv", 18_000_000_000),
+            file("Heat.1995.2160p.WEB.AAC.mkv", 25_000_000_000),
+            file("Heat.1995.mkv", 40_000_000_000),
+        )
+        assertEquals("Heat.1995.2160p.WEB.DDP5.1.mkv", RdIndex(files, bestFirst = true).movie("Heat", 1995)!!.file.name)
+        assertEquals(1080, RdIndex(files).movie("Heat", 1995)!!.quality) // the setting off keeps today's order
+        val sameSound = listOf(file("Heat.1995.2160p.A.mkv", 10_000_000_000), file("Heat.1995.2160p.B.mkv", 30_000_000_000))
+        assertEquals("Heat.1995.2160p.B.mkv", RdIndex(sameSound, bestFirst = true).movie("Heat", 1995)!!.file.name)
+    }
+
+    @Test
+    fun surroundNames() {
+        listOf("Film.Atmos.mkv", "Film.TrueHD.7.1.mkv", "Film.DTS.mkv", "Film.DD+.mkv", "Film.DDP5.1.mkv", "Film.EAC3.mkv", "Film.AC3.mkv", "Film.DD5.1.mkv", "Film 5.1.mkv")
+            .forEach { assertTrue(it, RdNames.isSurround(it)) }
+        listOf("Film.AAC2.0.mkv", "Credits.mkv", "Film.2015.1080p.mkv", "Odds.and.Ends.mkv").forEach { assertFalse(it, RdNames.isSurround(it)) }
+    }
+
+    @Test
+    fun searchListsAccountTitlesTheCatalogLacks() {
+        val index = RdIndex(
+            listOf(
+                file("Northern.Lights.S01E05.720p.mkv", 900_000_000),
+                file("Northern.Lights.S01E04.1080p.mkv", 1_200_000_000),
+                file("Northern.Lights.S01E04.720p.mkv", 800_000_000),
+                file("Northern.Exposure.1990.1080p.mkv"),
+                file("Heat.1995.1080p.mkv"),
+            ),
+        )
+        val found = index.search("northern", emptySet())
+        assertEquals(listOf("Northern Exposure", "Northern Lights"), found.map { it.title })
+        val show = found.single { it.isShow }
+        assertEquals(listOf("S01E04 · 1080p · 1.2 GB", "S01E05 · 720p · 900 MB"), show.episodes.map { it.label })
+        assertEquals(1990, found.single { !it.isShow }.year)
+        assertEquals(listOf("Northern Lights"), index.search("Northern", setOf("northernexposure")).map { it.title })
+        assertTrue(index.search(" ", emptySet()).isEmpty())
+    }
+
+    @Test
     fun sizeLabels() {
         assertEquals("850 MB", RdCopy.size(850_000_000))
         assertNull(RdCopy.size(0))

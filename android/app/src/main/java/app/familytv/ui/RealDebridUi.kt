@@ -29,6 +29,7 @@ import androidx.tv.material3.Text
 import app.familytv.app
 import app.familytv.debrid.RdCopy
 import app.familytv.debrid.RdIndex
+import app.familytv.debrid.RdResume
 import app.familytv.debrid.RealDebridException
 import app.familytv.trakt.PlayItem
 import kotlinx.coroutines.Dispatchers
@@ -49,9 +50,9 @@ fun RdBadge(modifier: Modifier = Modifier) {
     }
 }
 
-/** In the player, after an automatic switch: what happened, and OK (or a tap) to go back to the TV stream. */
+/** In the player, on a Real-Debrid copy: [text] says why, and OK (or a tap) goes back to the TV stream. */
 @Composable
-fun RdSwitchNotice(touch: Boolean, onBack: () -> Unit, modifier: Modifier = Modifier) {
+fun RdSwitchNotice(text: String, touch: Boolean, onBack: () -> Unit, modifier: Modifier = Modifier) {
     val tap = if (touch) Modifier.clickable(onClick = onBack) else Modifier
     Row(
         modifier.widthIn(max = 720.dp).background(Color(0xF00E1424), RoundedCornerShape(14.dp)).then(tap).padding(horizontal = 22.dp, vertical = 16.dp),
@@ -61,8 +62,8 @@ fun RdSwitchNotice(touch: Boolean, onBack: () -> Unit, modifier: Modifier = Modi
         Box(Modifier.size(10.dp).background(Tv.Good, CircleShape))
         Text(
             buildAnnotatedString {
-                append("The stream kept stopping, so it switched to your Real-Debrid copy.  ")
-                withStyle(SpanStyle(color = Tv.Muted)) { append(if (touch) "Tap to go back" else "OK to go back") }
+                append("$text  ")
+                withStyle(SpanStyle(color = Tv.Muted)) { append(if (touch) "Tap for the TV stream" else "OK for the TV stream") }
             },
             fontSize = 18.sp,
         )
@@ -73,7 +74,13 @@ fun RdSwitchNotice(touch: Boolean, onBack: () -> Unit, modifier: Modifier = Modi
  * Plays the Real-Debrid copy of [item]. The player treats it as the catalog title, so the resume
  * point and Trakt are shared with the TV stream.
  */
-suspend fun playFromRealDebrid(ctx: Context, copy: RdCopy, title: String, item: PlayItem) {
+suspend fun playFromRealDebrid(ctx: Context, copy: RdCopy, title: String, item: PlayItem) = playRd(ctx, copy, title) { item.putInto(it) }
+
+/** Plays a Real-Debrid title the catalog doesn't have; its resume spot stays on this TV ([RdResume]). */
+suspend fun playRdOnly(ctx: Context, copy: RdCopy, title: String, resumeKey: String) =
+    playRd(ctx, copy, title) { it.putExtra(RdResume.EXTRA_KEY, resumeKey) }
+
+private suspend fun playRd(ctx: Context, copy: RdCopy, title: String, extras: (Intent) -> Intent) {
     val url = try {
         ctx.app.realDebrid.streamUrl(copy)
     } catch (e: RealDebridException) {
@@ -86,6 +93,6 @@ suspend fun playFromRealDebrid(ctx: Context, copy: RdCopy, title: String, item: 
             .putExtra(PlayerActivity.EXTRA_URL, url)
             .putExtra(PlayerActivity.EXTRA_TITLE, title)
             .putExtra(PlayerActivity.EXTRA_REAL_DEBRID, true)
-        ctx.startActivity(item.putInto(i))
+        ctx.startActivity(extras(i))
     }
 }

@@ -78,7 +78,11 @@ passwords on a remote, and when a TV goes black the portal tells you why.
   every TV in that profile uses the account (Disconnect, on a TV or the profile's admin page, signs them
   all out). Movies and episodes already in the account's Torrents or Downloads get an RD tag and a "Play from Real-Debrid" choice showing quality and size,
   and when the TV stream keeps stalling the player switches to the Real-Debrid copy at the same spot
-  (OK goes back). It never searches for or adds torrents. Real-Debrid allows one connection at a time,
+  (OK goes back). The setting *Play from Real-Debrid first* (per TV, off by default) plays the
+  account's best copy (4K, then surround sound, then the biggest file) with the TV stream as the
+  backup. Search adds a *Real-Debrid* row of account titles the catalog doesn't have: a film plays its
+  best copy, a show lists its episodes; their resume spots stay on that TV (no Trakt, no portal).
+  It never searches for or adds torrents. Real-Debrid allows one connection at a time,
   so two TVs in different homes playing at once may be refused.
 - Live TV on a TV remote: OK shows the channel list; Back opens the full guide over the video, and
   Back again shrinks the video into a window at the top of the guide. OK on another channel plays it
