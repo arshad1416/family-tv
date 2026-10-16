@@ -4,7 +4,8 @@ import app.familytv.FamilyTvApp
 
 /**
  * Marking movies and episodes watched (or not) by hand, so a finished episode isn't played again.
- * With Trakt connected the change goes to Trakt history on the next sync, like a finished scrobble.
+ * The profile's other TVs get it through [SharedProgress]; with Trakt connected it also goes to
+ * Trakt history on the next sync, like a finished scrobble.
  */
 class WatchedMarks(private val app: FamilyTvApp) {
     private val dao get() = app.userDb.user()
@@ -25,6 +26,7 @@ class WatchedMarks(private val app: FamilyTvApp) {
         }
         if (rows.isEmpty()) return
         dao.upsertProgressRows(rows)
+        app.sharedProgress.soon()
         if (push) app.trakt.sync.soon()
     }
 

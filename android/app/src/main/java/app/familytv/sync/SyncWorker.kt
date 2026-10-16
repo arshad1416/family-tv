@@ -6,7 +6,7 @@ import androidx.work.WorkerParameters
 import app.familytv.app
 import app.familytv.update.Updater
 
-/** Periodic background check-in: heartbeat, run queued commands, refresh lists twice a day, look for new episodes. */
+/** Periodic background check-in: heartbeat, run queued commands, share watched marks, refresh lists twice a day, look for new episodes. */
 class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
         val app = applicationContext.app
@@ -15,6 +15,7 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
             if (!config.paired) return Result.success()
             val hb = app.portal.heartbeat(PlaybackStatus.snapshot())
             app.commands.runAll(config.commands, config.profile)
+            runCatching { app.sharedProgress.sync() }
             runCatching { Updater.check(app, hb.latestApp ?: config.latestApp, visible = app.visible) }
                 .onSuccess { it?.let { s -> PlaybackStatus.update = s } }
             val stale = System.currentTimeMillis() - (app.db.catalog().sources().minOfOrNull { it.lastRefresh } ?: 0) > 12 * 3600_000

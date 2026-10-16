@@ -4,6 +4,8 @@ import android.content.Context
 import android.os.Build
 import app.familytv.BuildConfig
 import app.familytv.core.Http
+import app.familytv.user.SharedProgressPage
+import app.familytv.user.SharedProgressRow
 import com.google.gson.Gson
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
@@ -103,6 +105,14 @@ class PortalClient(context: Context, private val baseUrl: String = BuildConfig.P
     /** Signs every TV in the profile out of Real-Debrid. */
     suspend fun realDebridUnlink() {
         post("/api/device/realdebrid/unlink", emptyMap<String, String>(), Map::class.java)
+    }
+
+    /** Watched marks and resume points other TVs in the profile changed after [since]. 404 from a portal without them. */
+    suspend fun progressPull(since: Long): SharedProgressPage = get("/api/device/progress?since=$since", SharedProgressPage::class.java)
+
+    /** This TV's changed rows (up to 500); the portal keeps whichever change is later. */
+    suspend fun progressPush(rows: List<SharedProgressRow>) {
+        post("/api/device/progress", mapOf("rows" to rows), Map::class.java)
     }
 
     private suspend fun <T> get(path: String, type: Class<T>): T = call(Request.Builder().url(baseUrl + path).get(), type, true)

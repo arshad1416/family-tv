@@ -59,6 +59,9 @@ passwords on a remote, and when a TV goes black the portal tells you why.
   (here or on Trakt) and goes away at zero. A show nobody has started counts only episodes that
   arrive after it was favourited. Arrivals also post a notification (on Android 13+ the app asks
   once for permission).
+- Watched marks and resume points are shared by every TV in a profile through the portal (no account
+  needed): finish an episode in the lounge and the bedroom TV shows it watched; stop a movie halfway and
+  any TV in the profile resumes it. The later change wins.
 - **Trakt (optional):** connect a Trakt account in Settings by scanning a QR that fills the code in (no typing on the
   remote). Favourite movies and series follow the Trakt watchlist both ways, and watched marks and
   resume points sync through Trakt scrobbling and history, so every device on the same Trakt account

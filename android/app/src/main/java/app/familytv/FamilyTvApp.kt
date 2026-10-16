@@ -20,6 +20,7 @@ import app.familytv.trailer.MediaExtras
 import app.familytv.trakt.Trakt
 import app.familytv.user.Favourites
 import app.familytv.user.MyCategoryOrder
+import app.familytv.user.SharedProgress
 import app.familytv.user.UserDb
 import app.familytv.user.WatchedMarks
 import kotlinx.coroutines.CoroutineScope
@@ -42,6 +43,7 @@ class FamilyTvApp : Application() {
     /** Trailers and episode details beyond the provider (TMDB, TheTVDB). */
     val extras by lazy { MediaExtras(this) }
     val watched by lazy { WatchedMarks(this) }
+    val sharedProgress by lazy { SharedProgress(this) }
     val newEpisodes by lazy { NewEpisodes(this) }
     val myCategoryOrder by lazy { MyCategoryOrder(this) }
 
