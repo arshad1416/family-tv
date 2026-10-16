@@ -232,6 +232,8 @@ async function deviceHeartbeat(req: Request, env: Env) {
     paired: !!d.profile_id,
     commands: d.profile_id ? await takeCommands(env, d.id, now) : [],
     latestApp: d.profile_id ? await latestApp(env, req) : null,
+    // Another TV marked or paused something when this is past the seq this TV last pulled.
+    progressSeq: d.profile_id ? await progressSeq(env, d.profile_id) : null,
   });
 }
 
@@ -512,6 +514,104 @@ async function rdDisconnect(env: Env, profileId: string) {
   await env.DB.prepare("DELETE FROM profile_debrid WHERE profile_id = ?").bind(profileId).run();
   await refreshProfileTvs(env, profileId);
   return json({ ok: true });
+}
+
+// ---------- watched marks and resume points, shared by a profile's TVs ----------
+// Each TV pushes the rows it changed and pulls what changed after the last seq it saw. A row only
+// replaces the stored one when it was changed later, so the newest mark or resume spot wins.
+
+const PROGRESS_PUSH_MAX = 500;
+const PROGRESS_PAGE = 1000;
+/** A TV clock running fast can't make its rows win for long. */
+const PROGRESS_CLOCK_SLACK_MS = 5 * 60 * 1000;
+
+interface ProgressRow {
+  key: string;
+  kind: string;
+  sourceId: string;
+  itemId: string;
+  season: number;
+  episode: number;
+  positionMs: number;
+  durationMs: number;
+  percent: number;
+  watched: boolean;
+  updatedAt: number;
+}
+
+const wholeNumber = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.floor(v) : 0);
+const shortText = (v: unknown) => (typeof v === "string" && v.length > 0 && v.length <= 120 ? v : null);
+
+/** A row a TV sent, or null when it isn't one (skipped rather than failing the whole push). */
+export function progressRow(v: unknown, now: number): ProgressRow | null {
+  const r = (v ?? {}) as Record<string, unknown>;
+  const key = typeof r.key === "string" && r.key.length <= 300 && /^[me]\//.test(r.key) ? r.key : null;
+  const kind = r.kind === "movie" || r.kind === "episode" ? r.kind : null;
+  const sourceId = shortText(r.sourceId);
+  const itemId = shortText(r.itemId);
+  const updatedAt = wholeNumber(r.updatedAt);
+  if (!key || !kind || !sourceId || !itemId || !updatedAt) return null;
+  const percent = typeof r.percent === "number" && Number.isFinite(r.percent) ? Math.min(100, Math.max(0, r.percent)) : 0;
+  return {
+    key, kind, sourceId, itemId,
+    season: wholeNumber(r.season),
+    episode: wholeNumber(r.episode),
+    positionMs: wholeNumber(r.positionMs),
+    durationMs: wholeNumber(r.durationMs),
+    percent,
+    watched: r.watched === true,
+    updatedAt: Math.min(updatedAt, now + PROGRESS_CLOCK_SLACK_MS),
+  };
+}
+
+/** The profile's latest change number, for heartbeats; null before the migration runs. */
+async function progressSeq(env: Env, profileId: string): Promise<number | null> {
+  const row = await env.DB.prepare("SELECT MAX(seq) AS seq FROM profile_progress WHERE profile_id = ?")
+    .bind(profileId)
+    .first<{ seq: number | null }>()
+    .catch(() => undefined);
+  return row === undefined ? null : row?.seq ?? 0;
+}
+
+async function progressPush(req: Request, env: Env) {
+  const profileId = await requirePaired(req, env);
+  const b = await body<{ rows?: unknown }>(req);
+  if (!Array.isArray(b.rows) || b.rows.length > PROGRESS_PUSH_MAX) throw new HttpError(400, `rows: a list of up to ${PROGRESS_PUSH_MAX}`);
+  const now = Date.now();
+  const rows = b.rows.map((r) => progressRow(r, now)).filter((r): r is ProgressRow => r !== null);
+  // Each upsert takes the next seq when it lands; D1 runs a batch in order, so seqs only grow.
+  const stmts = rows.map((r) =>
+    env.DB.prepare(
+      `INSERT INTO profile_progress (profile_id, key, kind, source_id, item_id, season, episode, position_ms, duration_ms, percent, watched, updated_at, seq)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?, (SELECT COALESCE(MAX(seq), 0) + 1 FROM profile_progress WHERE profile_id = ?))
+       ON CONFLICT (profile_id, key) DO UPDATE SET kind = excluded.kind, source_id = excluded.source_id, item_id = excluded.item_id,
+         season = excluded.season, episode = excluded.episode, position_ms = excluded.position_ms, duration_ms = excluded.duration_ms,
+         percent = excluded.percent, watched = excluded.watched, updated_at = excluded.updated_at, seq = excluded.seq
+       WHERE excluded.updated_at > profile_progress.updated_at`,
+    ).bind(profileId, r.key, r.kind, r.sourceId, r.itemId, r.season, r.episode, r.positionMs, r.durationMs, r.percent, r.watched ? 1 : 0, r.updatedAt, profileId),
+  );
+  if (stmts.length) await env.DB.batch(stmts);
+  return json({ ok: true, saved: rows.length, seq: await progressSeq(env, profileId) });
+}
+
+/** Rows changed after ?since=<seq>, oldest first; `profile` lets a TV notice it was moved to another profile. */
+async function progressPull(req: Request, env: Env, url: URL) {
+  const profileId = await requirePaired(req, env);
+  const since = wholeNumber(Number(url.searchParams.get("since") ?? 0));
+  const { results } = await env.DB.prepare(
+    `SELECT key, kind, source_id, item_id, season, episode, position_ms, duration_ms, percent, watched, updated_at, seq
+     FROM profile_progress WHERE profile_id = ? AND seq > ? ORDER BY seq LIMIT ?`,
+  )
+    .bind(profileId, since, PROGRESS_PAGE)
+    .all<{
+      key: string; kind: string; source_id: string; item_id: string; season: number; episode: number;
+      position_ms: number; duration_ms: number; percent: number; watched: number; updated_at: number; seq: number;
+    }>();
+  const rows: ProgressRow[] = results.map((r) => ({
+    key: r.key, kind: r.kind, sourceId: r.source_id, itemId: r.item_id, season: r.season, episode: r.episode,
+    positionMs: r.position_ms, durationMs: r.duration_ms, percent: r.percent, watched: r.watched === 1, updatedAt: r.updated_at,
+  }));
+  return json({ profile: profileId, rows, seq: results.length ? results[results.length - 1].seq : since, more: results.length === PROGRESS_PAGE });
 }
 
 // ---------- admin API ----------
@@ -1058,6 +1158,8 @@ export async function handle(req: Request, env: Env): Promise<Response> {
   if (m === "POST" && p === "/api/device/realdebrid/link") return rdLink(req, env);
   if ((m === "GET" || m === "POST") && p === "/api/device/realdebrid/token") return rdToken(req, env);
   if (m === "POST" && p === "/api/device/realdebrid/unlink") return rdDisconnect(env, await requirePaired(req, env));
+  if (m === "GET" && p === "/api/device/progress") return progressPull(req, env, url);
+  if (m === "POST" && p === "/api/device/progress") return progressPush(req, env);
   let mm = p.match(/^\/api\/device\/commands\/([a-f0-9]+)\/ack$/);
   if (m === "POST" && mm) return deviceAck(req, env, mm[1]);
 

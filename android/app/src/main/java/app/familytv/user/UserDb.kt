@@ -142,6 +142,7 @@ interface UserDao {
     @Query("SELECT * FROM progress WHERE `key` = :key") suspend fun progress(key: String): ProgressEntity?
     @Query("SELECT * FROM progress WHERE `key` IN (:keys)") suspend fun progressFor(keys: List<String>): List<ProgressEntity>
     @Query("SELECT * FROM progress WHERE pendingHistory = 1") suspend fun pendingHistory(): List<ProgressEntity>
+    @Query("SELECT * FROM progress WHERE updatedAt >= :since") suspend fun progressChangedSince(since: Long): List<ProgressEntity>
     @Query("SELECT * FROM progress WHERE kind = 'episode' AND sourceId = :sourceId AND itemId = :seriesId AND watched = 1")
     suspend fun watchedEpisodes(sourceId: String, seriesId: String): List<ProgressEntity>
     @Upsert suspend fun upsertProgress(p: ProgressEntity)

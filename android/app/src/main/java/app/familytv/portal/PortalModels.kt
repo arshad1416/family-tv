@@ -62,7 +62,13 @@ data class TraktPortal(val clientId: String? = null)
 /** Trakt's answer to a token call made through the portal: Trakt's HTTP status and JSON body. */
 data class TraktProxyResult(val status: Int = 0, val data: com.google.gson.JsonElement? = null)
 
-data class HeartbeatResponse(val paired: Boolean, val commands: List<Command>?, val latestApp: LatestApp? = null)
+data class HeartbeatResponse(
+    val paired: Boolean,
+    val commands: List<Command>?,
+    val latestApp: LatestApp? = null,
+    /** The profile's latest shared-progress change; past this TV's, another TV marked or paused something. */
+    val progressSeq: Long? = null,
+)
 
 data class ReachResult(val url: String, val ok: Boolean, val status: Int?, val ms: Long?, val error: String?)
 data class ReachResponse(val results: List<ReachResult>)
