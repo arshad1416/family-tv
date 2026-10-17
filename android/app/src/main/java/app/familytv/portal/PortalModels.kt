@@ -26,6 +26,8 @@ data class Profile(
     val extraGuides: List<String>? = null,
     /** Provider channel name to an extra guide's channel id, for channels the name rules can't link. */
     val guidePins: Map<String, String>? = null,
+    /** Startup video: "the-nook" on the Airbnb guest profile; unset plays Family TV's. */
+    val splash: String? = null,
 )
 
 data class Command(val id: String, val type: String, val payload: Map<String, Any?>?)

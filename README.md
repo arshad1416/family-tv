@@ -34,6 +34,9 @@ passwords on a remote, and when a TV goes black the portal tells you why.
 - **Search** finds channels, movies and series whose words start with what you type, ignoring case
   and accents ("pokemon" finds *Pokémon*, "star wa" finds *Star Wars*); names that only contain the
   text come after those.
+- **Startup video:** a 7-second seasonal intro (spring Mar-May, summer Jun-Aug, fall Sep-Nov,
+  winter Dec-Feb, by the TV's month) plays while the app starts; any key or a tap skips it. A
+  profile's *Startup video* on the portal picks Family TV's or The Nook's (the Airbnb guest profile).
 - **Stream quality** (Settings): one choice each for Live TV, Movies and Series: Auto, Always prefer
   4K, HD, 1080p or 720p, kept on that TV. Movies and shows open the copy nearest that quality (after a
   part-watched copy and the family's language). Live TV starts HLS streams on the nearest picture
