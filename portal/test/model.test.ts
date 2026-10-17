@@ -38,6 +38,11 @@ describe("validateProfile", () => {
     expect(() => validateProfile({ sources: [{ id: "x", name: "X", type: "xtream", username: "u" }] })).toThrow(/server URL/));
   it("rejects non-http URLs", () =>
     expect(() => validateProfile({ sources: [{ id: "x", name: "X", type: "m3u", m3uUrl: "file:///etc/passwd" }] })).toThrow(/http/));
+  it("keeps The Nook's startup video, drops an empty choice and refuses others", () => {
+    expect(validateProfile({ sources: [], splash: "the-nook" }).splash).toBe("the-nook");
+    expect("splash" in validateProfile({ sources: [], splash: "" as never })).toBe(false);
+    expect(() => validateProfile({ sources: [], splash: "other" as never })).toThrow(/splash/);
+  });
 });
 
 describe("profileHosts", () => {

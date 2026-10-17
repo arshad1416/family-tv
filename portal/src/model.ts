@@ -34,7 +34,12 @@ export interface ProfileData {
   extraGuides?: string[];
   /** Provider channel name → an extra guide's channel id, for channels the TV can't link by name. */
   guidePins?: Record<string, string>;
+  /** Startup video on the TVs: "the-nook" on the Airbnb guest profile; unset plays Family TV's. */
+  splash?: Splash;
 }
+
+export const SPLASHES = ["the-nook"] as const;
+export type Splash = (typeof SPLASHES)[number];
 
 /** epgshare01's Canada, US and India guides (free; Gracenote listings, about 6.5 MB each). */
 export const DEFAULT_EXTRA_GUIDES = [
@@ -160,6 +165,8 @@ export function validateProfile(p: unknown): ProfileData {
     if (Object.keys(pins).length > MAX_PINS) throw new Error(`at most ${MAX_PINS} guide pins`);
     d.guidePins = pins;
   }
+  if (d.splash === undefined || d.splash === null || (d.splash as string) === "") delete d.splash;
+  else if (!SPLASHES.includes(d.splash)) throw new Error(`splash must be one of ${SPLASHES.join(", ")} or unset`);
   return d;
 }
 

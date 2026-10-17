@@ -50,18 +50,30 @@ import app.familytv.BuildConfig
 import app.familytv.app
 import app.familytv.sync.CommandRunner
 import kotlinx.coroutines.launch
+import java.util.Calendar
 
 class MainActivity : ComponentActivity() {
     private val vm: MainViewModel by viewModels()
     private var message by mutableStateOf<String?>(null)
     private val exit = HoldBackToExit(this)
+    /** The startup video while it shows (see [SplashVideo]). */
+    private var splash by mutableStateOf<Int?>(null)
+    private var splashSkipped by mutableStateOf(false)
 
     // androidx marks this restricted, but overriding the platform method is fine.
     @SuppressLint("RestrictedApi")
-    override fun dispatchKeyEvent(event: KeyEvent): Boolean = exit.onKey(event) || super.dispatchKeyEvent(event)
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        // Any key skips the startup video; none reaches the app until the video has gone.
+        if (splash != null) {
+            if (event.action == KeyEvent.ACTION_UP) splashSkipped = true
+            return true
+        }
+        return exit.onKey(event) || super.dispatchKeyEvent(event)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (savedInstanceState == null) splash = Splash.video(app.portal.cachedConfig?.profile?.splash, Calendar.getInstance().get(Calendar.MONTH) + 1)
         lifecycleScope.launch {
             app.commands.events.collect { e ->
                 if (e is CommandRunner.UiEvent.Message) message = e.text
@@ -106,6 +118,7 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                     }
+                    splash?.let { SplashVideo(it, splashSkipped, onSkip = { splashSkipped = true }, onDone = { splash = null }) }
                 }
               }
             }
