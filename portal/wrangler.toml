@@ -39,3 +39,5 @@ TRAKT_REDIRECT_URI = "https://familytv.arshadkazi.ca/trakt"
 #   TMDB_API_KEY           optional; TMDB API key (v3 key or v4 read token) for trailers, season overviews and episode stills
 #   TVDB_API_KEY           optional; TheTVDB v4 API key, a fallback when TMDB has no episode still/overview or trailer
 #   IPTV_PANEL_API_KEY     optional; 8K Gold reseller panel API key for the Lines page (credits, expiry, renew, new lines)
+
+#   STREMIO_LAB_PUBLISH_TOKEN optional independent namespace-only Lab publisher secret; see STREMIO_LAB_ACTIVATION.md

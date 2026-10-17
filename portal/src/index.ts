@@ -1,3 +1,4 @@
+import { stremioUpdates } from "./stremio-updates";
 import { openJson, pairCode, randomId, sealJson, sha256Hex, timingSafeEqual } from "./crypto";
 import { assertHttpUrl, CATEGORY_KINDS, cleanNames, forDevice, MASK, maskSecrets, mergeSecrets, profileHosts, validateProfile, VERDICTS, type ProfileData, type Source } from "./model";
 import { probe } from "./reachability";
@@ -12,6 +13,8 @@ export interface Env {
   LATEST_APP_VERSION_CODE?: string;
   LATEST_APP_URL?: string;
   APPS?: R2Bucket;
+  /** Optional independent secret: permits only the Lab publication namespace. */
+  STREMIO_LAB_PUBLISH_TOKEN?: string;
   /** Trakt app credentials (wrangler secret put). Without both, the TV hides its Trakt section. */
   TRAKT_CLIENT_ID?: string;
   TRAKT_CLIENT_SECRET?: string;
@@ -1128,6 +1131,12 @@ export async function handle(req: Request, env: Env): Promise<Response> {
   const url = new URL(req.url);
   const p = url.pathname;
   const m = req.method;
+
+  const lab = await stremioUpdates(req, env, async () => {
+    const device = await requireDevice(req, env);
+    if (!device.profile_id) throw new HttpError(403, "device not paired");
+  });
+  if (lab) return lab;
 
   if (m === "GET" && (p === "/" || p === "/admin" || p === "/admin/")) {
     return new Response(ADMIN_PAGE, {
