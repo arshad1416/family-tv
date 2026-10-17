@@ -57,7 +57,6 @@ import app.familytv.data.AppDb
 import app.familytv.data.CategoryEntity
 import app.familytv.data.Kind
 import app.familytv.data.SeriesEntity
-import app.familytv.debrid.RdCopy
 import app.familytv.iptv.EpisodeGuide
 import app.familytv.iptv.SeriesTitles
 import app.familytv.iptv.Streams
@@ -187,8 +186,6 @@ fun SeriesPage(profile: Profile, group: SeriesGroup, visible: List<CategoryEntit
         else runCatching { app.catalog.seriesInfo(v.sourceId, v.seriesId, src) }.getOrDefault(XtreamParser.SeriesInfo(emptyList(), null, null))
     }
     fun progressOf(e: XtreamParser.Episode): ProgressEntity? = progress[ProgressKey.episode(v.sourceId, v.seriesId, e.season, e.episode)]
-    val rdIndex = rememberRdIndex()
-    fun rdOf(e: XtreamParser.Episode): RdCopy? = rdIndex.episode(v.name, v.year, e.season, e.episode)
 
     val episodes = info?.episodes.orEmpty()
     val seasons = remember(episodes) { EpisodeGuide.seasons(episodes) }
@@ -233,7 +230,6 @@ fun SeriesPage(profile: Profile, group: SeriesGroup, visible: List<CategoryEntit
                     add("✓  Mark watched up to here" to { mark(before, true, "${before.size} episodes") })
                 }
                 add("▶  Play" to { playEpisode(scope, ctx, profile, v, e) })
-                rdOf(e)?.let { rd -> add("▶  Play from Real-Debrid  ·  ${rd.label}" to { playEpisodeFromRd(scope, ctx, v, e, rd) }) }
             },
         )
     }
@@ -283,10 +279,6 @@ fun SeriesPage(profile: Profile, group: SeriesGroup, visible: List<CategoryEntit
                             Modifier.focusRequester(first),
                         )
                     }
-                    val nextRd = next?.let(::rdOf)
-                    if (next != null && nextRd != null) item("rd") {
-                        TvButton("▶  Play from Real-Debrid", { playEpisodeFromRd(scope, ctx, v, next, nextRd) })
-                    }
                     item("fav") {
                         TvButton(
                             if (favourite) "♥  In Favourites" else "♡  Add to Favourites",
@@ -302,10 +294,6 @@ fun SeriesPage(profile: Profile, group: SeriesGroup, visible: List<CategoryEntit
                         )
                     }
                 }
-            }
-            val nextRd = next?.let(::rdOf)
-            if (next != null && nextRd != null) item("rd-note") {
-                Text("S${next.season} E${next.episode} is also in your Real-Debrid account  ·  ${nextRd.label}", fontSize = 13.sp, color = Tv.Muted)
             }
             item("about") { ExpandableText(description ?: "No description", collapsedLines = if (phone) 4 else 3) }
             if (copies.size > 1) item("lang") {
@@ -335,7 +323,7 @@ fun SeriesPage(profile: Profile, group: SeriesGroup, visible: List<CategoryEntit
                     // The index keeps keys unique when a provider lists an episode twice.
                     itemsIndexed(inSeason, key = { i, e -> "${v.key}/$i/${e.id}" }) { _, e ->
                         EpisodeRow(
-                            e, cover, progressOf(e), rd = rdOf(e) != null,
+                            e, cover, progressOf(e),
                             onFocus = { preview = e },
                             onClick = { if (form.touch) sheet = e else playEpisode(scope, ctx, profile, v, e) },
                             onLongClick = { episodeMenu(e) },
@@ -362,11 +350,9 @@ fun SeriesPage(profile: Profile, group: SeriesGroup, visible: List<CategoryEntit
         }
         sheet?.let { e ->
             val watched = progressOf(e)?.watched == true
-            val rd = rdOf(e)
             EpisodeSheet(
                 e, cover, progressOf(e), phone,
                 onPlay = { sheet = null; playEpisode(scope, ctx, profile, v, e) },
-                onPlayRd = rd?.let { { sheet = null; playEpisodeFromRd(scope, ctx, v, e, it) } },
                 onWatched = { mark(listOf(e), !watched, "Episode ${e.episode}") },
                 onClose = { sheet = null },
             )
@@ -379,12 +365,6 @@ private fun playEpisode(scope: CoroutineScope, ctx: android.content.Context, pro
         Streams(ctx.app.db, profile).episode(v.sourceId, e)?.let {
             play(ctx, it, "S${e.season} E${e.episode} ${EpisodeGuide.title(e)}", PlayItem.episode(v.sourceId, v.seriesId, v.name, e.season, e.episode))
         }
-    }
-}
-
-private fun playEpisodeFromRd(scope: CoroutineScope, ctx: android.content.Context, v: SeriesEntity, e: XtreamParser.Episode, rd: RdCopy) {
-    scope.launch {
-        playFromRealDebrid(ctx, rd, "S${e.season} E${e.episode} ${EpisodeGuide.title(e)}", PlayItem.episode(v.sourceId, v.seriesId, v.name, e.season, e.episode))
     }
 }
 
@@ -451,7 +431,7 @@ private fun meta(e: XtreamParser.Episode, long: Boolean): String = listOfNotNull
 ).joinToString("  ·  ")
 
 @Composable
-private fun EpisodeRow(e: XtreamParser.Episode, cover: String?, p: ProgressEntity?, rd: Boolean, onFocus: () -> Unit, onClick: () -> Unit, onLongClick: () -> Unit) {
+private fun EpisodeRow(e: XtreamParser.Episode, cover: String?, p: ProgressEntity?, onFocus: () -> Unit, onClick: () -> Unit, onLongClick: () -> Unit) {
     val form = LocalFormFactor.current
     val stillWidth = when (form) { FormFactor.Phone -> 128.dp; FormFactor.Tablet -> 168.dp; FormFactor.Tv -> 128.dp }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -465,7 +445,6 @@ private fun EpisodeRow(e: XtreamParser.Episode, cover: String?, p: ProgressEntit
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         if (m.isNotEmpty()) Text(m, fontSize = 13.sp, color = if (focused) Tv.Text else Tv.Muted, maxLines = 1)
                         if (p?.watched == true) Text((if (m.isNotEmpty()) "  ·  " else "") + "✓ Watched", fontSize = 13.sp, color = if (focused) Tv.Text else Tv.Good, maxLines = 1)
-                        if (rd) RdBadge()
                     }
                     Text(
                         e.plot ?: "No description", fontSize = 13.sp, color = if (focused) Tv.Text else Tv.Muted,
@@ -503,7 +482,7 @@ private fun EpisodePreview(e: XtreamParser.Episode?, cover: String?, p: Progress
 /** Touch: the episode's large still, details and Play/Resume, over the page. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun EpisodeSheet(e: XtreamParser.Episode, cover: String?, p: ProgressEntity?, phone: Boolean, onPlay: () -> Unit, onPlayRd: (() -> Unit)?, onWatched: () -> Unit, onClose: () -> Unit) {
+private fun EpisodeSheet(e: XtreamParser.Episode, cover: String?, p: ProgressEntity?, phone: Boolean, onPlay: () -> Unit, onWatched: () -> Unit, onClose: () -> Unit) {
     BackHandler(onBack = onClose)
     val none = remember { MutableInteractionSource() }
     BoxWithConstraints(
@@ -533,7 +512,6 @@ private fun EpisodeSheet(e: XtreamParser.Episode, cover: String?, p: ProgressEnt
                 if (bar > 0f) ProgressLine(bar, Modifier.padding(top = 8.dp).widthIn(max = 260.dp))
                 FlowRow(Modifier.padding(top = 14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     TvButton(if (ProgressRules.started(p)) "▶  Resume" else "▶  Play", onPlay)
-                    onPlayRd?.let { TvButton("▶  Play from Real-Debrid", it) }
                     TvButton(if (p?.watched == true) "Mark unwatched" else "✓  Mark watched", onWatched)
                     e.trailer?.let { TrailerButton(it) }
                     TvButton("Close", onClose)

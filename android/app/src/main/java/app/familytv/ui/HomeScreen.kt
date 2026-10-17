@@ -604,8 +604,6 @@ fun PosterCard(
     onMenu: (() -> Unit)? = null,
     newBadge: Boolean = false,
     newCount: Int = 0,
-    /** Also in the Real-Debrid account. */
-    rd: Boolean = false,
     onFocus: () -> Unit = {},
     onClick: () -> Unit,
 ) {
@@ -620,7 +618,6 @@ fun PosterCard(
             }
             MarkBadge(Modifier.align(Alignment.TopStart), watched = watched)
             if (newBadge) NewBadge(Modifier.align(Alignment.BottomEnd), newCount)
-            else if (rd) RdBadge(Modifier.align(Alignment.BottomEnd).padding(bottom = if (progress > 0f) 12.dp else 0.dp))
             if (heart) FavouriteButton(favourite, onFavourite!!, Modifier.align(Alignment.TopEnd))
             else MarkBadge(Modifier.align(Alignment.TopEnd), favourite = favourite)
             if (progress > 0f) ProgressLine(progress, Modifier.align(Alignment.BottomCenter).padding(8.dp), height = 4.dp)

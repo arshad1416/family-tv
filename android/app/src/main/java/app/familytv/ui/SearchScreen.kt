@@ -23,7 +23,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -48,13 +47,9 @@ import app.familytv.data.SeriesEntity
 import app.familytv.data.searchChannels
 import app.familytv.data.searchMovies
 import app.familytv.data.searchSeries
-import app.familytv.debrid.RdResume
-import app.familytv.debrid.RdTitle
 import app.familytv.portal.Profile
-import app.familytv.trakt.TitleMatch
 import app.familytv.user.Favourites
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 
 private const val LIMIT = 50
 
@@ -62,16 +57,12 @@ private data class Results(
     val channels: List<ChannelEntity> = emptyList(),
     val movies: List<MovieEntity> = emptyList(),
     val series: List<SeriesEntity> = emptyList(),
-    /** Titles in the Real-Debrid account the catalog results don't already show. */
-    val rd: List<RdTitle> = emptyList(),
 )
 
 @Composable
 fun SearchScreen(vm: MainViewModel, profile: Profile) {
     val ctx = LocalContext.current
     val dao = ctx.app.db.catalog()
-    val menus = LocalItemMenus.current
-    val scope = rememberCoroutineScope()
     val nav = rememberSeriesNav()
     val focusManager = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
@@ -89,10 +80,9 @@ fun SearchScreen(vm: MainViewModel, profile: Profile) {
         value = if (q.length < 2) Results() else {
             val m = dao.searchMovies(q, LIMIT * 3).filter { (it.sourceId to it.categoryId) in movies }.take(LIMIT)
             val s = dao.searchSeries(q, LIMIT * 3).filter { (it.sourceId to it.categoryId) in series }.take(LIMIT)
-            val found = (m.map { it.name } + s.map { it.name }).mapTo(HashSet()) { TitleMatch.key(TitleMatch.parse(it).title) }
             Results(
                 dao.searchChannels(q, LIMIT * 3).filter { (it.sourceId to it.categoryId) in live }.take(LIMIT),
-                m, s, ctx.app.realDebrid.index.value.search(q, found),
+                m, s,
             )
         }
     }
@@ -135,7 +125,7 @@ fun SearchScreen(vm: MainViewModel, profile: Profile) {
             )
             Spacer(Modifier.height(12.dp))
             val r = results
-            if (q.length >= 2 && r.channels.isEmpty() && films.isEmpty() && shows.isEmpty() && r.rd.isEmpty()) Text("No matches for \"$q\".", fontSize = 17.sp, color = Tv.Muted)
+            if (q.length >= 2 && r.channels.isEmpty() && films.isEmpty() && shows.isEmpty()) Text("No matches for \"$q\".", fontSize = 17.sp, color = Tv.Muted)
             LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(bottom = 40.dp)) {
                 if (r.channels.isNotEmpty()) item("ch") {
                     Shelf("Channels") {
@@ -164,20 +154,6 @@ fun SearchScreen(vm: MainViewModel, profile: Profile) {
                                 favourite = on,
                                 onFavourite = { toggleShowFavourite(ctx, g, on) },
                             ) { nav.open = g }
-                        }
-                    }
-                }
-                if (r.rd.isNotEmpty()) item("rd") {
-                    Shelf("Real-Debrid") {
-                        itemsIndexed(r.rd, key = { i, t -> "rd/$i/${t.title}" }) { _, t ->
-                            val name = listOfNotNull(t.year?.let { "${t.title} ($it)" } ?: t.title, t.copy?.label ?: "${t.episodes.size} episodes")
-                            PosterCard(name.joinToString("\n"), null, rd = true) {
-                                val copy = t.copy
-                                if (copy != null) scope.launch { playRdOnly(ctx, copy, t.title, RdResume.key(t)) }
-                                else menus.open = ItemMenu(t.title, t.episodes.map { e ->
-                                    "▶  ${e.label}" to { scope.launch { playRdOnly(ctx, e.copy, "${t.title}  S${e.season} E${e.episode}", RdResume.key(t, e)) } }
-                                })
-                            }
                         }
                     }
                 }

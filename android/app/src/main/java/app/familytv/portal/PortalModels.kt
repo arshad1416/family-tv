@@ -47,14 +47,7 @@ data class DeviceConfig(
     val tmdbApiKey: String? = null,
     /** TheTVDB v4 key from the portal's Worker secret; null skips the TVDB fallback. */
     val tvdbApiKey: String? = null,
-    /** The profile's shared Real-Debrid account, when one of its TVs signed in; null otherwise. */
-    val realDebrid: RealDebridPortal? = null,
 )
-
-data class RealDebridPortal(val username: String? = null)
-
-/** The profile's Real-Debrid access token, kept fresh by the portal. */
-data class RealDebridToken(val accessToken: String = "", val expiresAt: Long = 0, val username: String? = null)
 
 /** The Trakt app's public client id. The secret stays in the portal. */
 data class TraktPortal(val clientId: String? = null)

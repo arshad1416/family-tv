@@ -13,14 +13,12 @@ import app.familytv.data.AppDb
 import app.familytv.data.CategoryEntity
 import app.familytv.data.Kind
 import app.familytv.data.MovieEntity
-import app.familytv.debrid.RdCopy
 import app.familytv.iptv.MovieTitles
 import app.familytv.iptv.SeriesTitles
 import app.familytv.iptv.groupKey
 import app.familytv.iptv.language
 import app.familytv.iptv.releaseYear
 import app.familytv.portal.Profile
-import app.familytv.trakt.PlayItem
 import app.familytv.trakt.ProgressRules
 import app.familytv.user.Favourites
 import app.familytv.user.MovieLanguages
@@ -99,23 +97,20 @@ internal fun MovieCard(
     val scope = rememberCoroutineScope()
     val shown = remember(g) { pickCopy(ctx, g.copies, emptyMap()) }
     val p = g.progressIn(progress)
-    val rdIndex = rememberRdIndex()
-    val rd = rdIndex.movie(shown.name, shown.year)
     PosterCard(
         g.title, g.poster, modifier, width = width,
         favourite = g.favourite(favKeys),
         onFavourite = { toggleMovieFavourite(ctx, g, visible, favKeys) },
         watched = p?.watched == true, progress = ProgressRules.bar(p),
         onTrailer = movieTrailerAction(profile, shown),
-        rd = rd != null,
-        onMenu = { scope.launch { menus.open = movieMenu(ctx, profile, g, ctx.app.db.allCopies(g, visible), favKeys, progress, rd, scope) } },
+        onMenu = { scope.launch { menus.open = movieMenu(ctx, profile, g, ctx.app.db.allCopies(g, visible), favKeys, progress, scope) } },
         onFocus = onFocus,
     ) { scope.launch { playMovie(ctx, profile, g, visible, progress) } }
 }
 
 /**
  * A film's actions: one "Play in …" per language when there are several (picking one remembers
- * it for this film), the Real-Debrid copy when the account has it, then watched and favourite.
+ * it for this film), then watched and favourite.
  */
 fun movieMenu(
     ctx: Context,
@@ -124,7 +119,6 @@ fun movieMenu(
     copies: List<MovieEntity>,
     favKeys: Set<String>,
     progress: Map<String, ProgressEntity>,
-    rd: RdCopy?,
     scope: CoroutineScope,
 ): ItemMenu {
     val pick = pickCopy(ctx, copies, progress)
@@ -142,11 +136,6 @@ fun movieMenu(
                         scope.launch { playMovieNow(ctx, profile, c) }
                     })
                 }
-            } else if (rd != null) {
-                add("▶  Play" to { scope.launch { playMovieNow(ctx, profile, pick) } })
-            }
-            if (rd != null) {
-                add("▶  Play from Real-Debrid  ·  ${rd.label}" to { scope.launch { playFromRealDebrid(ctx, rd, pick.name, PlayItem.movie(pick.sourceId, pick.streamId, pick.name)) } })
             }
             add((if (watched) "Mark as unwatched" else "✓  Mark as watched") to { markMovie(ctx, copies, pick, !watched, progress) })
             add((if (favourite) "♥  Remove from Favourites" else "♡  Add to Favourites") to { toggleMovieFavourite(ctx, all, emptySet(), favKeys, pick) })
