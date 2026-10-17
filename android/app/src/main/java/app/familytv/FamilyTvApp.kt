@@ -22,6 +22,7 @@ import app.familytv.user.Favourites
 import app.familytv.user.MyCategoryOrder
 import app.familytv.user.SharedProgress
 import app.familytv.user.UserDb
+import app.familytv.user.QualityPrefs
 import app.familytv.user.WatchedMarks
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -47,6 +48,8 @@ class FamilyTvApp : Application() {
     val sharedProgress by lazy { SharedProgress(this) }
     val newEpisodes by lazy { NewEpisodes(this) }
     val myCategoryOrder by lazy { MyCategoryOrder(this) }
+    /** Settings' Stream quality for Live TV, Movies and Series. */
+    val quality by lazy { QualityPrefs(this) }
     /** The parental PIN was entered (Settings or Adult Content): adult content opens without it until the app restarts. */
     val adultUnlocked = MutableStateFlow(false)
 

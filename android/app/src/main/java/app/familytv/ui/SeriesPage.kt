@@ -29,6 +29,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -166,7 +167,14 @@ fun SeriesPage(profile: Profile, group: SeriesGroup, visible: List<CategoryEntit
             .sortedWith(compareBy({ SeriesTitles.languageName(it.lang ?: SeriesTitles.ORIGINAL) }, { it.key }))
     }
     var chosenKey by rememberSaveable(group.key) { mutableStateOf<String?>(null) }
-    val defaultIndex = remember(copies) { languages.choose(copies).coerceAtLeast(0) }
+    val progress = rememberProgress()
+    val quality by app.quality.flow(Kind.SERIES).collectAsState()
+    // The copy already being watched, else the family's language nearest Settings' Stream quality.
+    val defaultIndex = remember(copies, progress, quality) {
+        val watching = progress.values.filter { it.kind == ProgressKey.EPISODE }.sortedByDescending { it.updatedAt }
+            .firstNotNullOfOrNull { p -> copies.indexOfFirst { it.sourceId == p.sourceId && it.seriesId == p.itemId }.takeIf { it >= 0 } }
+        watching ?: languages.choose(copies, quality).coerceAtLeast(0)
+    }
     val v = copies.firstOrNull { it.key == chosenKey } ?: copies.getOrNull(defaultIndex) ?: group.first
     val labels = remember(copies) {
         SeriesTitles.variantLabels(copies.map { (it.lang ?: SeriesTitles.ORIGINAL) to SeriesTitles.parse(it.name).tags })
@@ -178,7 +186,6 @@ fun SeriesPage(profile: Profile, group: SeriesGroup, visible: List<CategoryEntit
         info = if (src == null) XtreamParser.SeriesInfo(emptyList(), null, null)
         else runCatching { app.catalog.seriesInfo(v.sourceId, v.seriesId, src) }.getOrDefault(XtreamParser.SeriesInfo(emptyList(), null, null))
     }
-    val progress = rememberProgress()
     fun progressOf(e: XtreamParser.Episode): ProgressEntity? = progress[ProgressKey.episode(v.sourceId, v.seriesId, e.season, e.episode)]
     val rdIndex = rememberRdIndex()
     fun rdOf(e: XtreamParser.Episode): RdCopy? = rdIndex.episode(v.name, v.year, e.season, e.episode)

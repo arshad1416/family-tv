@@ -247,7 +247,7 @@ fun toggleShowFavourite(ctx: Context, group: SeriesGroup, isFavourite: Boolean, 
                 if (match) app.favourites.toggle(Kind.SERIES, f.sourceId, f.itemId, f.name)
             }
         } else {
-            val pick = preferred ?: copies.getOrNull(SeriesLanguages(ctx).choose(copies)) ?: group.first
+            val pick = preferred ?: copies.getOrNull(SeriesLanguages(ctx).choose(copies, app.quality[Kind.SERIES])) ?: group.first
             app.favourites.toggle(Kind.SERIES, pick.sourceId, pick.seriesId, pick.name)
         }
         withContext(Dispatchers.Main) { Toast.makeText(ctx.applicationContext, favouriteMessage(app, Kind.SERIES, !isFavourite), Toast.LENGTH_SHORT).show() }

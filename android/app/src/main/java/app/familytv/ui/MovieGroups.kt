@@ -71,10 +71,11 @@ suspend fun AppDb.allCopies(group: MovieGroup, visible: Set<Pair<String, String>
     return copies.sortedWith(compareBy({ SeriesTitles.languageName(it.language) }, { it.key }))
 }
 
-/** The copy OK plays: one already part-watched, else the one in the family's language. */
+/** The copy OK plays: one already part-watched, else the one in the family's language, nearest Settings' Stream quality. */
 fun pickCopy(ctx: Context, copies: List<MovieEntity>, progress: Map<String, ProgressEntity>): MovieEntity {
     val started = copies.mapNotNull { c -> progress[ProgressKey.movie(c.sourceId, c.streamId)]?.takeIf { !it.watched && ProgressRules.started(it) }?.let { c to it } }
-    return started.maxByOrNull { it.second.updatedAt }?.first ?: copies.getOrNull(MovieLanguages(ctx).choose(copies)) ?: copies.first()
+    return started.maxByOrNull { it.second.updatedAt }?.first
+        ?: copies.getOrNull(MovieLanguages(ctx).choose(copies, ctx.app.quality[Kind.MOVIE])) ?: copies.first()
 }
 
 suspend fun playMovie(ctx: Context, profile: Profile, group: MovieGroup, visible: Set<Pair<String, String>>, progress: Map<String, ProgressEntity>) {

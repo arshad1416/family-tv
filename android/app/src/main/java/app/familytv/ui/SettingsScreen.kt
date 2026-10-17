@@ -29,6 +29,8 @@ import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Text
 import app.familytv.BuildConfig
 import app.familytv.app
+import app.familytv.data.Kind
+import app.familytv.iptv.QualityPref
 import app.familytv.portal.DeviceConfig
 import app.familytv.portal.Profile
 import app.familytv.sync.PlaybackStatus
@@ -77,6 +79,7 @@ fun SettingsScreen(vm: MainViewModel, config: DeviceConfig) {
                 }
                 // Only shown when the portal has Trakt set up.
                 if (config.trakt?.clientId != null) TraktPanel()
+                StreamQualityPanel()
                 RealDebridPanel()
                 PackageSorterPanel(config.profile)
                 ParentalPinPanel(config.profile)
@@ -85,6 +88,30 @@ fun SettingsScreen(vm: MainViewModel, config: DeviceConfig) {
         Spacer(Modifier.height(20.dp))
         Column(if (touch) Modifier.widthIn(max = 640.dp) else Modifier) { ArrangeCategoriesPanel(config.profile ?: Profile()) }
         Spacer(Modifier.height(32.dp))
+    }
+}
+
+/** Stream quality: which quality plays first when there's a choice, for Live TV, Movies and Series. Kept on this TV. */
+@Composable
+private fun StreamQualityPanel() {
+    val ctx = LocalContext.current
+    val menus = LocalItemMenus.current
+    Panel {
+        Text("Stream quality", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        Text(
+            "Which copy of a movie or show, or version of a channel, plays first when there's more than one. " +
+                "Auto plays what the app picks today. Picture & sound in the player still changes it for one video.",
+            fontSize = 14.sp, color = Tv.Muted,
+        )
+        for ((kind, label) in listOf(Kind.LIVE to "Live TV", Kind.MOVIE to "Movies", Kind.SERIES to "Series")) {
+            val pref by ctx.app.quality.flow(kind).collectAsState()
+            TvButton("$label: ${pref.label}", {
+                menus.open = ItemMenu(
+                    "Stream quality · $label",
+                    QualityPref.entries.map { q -> (if (q == pref) "✓  ${q.label}" else q.label) to { ctx.app.quality.set(kind, q) } },
+                )
+            })
+        }
     }
 }
 
