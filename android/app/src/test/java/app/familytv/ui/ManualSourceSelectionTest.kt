@@ -35,6 +35,7 @@ class ManualSourceSelectionTest {
         val ticket = selection.begin()
         val resolver = RdSourceResolver({ path, _ ->
             when (path) {
+                "/torrents?limit=20" -> "[]"
                 "/torrents/addMagnet" -> """{"id":"ABC"}"""
                 "/torrents/info/ABC" -> """{"hash":"$hash","filename":"Open Film 2024","status":"downloaded","files":[{"id":1,"path":"Open.Film.2024.mkv","bytes":100,"selected":1}],"links":["https://real-debrid.com/d/synthetic"]}"""
                 "/unrestrict/link" -> { withContext(NonCancellable) { pending.await() }; """{"download":"https://cdn.example.test/video.mkv"}""" }

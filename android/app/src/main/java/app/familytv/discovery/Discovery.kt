@@ -36,6 +36,8 @@ data class DiscoveryTarget(val title: DiscoveryTitle, val season: Int = 0, val e
 data class SourceCandidate(val hash: String, val fileIdx: Int?, val label: String, val compatible: Boolean)
 data class RdSourceFile(val id: Int, val path: String, val bytes: Long, val selected: Boolean = false)
 
+internal fun sourceBasename(path: String) = path.substringAfterLast('/').substringAfterLast('\\')
+
 object DiscoveryPolicy {
     // Preserve meaningful country qualifiers as well as the legacy matcher form. A provider's
     // "The Office (US)" and a release named "The.Office.US" must share a policy identity.
@@ -62,7 +64,7 @@ object TorrentioParse {
         val knownCodec = Regex("(?i)\\b(x264|h[ .]?264|avc)\\b").containsMatchIn(label)
         val hd = Regex("(?i)\\b(480|576|720|1080)[pi]\\b").containsMatchIn(label)
         val unsupported = Regex("(?i)\\b(2160p|4k|8k|uhd|hdr\\w*|dv|dolby[ .]?vision|hevc|x265|h[ .]?265|av1|10[ .-]?bit|3d)\\b").containsMatchIn(label)
-        SourceCandidate(hash, index, label.ifBlank { "Torrent source" }, knownCodec && hd && !unsupported)
+        SourceCandidate(hash, index, "RD availability unverified · " + label.ifBlank { "Torrent source" }, knownCodec && hd && !unsupported)
     }.distinctBy { it.hash to it.fileIdx }.sortedWith(compareBy<SourceCandidate>({ !it.compatible }, { if (it.compatible && Regex("(?i)\\b1080[pi]\\b").containsMatchIn(it.label)) 0 else 1 })).take(40)
 }
 
@@ -73,7 +75,7 @@ object SourceRules {
 
     /** One full episode marker, with no second full/shorthand marker or numeric range. */
     private fun singleEpisodeFile(path: String): Boolean {
-        val name = path.substringAfterLast('/').replace('.', ' ').replace('_', ' ')
+        val name = sourceBasename(path).replace('.', ' ').replace('_', ' ')
         val markers = EPISODE_TOKEN.findAll(name).take(2).toList()
         if (markers.size != 1) return false
         val marker = markers.single()
@@ -93,7 +95,7 @@ object SourceRules {
         if (!Regex("[a-f0-9]{40}").matches(source.hash) || files.size > 10000 || files.map { it.id }.distinct().size != files.size || files.any { it.id <= 0 }) throw SourceUnavailable("Invalid torrent file list.")
         fun matches(f: RdSourceFile): Boolean {
             if (f.bytes <= 0 || !RdNames.isVideo(f.path) || RdNames.isExtra(f.path)) return false
-            val p = RdNames.parse(f.path, folder)
+            val p = RdNames.parse(sourceBasename(f.path), folder)
             return if (target.isEpisode) singleEpisodeFile(f.path) && p.season == target.season && p.episode == target.episode && TitleMatch.same(target.title.title, target.title.year, p.title, p.year)
             else p.season == null && p.episode == null && RdNames.parse(folder).let { it.season == null && it.episode == null } && TitleMatch.same(target.title.title, target.title.year, p.title, p.year)
         }

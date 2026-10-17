@@ -80,11 +80,13 @@ class ProfileRealDebrid internal constructor(
         suspend fun verify() {
             currentCoroutineContext().ensureActive()
             session.verify()
-            // This authenticated GET itself checks current device/profile membership. Keep it
-            // last, after other awaited validation, so revocation cannot hide behind a later lookup.
+            // This authenticated GET checks current device/profile membership. Recheck the
+            // session after it returns because the read itself may suspend during a switch.
             val now = gateway.rdKeyRead(session.profileId)
             validate(session, now)
             if (now.revision != account.revision || now.apiKey != token) throw SourceUnavailable("The profile’s Real-Debrid key was replaced or removed. Choose a source again.")
+            session.verify()
+            currentCoroutineContext().ensureActive()
         }
         val url = RdSourceResolver({ path, form ->
             verify()
@@ -99,6 +101,7 @@ class ProfileRealDebrid internal constructor(
                 403 -> "Real-Debrid denied this request (HTTP 403). Check account access or premium status."
                 451 -> {
                     val stage = when {
+                        path == "/torrents?limit=20" -> "checking existing account sources"
                         path == "/torrents/addMagnet" -> "adding the selected torrent"
                         path.startsWith("/torrents/info/") -> "checking torrent status"
                         path.startsWith("/torrents/selectFiles/") -> "selecting the video file"
@@ -109,7 +112,7 @@ class ProfileRealDebrid internal constructor(
                 429 -> "Real-Debrid is busy. Wait a minute before trying again."
                 else -> "Real-Debrid could not prepare this source (HTTP $code). Try another source."
             }) + providerReason(text)?.let { " $it" }.orEmpty())
-            text
+            if (path == "/torrents?limit=20" && code == 204 && text.isEmpty()) "[]" else text
         }, ::verify).prepare(source, target, progress, status, beforeReturn = {
             beforeOpen()
             verify()

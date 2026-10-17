@@ -20,6 +20,7 @@ class SourceDiscoveryTest {
         assertEquals(1, rows.size)
         assertEquals(0, rows.single().fileIdx)
         assertTrue(rows.single().compatible)
+        assertTrue(rows.single().label.startsWith("RD availability unverified · "))
     }
 
     @Test fun conservativeCompatibilityDoesNotPrefer4kOrHdrOrUnknownCodec() {

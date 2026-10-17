@@ -62,18 +62,58 @@ class DiscoverySessionTest {
     private val source = SourceCandidate("0123456789abcdef0123456789abcdef01234567", 0, "Open Film 1080p x264", true)
     private val target = DiscoveryTarget(DiscoveryTitle("movie", "42", "Open Film", imdb = "tt1234567"))
 
+    @Test fun emptyAccount204FallsBackToNewPreparationButEmpty200FailsClosed() = runBlocking {
+        for (code in listOf(204, 200)) MockWebServer().use { server ->
+            server.enqueue(MockResponse().setResponseCode(code))
+            server.enqueue(MockResponse().setBody("""{"id":"NEW"}"""))
+            server.enqueue(MockResponse().setBody("""{"hash":"${source.hash}","filename":"Open Film","status":"downloaded","files":[{"id":1,"path":"Open.Film.mkv","bytes":100,"selected":1}],"links":["https://real-debrid.com/d/synthetic"]}"""))
+            server.enqueue(MockResponse().setBody("""{"download":"https://cdn.example.test/new.mkv"}"""))
+            val rd = ProfileRealDebrid(MemoryGateway(), DiscoveryHttp(OkHttpClient()), server.url("/api").toString())
+            val launched = mutableListOf<String>()
+            val result = runCatching { rd.prepare(DiscoverySession(identity) { identity }, source, target, {}, open = launched::add) }
+            assertEquals("/api/torrents?limit=20", server.takeRequest().path)
+            if (code == 204) {
+                result.getOrThrow()
+                assertEquals(listOf("https://cdn.example.test/new.mkv"), launched)
+                assertEquals("/api/torrents/addMagnet", server.takeRequest().path)
+                assertEquals(4, server.requestCount)
+            } else {
+                assertTrue(result.exceptionOrNull() is SourceUnavailable)
+                assertTrue(launched.isEmpty())
+                assertEquals(1, server.requestCount)
+            }
+        }
+    }
+
+    @Test fun readyAccountTorrentIsReusedWithoutAddSelectionOrDelete() = runBlocking {
+        MockWebServer().use { server ->
+            server.enqueue(MockResponse().setBody("""[{"id":"READY","hash":"${source.hash}","status":"downloaded"}]"""))
+            server.enqueue(MockResponse().setBody("""{"hash":"${source.hash}","filename":"Open Film","status":"downloaded","files":[{"id":1,"path":"Open.Film.1080p.mkv","bytes":100,"selected":1}],"links":["https://real-debrid.com/d/synthetic"]}"""))
+            server.enqueue(MockResponse().setBody("""{"download":"https://cdn.example.test/reused.mkv"}"""))
+            val rd = ProfileRealDebrid(MemoryGateway(), DiscoveryHttp(OkHttpClient()), server.url("/api").toString())
+            val launched = mutableListOf<String>()
+            val result = runCatching { rd.prepare(DiscoverySession(identity) { identity }, source, target, {}, open = launched::add) }
+            val requests = List(server.requestCount) { server.takeRequest() }
+            assertEquals("Ready account media must be checked before adding a new torrent", "/api/torrents?limit=20", requests.first().path)
+            result.getOrThrow()
+            assertEquals(listOf("https://cdn.example.test/reused.mkv"), launched)
+            assertEquals(listOf("/api/torrents?limit=20", "/api/torrents/info/READY", "/api/unrestrict/link"), requests.map { it.path })
+            assertEquals(listOf("GET", "GET", "POST"), requests.map { it.method })
+        }
+    }
+
     @Test fun revokedKeyDuringPendingResponseStopsFurtherMutationAndPlayback() = runBlocking {
         MockWebServer().use { server ->
             val gateway = MemoryGateway()
-            server.enqueue(MockResponse().setBody("""{"id":"ABC"}""").setBodyDelay(300, TimeUnit.MILLISECONDS))
+            server.enqueue(MockResponse().setBody("[]").setBodyDelay(300, TimeUnit.MILLISECONDS))
             val rd = ProfileRealDebrid(gateway, DiscoveryHttp(OkHttpClient()), server.url("/api").toString())
             val session = DiscoverySession(identity) { identity }
             var opened = false
             val pending = async(Dispatchers.Default) { runCatching { rd.prepare(session, source, target, {}) { opened = true } } }
-            val add = server.takeRequest(2, TimeUnit.SECONDS)!!
-            assertEquals("/api/torrents/addMagnet", add.path)
-            assertEquals("Bearer synthetic-key-0123456789", add.getHeader("Authorization"))
-            assertFalse(add.path!!.contains("synthetic-key"))
+            val lookup = server.takeRequest(2, TimeUnit.SECONDS)!!
+            assertEquals("/api/torrents?limit=20", lookup.path)
+            assertEquals("Bearer synthetic-key-0123456789", lookup.getHeader("Authorization"))
+            assertFalse(lookup.path!!.contains("synthetic-key"))
             gateway.state.set(ProfileRdKey("profile-a", 2, false, null))
             assertTrue(pending.await().exceptionOrNull() is SourceUnavailable)
             assertEquals(1, server.requestCount)
@@ -211,6 +251,7 @@ class DiscoverySessionTest {
             val gateway = MemoryGateway()
             val episodeSource = source.copy(fileIdx = 1, label = "Open Series S02E03 1080p x264")
             val episodeTarget = DiscoveryTarget(DiscoveryTitle("tv", "42", "Open Series", imdb = "tt1234567"), 2, 3, "Selected Episode")
+            server.enqueue(MockResponse().setBody("[]"))
             server.enqueue(MockResponse().setBody("""{"id":"ABC"}"""))
             server.enqueue(MockResponse().setBody("""{"hash":"${source.hash}","filename":"Open Series S02","status":"downloaded","files":[{"id":1,"path":"Open.Series.S02E02.mkv","bytes":100,"selected":0},{"id":2,"path":"Open.Series.S02E03.mkv","bytes":200,"selected":1}],"links":["https://real-debrid.com/d/synthetic"]}"""))
             server.enqueue(MockResponse().setBody("""{"download":"https://cdn.example.test/selected-episode.mkv"}"""))
@@ -222,7 +263,7 @@ class DiscoverySessionTest {
                 beforeOpen = { validations++ }) { url -> launched += episodeTarget to url }
             assertEquals(listOf(episodeTarget to "https://cdn.example.test/selected-episode.mkv"), launched)
             assertEquals(1, validations)
-            assertEquals(3, server.requestCount)
+            assertEquals(4, server.requestCount)
             assertEquals("Resolving the selected video link…", status.last())
             assertEquals(2, launched.single().first.season)
             assertEquals(3, launched.single().first.episode)
@@ -233,10 +274,11 @@ class DiscoverySessionTest {
     @Test fun http451AtEveryPreparationStageStopsWithoutRetryOrSecretEcho() = runBlocking {
         val info = """{"hash":"${source.hash}","filename":"Open Film","status":"downloaded","files":[{"id":1,"path":"Open.Film.1080p.mkv","bytes":100,"selected":1}],"links":["https://real-debrid.com/d/synthetic"]}"""
         val cases = listOf(
-            "adding the selected torrent" to emptyList(),
-            "checking torrent status" to listOf("""{"id":"ABC"}"""),
-            "selecting the video file" to listOf("""{"id":"ABC"}""", info.replace("downloaded", "waiting_files_selection")),
-            "resolving the video link" to listOf("""{"id":"ABC"}""", info))
+            "checking existing account sources" to emptyList(),
+            "adding the selected torrent" to listOf("[]"),
+            "checking torrent status" to listOf("[]", """{"id":"ABC"}"""),
+            "selecting the video file" to listOf("[]", """{"id":"ABC"}""", info.replace("downloaded", "waiting_files_selection")),
+            "resolving the video link" to listOf("[]", """{"id":"ABC"}""", info))
         for ((stage, preceding) in cases) MockWebServer().use { server ->
             preceding.forEach { server.enqueue(MockResponse().setBody(it)) }
             server.enqueue(MockResponse().setResponseCode(451).setBody("synthetic-secret-body https://secret.example.test/?key=fixture"))
@@ -319,6 +361,7 @@ class DiscoverySessionTest {
     @Test fun removalDuringFinalCatalogValidationPreventsPlayerLaunch() = runBlocking {
         MockWebServer().use { server ->
             val gateway = MemoryGateway()
+            server.enqueue(MockResponse().setBody("[]"))
             server.enqueue(MockResponse().setBody("""{"id":"ABC"}"""))
             server.enqueue(MockResponse().setBody("""{"hash":"0123456789abcdef0123456789abcdef01234567","filename":"Open Film","status":"downloaded","files":[{"id":1,"path":"Open.Film.1080p.mkv","bytes":100,"selected":1}],"links":["https://real-debrid.com/d/synthetic"]}"""))
             server.enqueue(MockResponse().setBody("""{"download":"https://cdn.example.test/open-film.mkv"}"""))
@@ -332,7 +375,7 @@ class DiscoverySessionTest {
                 fail("Revoked key launched playback")
             } catch (_: SourceUnavailable) {}
             assertFalse(opened)
-            assertEquals(3, server.requestCount)
+            assertEquals(4, server.requestCount)
         }
     }
 }

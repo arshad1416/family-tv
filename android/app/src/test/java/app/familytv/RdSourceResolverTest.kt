@@ -26,7 +26,7 @@ class RdSourceResolverTest {
         for (raw in listOf("25.5", "-1", "101", "null", "\"50\"", "{}")) {
             val reports = mutableListOf<PreparationProgress>()
             val resolver = RdSourceResolver({ path, _ ->
-                if (path == "/torrents/addMagnet") """{"id":"ABC"}"""
+                if (path == "/torrents?limit=20") "[]" else if (path == "/torrents/addMagnet") """{"id":"ABC"}"""
                 else """{"hash":"$hash","status":"downloading","progress":$raw}"""
             }, {}, {})
             try { resolver.prepare(source, target, progress = reports::add) {}; fail("Wait must be bounded") }
@@ -42,6 +42,7 @@ class RdSourceResolverTest {
         val reports = mutableListOf<PreparationProgress>()
         val resolver = RdSourceResolver({ path, _ ->
             when (path) {
+                "/torrents?limit=20" -> "[]"
                 "/torrents/addMagnet" -> """{"id":"ABC"}"""
                 "/torrents/info/ABC" -> states.removeFirst()
                 "/torrents/selectFiles/ABC" -> ""
@@ -63,6 +64,7 @@ class RdSourceResolverTest {
         val resolver = RdSourceResolver({ path, form ->
             if (form != null) mutations += path to form
             when (path) {
+                "/torrents?limit=20" -> "[]"
                 "/torrents/addMagnet" -> """{"id":"ABC","uri":"https://api.real-debrid.com/rest/1.0/torrents/info/ABC"}"""
                 "/torrents/info/ABC" -> states.removeFirst()
                 "/torrents/selectFiles/ABC" -> ""
@@ -83,7 +85,7 @@ class RdSourceResolverTest {
             val mutations = mutableListOf<String>()
             val resolver = RdSourceResolver({ path, form ->
                 if (form != null) mutations += path
-                if (path == "/torrents/addMagnet") """{"id":"ABC"}""" else bad
+                if (path == "/torrents?limit=20") "[]" else if (path == "/torrents/addMagnet") """{"id":"ABC"}""" else bad
             }, {}, {})
             try { resolver.prepare(source, target) {}; fail("Unsafe torrent accepted") } catch (_: SourceUnavailable) {}
             assertEquals(listOf("/torrents/addMagnet"), mutations)
@@ -94,7 +96,7 @@ class RdSourceResolverTest {
         var infoCalls = 0
         val waits = mutableListOf<Long>()
         val resolver = RdSourceResolver({ path, _ ->
-            if (path == "/torrents/addMagnet") """{"id":"ABC"}""" else { infoCalls++; info("downloading") }
+            if (path == "/torrents?limit=20") "[]" else if (path == "/torrents/addMagnet") """{"id":"ABC"}""" else { infoCalls++; info("downloading") }
         }, {}, { waits += it })
         try { resolver.prepare(source, target) {}; fail("Unbounded wait") } catch (e: SourceUnavailable) { assertTrue(e.message!!.contains("still preparing")) }
         assertEquals(120, infoCalls)
@@ -105,8 +107,8 @@ class RdSourceResolverTest {
     @Test fun cancellationStopsBeforeAnotherAccountMutation() = runTest {
         var addCalls = 0
         var verifyCalls = 0
-        val resolver = RdSourceResolver({ _, _ -> addCalls++; """{"id":"ABC"}""" }, {
-            if (++verifyCalls == 2) throw CancellationException("Profile/account changed")
+        val resolver = RdSourceResolver({ path, _ -> if (path == "/torrents?limit=20") "[]" else { addCalls++; """{"id":"ABC"}""" } }, {
+            if (++verifyCalls == 4) throw CancellationException("Profile/account changed")
         }, {})
         try { resolver.prepare(source, target) {}; fail("Cancellation swallowed") } catch (_: CancellationException) {}
         assertEquals(1, addCalls)
@@ -117,6 +119,7 @@ class RdSourceResolverTest {
         var now = 0L
         val resolver = RdSourceResolver({ path, _ ->
             when (path) {
+                "/torrents?limit=20" -> "[]"
                 "/torrents/addMagnet" -> """{"id":"ABC"}"""
                 "/torrents/info/ABC" -> { polls++; info(if (polls < 13) "downloading" else "downloaded", 1) }
                 "/unrestrict/link" -> """{"download":"https://cdn.example.test/selected.mkv"}"""
@@ -132,11 +135,11 @@ class RdSourceResolverTest {
         var now = 0L
         val resolver = RdSourceResolver({ path, _ ->
             calls++
-            if (path == "/torrents/addMagnet") """{"id":"ABC"}""" else info("downloading")
+            if (path == "/torrents?limit=20") "[]" else if (path == "/torrents/addMagnet") """{"id":"ABC"}""" else info("downloading")
         }, {}, { now = 8 * 60_000L }, { now })
         try { resolver.prepare(source, target) {}; fail("Expired preparation continued") }
         catch (e: SourceUnavailable) { assertTrue(e.message!!.contains("still preparing")) }
-        assertEquals(2, calls)
+        assertEquals(3, calls)
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -145,14 +148,14 @@ class RdSourceResolverTest {
         var resolved = false
         val resolver = RdSourceResolver({ path, _ ->
             calls++
-            if (path == "/torrents/addMagnet") """{"id":"ABC"}""" else info("downloading")
+            if (path == "/torrents?limit=20") "[]" else if (path == "/torrents/addMagnet") """{"id":"ABC"}""" else info("downloading")
         }, {}, { awaitCancellation() }, { 0L })
         val job = launch { resolver.prepare(source, target) {}; resolved = true }
         runCurrent()
-        assertEquals(2, calls)
+        assertEquals(3, calls)
         job.cancelAndJoin()
         runCurrent()
-        assertEquals(2, calls)
+        assertEquals(3, calls)
         assertFalse(resolved)
     }
 
@@ -161,6 +164,7 @@ class RdSourceResolverTest {
         var returned = false
         val resolver = RdSourceResolver({ path, _ ->
             when (path) {
+                "/torrents?limit=20" -> "[]"
                 "/torrents/addMagnet" -> """{"id":"ABC"}"""
                 "/torrents/info/ABC" -> info("downloaded", 1)
                 "/unrestrict/link" -> { now = 8 * 60_000L; """{"download":"https://cdn.example.test/late.mkv"}""" }
@@ -177,6 +181,7 @@ class RdSourceResolverTest {
         var returned = false
         val resolver = RdSourceResolver({ path, _ ->
             when (path) {
+                "/torrents?limit=20" -> "[]"
                 "/torrents/addMagnet" -> """{"id":"ABC"}"""
                 "/torrents/info/ABC" -> info("downloaded", 1)
                 "/unrestrict/link" -> """{"download":"https://cdn.example.test/selected.mkv"}"""
