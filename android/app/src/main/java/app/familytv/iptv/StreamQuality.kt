@@ -1,6 +1,7 @@
 package app.familytv.iptv
 
 import app.familytv.data.SearchText
+import java.text.Normalizer
 
 /** Settings' Stream quality choice, one each for Live TV, Movies and Series. */
 enum class QualityPref(val label: String) {
@@ -43,8 +44,35 @@ object StreamQuality {
         QualityPref.P720 -> Q.P720
     }
 
+    /** Small capitals, which have no Unicode decomposition ("ꜰʜᴅ"). */
+    private val SMALL_CAPS = "ᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘǫʀꜱᴛᴜᴠᴡʏᴢ".zip("abcdefghijklmnopqrstuvwxyz").toMap()
+
+    /** A superscript or small-capital letter or digit as plain ASCII ("ᴴ" is "H", "⁴" is "4"), else null. */
+    private fun plain(c: Char): Char? {
+        SMALL_CAPS[c]?.let { return it }
+        if (c.code < 0x80) return null
+        val d = Normalizer.normalize(c.toString(), Normalizer.Form.NFKD)
+        return d.singleOrNull()?.takeIf { it.code < 0x80 && it.isLetterOrDigit() }
+    }
+
+    /**
+     * The provider's superscript and small-capital tags as separate plain words: "CTVᴴᴰ" is
+     * "CTV HD", "TSN ꜰʜᴅ" is "TSN fhd", "⁴ᴷ" is "4K", "ᴿᴬᵂ ⁶⁰ᶠᵖˢ" is "RAW 60fps".
+     */
+    internal fun fold(name: String): String = buildString {
+        var inTag = false
+        for (c in name) {
+            val p = plain(c)
+            if ((p != null) != inTag) append(' ')
+            append(p ?: c)
+            inTag = p != null
+        }
+    }
+
+    private fun words(name: String) = SearchText.words(fold(name))
+
     /** The quality a name says it is: the highest tag in it, or null when it has none. */
-    fun of(name: String): Q? = SearchText.words(name).mapNotNull { TOKENS[it] }.maxByOrNull { it.rung }
+    fun of(name: String): Q? = words(name).mapNotNull { TOKENS[it] }.maxByOrNull { it.rung }
 
     fun ofHeight(height: Int): Q? = when {
         height <= 0 -> null
@@ -76,5 +104,5 @@ object StreamQuality {
      * A channel's name without its quality tags ("CA: CTV FHD" and "CA: CTV 4K" both give "ca ctv"),
      * so versions of one channel share it; country prefixes stay. Empty when nothing is left.
      */
-    fun channelKey(name: String): String = SearchText.words(name).filter { it !in TOKENS && it !in TECH }.joinToString(" ")
+    fun channelKey(name: String): String = words(name).filter { it !in TOKENS && it !in TECH }.joinToString(" ")
 }
