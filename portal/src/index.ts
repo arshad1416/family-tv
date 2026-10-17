@@ -226,7 +226,7 @@ async function deviceHeartbeat(req: Request, env: Env) {
   const b = await body<{ appVersion?: string; status?: unknown }>(req);
   const now = Date.now();
   await env.DB.prepare("UPDATE devices SET last_seen = ?, app_version = COALESCE(?, app_version), status_json = ?, country = ? WHERE id = ?")
-    .bind(now, clip(b.appVersion), JSON.stringify(b.status ?? null).slice(0, 8000), country(req), d.id)
+    .bind(now, clip(b.appVersion), JSON.stringify(normalizeGuideStatus(b.status)).slice(0, 8000), country(req), d.id)
     .run();
   return json({
     paired: !!d.profile_id,
@@ -235,6 +235,18 @@ async function deviceHeartbeat(req: Request, env: Env) {
     // Another TV marked or paused something when this is past the seq this TV last pulled.
     progressSeq: d.profile_id ? await progressSeq(env, d.profile_id) : null,
   });
+}
+
+/** New telemetry counts have a numeric schema; the renderer independently handles old stored data. */
+export function normalizeGuideStatus(status: unknown): unknown {
+  if (!status || typeof status !== "object" || Array.isArray(status)) return status ?? null;
+  const s = status as Record<string, unknown>;
+  if (!s.guide || typeof s.guide !== "object" || Array.isArray(s.guide)) return { ...s, guide: null };
+  const g = s.guide as Record<string, unknown>;
+  const count = (v: unknown) => typeof v === "number" && Number.isSafeInteger(v) && v >= 0 ? Math.min(v, 1_000_000_000) : 0;
+  const linked = g.linked && typeof g.linked === "object" && !Array.isArray(g.linked) ? g.linked : {};
+  return { ...s, guide: { ...g, switched: count(g.switched), thin: count(g.thin), unmatchedCount: count(g.unmatchedCount),
+    linked: Object.fromEntries(Object.entries(linked).map(([k, v]) => [k, count(v)])) } };
 }
 
 async function deviceAck(req: Request, env: Env, commandId: string) {
@@ -430,6 +442,118 @@ async function requirePaired(req: Request, env: Env): Promise<string> {
   const d = await requireDevice(req, env);
   if (!d.profile_id) throw new HttpError(403, "device not paired");
   return d.profile_id;
+}
+
+/** Separate from OAuth: explicitly entered API keys shared only by the owner's current-profile devices. */
+async function rdApiKey(req: Request, env: Env, url: URL): Promise<Response> {
+  try {
+    if (url.protocol !== "https:") throw new HttpError(426, "HTTPS required");
+    const d = await requireDevice(req, env);
+    const b = req.method === "GET" ? null : await body<Record<string, unknown>>(req);
+    const profileId = req.method === "GET" ? url.searchParams.get("profileId") : b?.profileId;
+    if (typeof profileId !== "string" || !profileId || profileId !== d.profile_id) throw new HttpError(403, "current profile required");
+    const tokenHash = await sha256Hex(bearer(req));
+    // Re-check membership and token in the same statement that reads the secret or changes it.
+    const read = () => env.DB.prepare(
+      `SELECT COALESCE(k.revision, 0) AS revision, k.key_enc FROM devices d
+       LEFT JOIN profile_rd_api_keys k ON k.profile_id = d.profile_id
+       WHERE d.id = ? AND d.token_hash = ? AND d.profile_id = ?`,
+    ).bind(d.id, tokenHash, profileId).first<{ revision: number; key_enc: string | null }>();
+    if (req.method === "GET") {
+      const row = await read();
+      if (!row) throw new HttpError(403, "current profile required");
+      let apiKey: string | null = null;
+      if (row.key_enc) {
+        const opened = await openJson<{ profileId: string; apiKey: string }>(env.CONFIG_KEY, row.key_enc);
+        if (opened.profileId !== profileId || !validRdApiKey(opened.apiKey)) throw new HttpError(500, "credential unavailable");
+        apiKey = opened.apiKey;
+      }
+      // Decryption yields: reject if the key was removed/replaced or device moved meanwhile.
+      const current = await read();
+      if (!current) throw new HttpError(403, "current profile required");
+      if (current.revision !== row.revision || current.key_enc !== row.key_enc) throw new HttpError(409, "credential changed; reload");
+      return json({ profileId, revision: row.revision, configured: apiKey !== null, apiKey });
+    }
+    const revision = b?.revision;
+    if (typeof revision !== "number" || !Number.isSafeInteger(revision) || revision < 0 || revision >= Number.MAX_SAFE_INTEGER) throw new HttpError(400, "valid revision required");
+    const apiKey = req.method === "PUT" ? b?.apiKey : null;
+    if (req.method === "PUT" && !validRdApiKey(apiKey)) throw new HttpError(400, "API key must contain 16 to 512 printable non-space ASCII characters");
+    const sealed = apiKey === null ? null : await sealJson(env.CONFIG_KEY, { profileId, apiKey });
+    const changed = await env.DB.prepare(
+      `INSERT INTO profile_rd_api_keys (profile_id, revision, key_enc, updated_at)
+       SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM devices WHERE id = ? AND token_hash = ? AND profile_id = ?)
+         AND (? = 0 OR EXISTS (SELECT 1 FROM profile_rd_api_keys WHERE profile_id = ? AND revision = ?))
+       ON CONFLICT (profile_id) DO UPDATE SET revision = excluded.revision, key_enc = excluded.key_enc, updated_at = excluded.updated_at
+       WHERE profile_rd_api_keys.revision = ?
+       RETURNING revision`,
+    ).bind(profileId, revision + 1, sealed, Date.now(), d.id, tokenHash, profileId, revision, profileId, revision, revision)
+      .first<{ revision: number }>();
+    if (!changed) {
+      if (!await read()) throw new HttpError(403, "current profile required");
+      throw new HttpError(409, "credential changed; reload");
+    }
+    return json({ profileId, revision: changed.revision, configured: apiKey !== null });
+  } catch (e) {
+    // Never let crypto/DB exceptions reach routine logs with credential-bearing context.
+    if (e instanceof HttpError) throw e;
+    throw new HttpError(500, "credential unavailable");
+  }
+}
+
+/** Admin can replace/remove a profile credential, and read only a server-masked preview. */
+async function adminRdApiKey(req: Request, env: Env, url: URL, profileId: string): Promise<Response> {
+  try {
+    if (url.protocol !== "https:") throw new HttpError(426, "HTTPS required");
+    const read = () => env.DB.prepare(
+      `SELECT COALESCE(k.revision, 0) AS revision, k.key_enc
+       FROM profiles p LEFT JOIN profile_rd_api_keys k ON k.profile_id = p.id WHERE p.id = ?`,
+    ).bind(profileId).first<{ revision: number; key_enc: string | null }>();
+    const row = await read();
+    if (!row) throw new HttpError(404, "profile not found");
+    if (req.method === "GET") {
+      let maskedPreview: string | null = null;
+      if (row.key_enc !== null) {
+        const opened = await openJson<{ profileId: string; apiKey: string } | null>(env.CONFIG_KEY, row.key_enc);
+        if (!opened || opened.profileId !== profileId || !validRdApiKey(opened.apiKey)) throw new HttpError(500, "credential unavailable");
+        maskedPreview = maskRdApiKey(opened.apiKey);
+      }
+      // Decryption yields: never return a removed/replaced key or a deleted profile's preview.
+      const current = await read();
+      if (!current) throw new HttpError(404, "profile not found");
+      if (current.revision !== row.revision || current.key_enc !== row.key_enc) throw new HttpError(409, "credential changed; reload");
+      return json({ profileId, revision: row.revision, configured: maskedPreview !== null, maskedPreview });
+    }
+    const b = await body<Record<string, unknown>>(req);
+    const revision = b.revision;
+    if (typeof revision !== "number" || !Number.isSafeInteger(revision) || revision < 0 || revision >= Number.MAX_SAFE_INTEGER) throw new HttpError(400, "valid revision required");
+    const apiKey = req.method === "PUT" ? b.apiKey : null;
+    if (req.method === "PUT" && !validRdApiKey(apiKey)) throw new HttpError(400, "API key must contain 16 to 512 printable non-space ASCII characters");
+    const sealed = apiKey === null ? null : await sealJson(env.CONFIG_KEY, { profileId, apiKey });
+    const changed = await env.DB.prepare(
+      `INSERT INTO profile_rd_api_keys (profile_id, revision, key_enc, updated_at)
+       SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM profiles WHERE id = ?)
+         AND (? = 0 OR EXISTS (SELECT 1 FROM profile_rd_api_keys WHERE profile_id = ? AND revision = ?))
+       ON CONFLICT (profile_id) DO UPDATE SET revision = excluded.revision, key_enc = excluded.key_enc, updated_at = excluded.updated_at
+       WHERE profile_rd_api_keys.revision = ? RETURNING revision`,
+    ).bind(profileId, revision + 1, sealed, Date.now(), profileId, revision, profileId, revision, revision).first<{ revision: number }>();
+    if (!changed) {
+      if (!await read()) throw new HttpError(404, "profile not found");
+      throw new HttpError(409, "credential changed; reload");
+    }
+    return json({ profileId, revision: changed.revision, configured: apiKey !== null, maskedPreview: apiKey === null ? null : maskRdApiKey(apiKey) });
+  } catch (e) {
+    if (e instanceof HttpError) throw e;
+    throw new HttpError(500, "credential unavailable");
+  }
+}
+
+function validRdApiKey(v: unknown): v is string {
+  return typeof v === "string" && /^[\x21-\x7e]{16,512}$/.test(v);
+}
+
+function maskRdApiKey(key: unknown): string {
+  if (!validRdApiKey(key)) throw new HttpError(500, "credential unavailable");
+  return key.slice(0, 4) + "********" + key.slice(-4);
 }
 
 const rdRow = (env: Env, profileId: string) =>
@@ -1156,6 +1280,7 @@ export async function handle(req: Request, env: Env): Promise<Response> {
   if (m === "POST" && p === "/api/device/trakt/refresh") return traktRefresh(req, env);
   if (m === "POST" && p === "/api/device/trakt/revoke") return traktRevoke(req, env);
   if (m === "POST" && p === "/api/device/realdebrid/link") return rdLink(req, env);
+  if (["GET", "PUT", "DELETE"].includes(m) && p === "/api/device/realdebrid/api-key") return rdApiKey(req, env, url);
   if ((m === "GET" || m === "POST") && p === "/api/device/realdebrid/token") return rdToken(req, env);
   if (m === "POST" && p === "/api/device/realdebrid/unlink") return rdDisconnect(env, await requirePaired(req, env));
   if (m === "GET" && p === "/api/device/progress") return progressPull(req, env, url);
@@ -1178,6 +1303,7 @@ export async function handle(req: Request, env: Env): Promise<Response> {
     if (m === "POST" && p === "/api/admin/lines/add") return adminAddLines(req, env);
     if (m === "POST" && p === "/api/admin/lines/forget") return adminForgetLine(req, env);
     if (m === "POST" && p === "/api/admin/lines/sorter") return adminLineSorter(req, env);
+    if (["GET", "PUT", "DELETE"].includes(m) && (mm = p.match(/^\/api\/admin\/profiles\/([a-f0-9]+)\/realdebrid\/api-key$/))) return adminRdApiKey(req, env, url, mm[1]);
     if (m === "GET" && (mm = p.match(/^\/api\/admin\/profiles\/([a-f0-9]+)\/categories$/))) return adminProfileCategories(env, mm[1]);
     if (m === "POST" && (mm = p.match(/^\/api\/admin\/profiles\/([a-f0-9]+)\/primary-server$/))) return adminPreferServer(req, env, mm[1]);
     if (m === "DELETE" && (mm = p.match(/^\/api\/admin\/profiles\/([a-f0-9]+)\/realdebrid$/))) return rdDisconnect(env, mm[1]);
