@@ -20,6 +20,8 @@ env:
 
 jobs:
   release:
+    # Only main publishes to /tv: a manual run from any other branch stops here.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

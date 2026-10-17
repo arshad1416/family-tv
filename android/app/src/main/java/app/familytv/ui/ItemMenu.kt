@@ -41,7 +41,7 @@ class ItemMenus {
         val menu = open ?: return
         val close = { open = null }
         Dialog(onDismissRequest = close) {
-            // Scrolls, for long lists such as a show's Real-Debrid episodes.
+            // Scrolls, for long lists.
             Column(
                 Modifier.widthIn(min = 280.dp, max = 460.dp).background(Tv.Raised, Tv.Shape).verticalScroll(rememberScrollState()).padding(24.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),

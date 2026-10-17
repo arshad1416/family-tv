@@ -36,9 +36,9 @@ passwords on a remote, and when a TV goes black the portal tells you why.
   text come after those.
 - **Stream quality** (Settings): one choice each for Live TV, Movies and Series: Auto, Always prefer
   4K, HD, 1080p or 720p, kept on that TV. Movies and shows open the copy nearest that quality (after a
-  part-watched copy and the family's language), and Real-Debrid first follows it too. Live TV starts
-  HLS streams on the nearest picture size and plays the preferred version of a channel the line has
-  in several qualities ("CTV HD", "CTV 4K"); Up/Down steps past the other versions. Missing quality:
+  part-watched copy and the family's language). Live TV starts HLS streams on the nearest picture
+  size and plays the preferred version of a channel the line has in several qualities ("CTV HD",
+  "CTV 4K"); Up/Down steps past the other versions. Missing quality:
   the nearest lower, then higher. Picture & sound in the player still changes it for one video.
 - **Favourites:** hold OK (or press Menu) on any channel, movie or series to add or remove it; on a
   phone or tablet tap the heart. Live TV, Movies and Series each get a *Favourites* category at the
@@ -85,16 +85,6 @@ passwords on a remote, and when a TV goes black the portal tells you why.
   with its watched episodes and resume points; those stay on the device, and one removed here isn't
   added back. Titles are matched by id, else by title and year. Channel favourites stay on the
   device, since Trakt has no live TV.
-- **Real-Debrid (optional):** connect a Real-Debrid account in Settings with a code; one TV signs in and
-  every TV in that profile uses the account (Disconnect, on a TV or the profile's admin page, signs them
-  all out). Movies and episodes already in the account's Torrents or Downloads get an RD tag and a "Play from Real-Debrid" choice showing quality and size,
-  and when the TV stream keeps stalling the player switches to the Real-Debrid copy at the same spot
-  (OK goes back). The setting *Play from Real-Debrid first* (per TV, off by default) plays the
-  account's best copy (4K, then surround sound, then the biggest file) with the TV stream as the
-  backup. Search adds a *Real-Debrid* row of account titles the catalog doesn't have: a film plays its
-  best copy, a show lists its episodes; their resume spots stay on that TV (no Trakt, no portal).
-  It never searches for or adds torrents. Real-Debrid allows one connection at a time,
-  so two TVs in different homes playing at once may be refused.
 - Live TV on a TV remote: OK shows the channel list; Back opens the full guide over the video, and
   Back again shrinks the video into a window at the top of the guide. OK on another channel plays it
   in that window, OK again goes full screen. A third Back opens the categories beside the guide
@@ -247,11 +237,9 @@ The TV asks the portal (only once paired) to exchange and refresh its Trakt toke
 directly with its own token. Without `TRAKT_CLIENT_ID` the TVs hide
 the Trakt section. No database migration is needed; Trakt tokens live on each device.
 
-### 5. Real-Debrid (optional)
-Nothing to configure: the TV signs in with Real-Debrid's device code, and the portal keeps that
-profile's account (sealed with `CONFIG_KEY`) and refreshes its token for every TV. The profile page
-shows which account is connected, with a Disconnect button. It needs the
-`profile_debrid` table, so run `npm run db:migrate:remote` and `npm run deploy` once in `portal/`.
+### 5. Real-Debrid
+This app has no Real-Debrid (removed Oct 2026; a separate fork builds it). The portal keeps its
+`/api/device/realdebrid/*` routes and `profile_debrid` table for that fork; nothing here calls them.
 
 ## Develop
 | Where | Command |

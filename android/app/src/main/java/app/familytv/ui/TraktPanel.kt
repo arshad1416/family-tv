@@ -93,8 +93,8 @@ fun TraktPanel(modifier: Modifier = Modifier) {
 
 /**
  * A sign-in code, where to enter it, and a QR with a countdown. The QR ([qrUrl]) opens the page
- * with the code already filled in (Trakt keeps /activate/CODE through its sign-in page; Real-Debrid
- * has a direct link), so a phone scan only needs Approve.
+ * with the code already filled in (Trakt keeps /activate/CODE through its sign-in page), so a phone
+ * scan only needs Approve.
  */
 @Composable
 internal fun LinkCode(userCode: String, url: String, qrUrl: String, expiresAt: Long, touch: Boolean, actions: @Composable () -> Unit) {
