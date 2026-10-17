@@ -5,6 +5,8 @@ import android.content.Intent
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.media3.common.C
 import androidx.media3.common.Player
 import app.familytv.trakt.TitleMatch
@@ -26,9 +28,8 @@ class RdResume private constructor(private val activity: ComponentActivity, priv
     init {
         player.addListener(this)
         ticker = activity.lifecycleScope.launch {
-            while (isActive) {
-                delay(30_000)
-                if (player.isPlaying) save()
+            activity.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                while (isActive) { delay(30_000); if (player.isPlaying) save() }
             }
         }
     }

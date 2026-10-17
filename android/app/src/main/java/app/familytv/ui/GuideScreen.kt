@@ -1,5 +1,8 @@
 package app.familytv.ui
 
+import app.familytv.core.foregroundTicks
+import androidx.lifecycle.compose.LocalLifecycleOwner
+
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.gestures.BringIntoViewSpec
@@ -31,7 +34,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -107,7 +109,11 @@ fun GuideScreen(vm: MainViewModel, profile: Profile) {
     }.collectAsState(initial = emptyList())
     val showingFavourites = cat?.isFavourites == true
     val channels = if (showingFavourites) favChannels else inCategory
-    val now = produceState(System.currentTimeMillis()) { while (true) { delay(30_000); value = System.currentTimeMillis() } }
+    val clockLifecycle = LocalLifecycleOwner.current.lifecycle
+    val now = remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(clockLifecycle) {
+        clockLifecycle.foregroundTicks(30_000) { now.value = System.currentTimeMillis() }
+    }
     val start by remember { derivedStateOf { now.value / SLOT * SLOT } }
     val progs = rememberProgrammes(channels, from = start, hours = HOURS)
     val focus = remember { mutableStateOf<GuideFocus?>(null) }

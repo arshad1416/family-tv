@@ -1,5 +1,11 @@
 package app.familytv.ui
 
+import app.familytv.core.foregroundTicks
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.compose.runtime.DisposableEffect
+import androidx.lifecycle.compose.LocalLifecycleOwner
+
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -38,6 +44,12 @@ fun TraktPanel(modifier: Modifier = Modifier) {
     val ctx = LocalContext.current
     val trakt = ctx.app.trakt
     val state by trakt.state.collectAsState()
+    val owner = LocalLifecycleOwner.current
+    DisposableEffect(owner) {
+        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_STOP) trakt.cancelLink() }
+        owner.lifecycle.addObserver(observer)
+        onDispose { trakt.cancelLink(); owner.lifecycle.removeObserver(observer) }
+    }
     val touch = LocalFormFactor.current.touch
     LaunchedEffect(Unit) { trakt.refreshState() }
     if (state is Trakt.State.Off) return
@@ -99,7 +111,8 @@ fun TraktPanel(modifier: Modifier = Modifier) {
 @Composable
 internal fun LinkCode(userCode: String, url: String, qrUrl: String, expiresAt: Long, touch: Boolean, actions: @Composable () -> Unit) {
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(userCode) { while (true) { now = System.currentTimeMillis(); delay(1_000) } }
+    val clockLifecycle = LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(userCode, clockLifecycle) { clockLifecycle.foregroundTicks(1_000) { now = System.currentTimeMillis() } }
     val left = ((expiresAt - now) / 1000).coerceAtLeast(0)
     val qr = remember(qrUrl) { qrImage(qrUrl, 300) }
     val words: @Composable () -> Unit = {

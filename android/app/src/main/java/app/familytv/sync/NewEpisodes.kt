@@ -24,6 +24,9 @@ import app.familytv.ui.copyIds
 import app.familytv.user.EpisodeWatchEntity
 import app.familytv.user.NewEpisodeList
 import app.familytv.user.Pending
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 
@@ -67,9 +70,10 @@ class NewEpisodes(private val app: FamilyTvApp) {
         val fresh = ArrayList<Pair<String, Int>>()
         val report = ArrayList<String>()
         for ((i, f) in favs.take(MAX_SHOWS).withIndex()) {
+            currentCoroutineContext().ensureActive()
             val src = profile.sources.firstOrNull { it.id == f.sourceId && it.type == "xtream" } ?: continue
             if (i > 0) delay(PAUSE_MS) // one show at a time, gently, so the provider never sees a burst
-            val episodes = runCatching { app.catalog.seriesInfo(f.sourceId, f.itemId, src).episodes }.getOrNull() ?: continue
+            val episodes = runCatching { app.catalog.seriesInfo(f.sourceId, f.itemId, src).episodes }.onFailure { if (it is CancellationException) throw it }.getOrNull() ?: continue
             val latest = EpisodeGuide.latest(episodes) ?: continue
             val now = System.currentTimeMillis()
             val old = known[f.sourceId to f.itemId]

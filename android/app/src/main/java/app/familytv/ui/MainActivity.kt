@@ -1,5 +1,8 @@
 package app.familytv.ui
 
+import app.familytv.core.foregroundTicks
+import androidx.lifecycle.compose.LocalLifecycleOwner
+
 import android.annotation.SuppressLint
 import android.os.Bundle
 import android.view.KeyEvent
@@ -54,6 +57,9 @@ import kotlinx.coroutines.launch
 class MainActivity : ComponentActivity() {
     private val vm: MainViewModel by viewModels()
     private var message by mutableStateOf<String?>(null)
+    internal var sourceChoice by mutableStateOf<CatalogSourceRequest?>(null)
+    internal fun chooseSource(request: CatalogSourceRequest) { sourceChoice = request }
+    internal fun sourceRequestCurrent(request: CatalogSourceRequest) = sourceChoice === request && vm.profile === request.profile
     private val exit = HoldBackToExit(this)
 
     // androidx marks this restricted, but overriding the platform method is fine.
@@ -92,6 +98,10 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                     menus.Host()
+                    sourceChoice?.let { request ->
+                        if (vm.profile === request.profile) CatalogSources(request) { sourceChoice = null }
+                        else LaunchedEffect(request) { sourceChoice = null }
+                    }
                     message?.let { text ->
                         Dialog(onDismissRequest = { message = null }) {
                             Column(
@@ -118,6 +128,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onStop() {
+        sourceChoice = null
         vm.stop()
         super.onStop()
     }
@@ -152,7 +163,8 @@ private fun SyncingScreen(s: Screen.Syncing) = Centered {
 private fun PairingScreen(code: String) {
     val qr = remember(code) { qrImage("${BuildConfig.PORTAL_URL.trimEnd('/')}/#pair=$code") }
     var dots by remember { mutableStateOf(0) }
-    LaunchedEffect(Unit) { while (true) { kotlinx.coroutines.delay(800); dots = (dots + 1) % 4 } }
+    val clockLifecycle = LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(clockLifecycle) { clockLifecycle.foregroundTicks(800) { dots = (dots + 1) % 4 } }
     val words: @Composable () -> Unit = {
         Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Text("Set up this TV", fontSize = 34.sp, fontWeight = FontWeight.Bold)
@@ -175,4 +187,11 @@ private fun PairingScreen(code: String) {
             }
         }
     }
+}
+
+/** Compose may provide a ContextWrapper; never silently drop a catalog selection. */
+internal tailrec fun android.content.Context.sourceActivity(): MainActivity? = when (this) {
+    is MainActivity -> this
+    is android.content.ContextWrapper -> if (baseContext !== this) baseContext.sourceActivity() else null
+    else -> null
 }

@@ -3,12 +3,15 @@ package app.familytv
 import android.app.Activity
 import android.app.Application
 import android.os.Bundle
+import androidx.work.Constraints
+import androidx.work.NetworkType
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import app.familytv.core.CrashLog
 import app.familytv.data.AppDb
 import app.familytv.debrid.RealDebrid
+import app.familytv.discovery.ProfileRealDebrid
 import app.familytv.diag.Diagnoser
 import app.familytv.iptv.Catalog
 import app.familytv.portal.PortalClient
@@ -41,6 +44,8 @@ class FamilyTvApp : Application() {
     val trakt by lazy { Trakt(this) }
     /** The profile's Real-Debrid account: a backup copy of movies and episodes the person added there. */
     val realDebrid by lazy { RealDebrid(this) }
+    /** External sources use the owner's API key synchronized only within this profile. */
+    val profileRealDebrid by lazy { ProfileRealDebrid(portal) }
     /** Trailers and episode details beyond the provider (TMDB, TheTVDB). */
     val extras by lazy { MediaExtras(this) }
     val watched by lazy { WatchedMarks(this) }
@@ -73,10 +78,14 @@ class FamilyTvApp : Application() {
         // Background check-in while the app is closed: picks up portal changes and keeps lists fresh.
         WorkManager.getInstance(this).enqueueUniquePeriodicWork(
             "sync",
-            ExistingPeriodicWorkPolicy.KEEP,
-            PeriodicWorkRequestBuilder<SyncWorker>(30, TimeUnit.MINUTES).build(),
+            ExistingPeriodicWorkPolicy.UPDATE,
+            backgroundSyncRequest(),
         )
     }
 }
 
 val android.content.Context.app: FamilyTvApp get() = applicationContext as FamilyTvApp
+
+internal fun backgroundSyncRequest() = PeriodicWorkRequestBuilder<SyncWorker>(30, TimeUnit.MINUTES)
+    .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).setRequiresBatteryNotLow(true).build())
+    .build()

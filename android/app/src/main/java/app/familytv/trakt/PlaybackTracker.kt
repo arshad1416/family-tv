@@ -4,6 +4,8 @@ import android.content.Intent
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.media3.common.C
 import androidx.media3.common.Player
 import app.familytv.app
@@ -39,9 +41,8 @@ class PlaybackTracker private constructor(
         }
         // Saves the spot every half minute, so a crash or power cut loses little.
         ticker = activity.lifecycleScope.launch {
-            while (isActive) {
-                delay(30_000)
-                if (player.isPlaying) report(TraktSync.TICK)
+            activity.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                while (isActive) { delay(30_000); if (player.isPlaying) report(TraktSync.TICK) }
             }
         }
     }

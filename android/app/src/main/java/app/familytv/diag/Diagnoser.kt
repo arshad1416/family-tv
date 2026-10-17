@@ -6,6 +6,7 @@ import android.net.NetworkCapabilities
 import android.net.wifi.WifiManager
 import android.os.Build
 import app.familytv.BuildConfig
+import app.familytv.core.consumeCancellable
 import app.familytv.core.Http
 import app.familytv.core.redact
 import app.familytv.data.AppDb
@@ -15,6 +16,9 @@ import app.familytv.portal.PortalClient
 import app.familytv.portal.Profile
 import app.familytv.portal.Source
 import com.google.gson.JsonParser
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -45,14 +49,16 @@ data class DiagnosisReport(
 class Diagnoser(private val context: Context, private val db: AppDb, private val portal: PortalClient) {
 
     suspend fun run(profile: Profile, playingHere: Boolean = false): DiagnosisReport = withContext(Dispatchers.IO) {
+        currentCoroutineContext().ensureActive()
         val internetOk = internetReachable()
+        currentCoroutineContext().ensureActive()
         val hostFacts = mutableListOf<HostFacts>()
         val findings = mutableListOf<Finding>()
         var streamFacts: StreamFacts? = null
 
         if (internetOk) {
             val urls = profile.sources.flatMap { s -> s.serverUrls.orEmpty() + listOfNotNull(s.m3uUrl, s.epgUrl) }.distinctBy { hostOf(it) }
-            val portalView = runCatching { portal.reachability(urls) }.getOrNull()
+            val portalView = runCatching { portal.reachability(urls) }.onFailure { if (it is CancellationException) throw it }.getOrNull()
                 ?.associateBy { it.url.toHttpUrlOrNull()?.let { u -> "${u.host}:${u.port}" } }
 
             hostFacts += coroutineScope {
@@ -61,6 +67,7 @@ class Diagnoser(private val context: Context, private val db: AppDb, private val
             hostFacts.forEach { f -> Classifier.host(f)?.let(findings::add) }
 
             for (s in profile.sources.filter { it.type == "xtream" }) {
+                currentCoroutineContext().ensureActive()
                 val server = workingServer(s, hostFacts) ?: continue
                 accountCheck(s, server)?.let { acc -> Classifier.account(acc, System.currentTimeMillis(), playingHere)?.let(findings::add) }
                 if (!playingHere && findings.none { it.verdict.severity >= 3 }) {
@@ -82,16 +89,18 @@ class Diagnoser(private val context: Context, private val db: AppDb, private val
     /** Runs a check and uploads it; the upload is best effort (no internet = nothing to upload to). */
     suspend fun runAndReport(profile: Profile, playingHere: Boolean = false): DiagnosisReport {
         val r = run(profile, playingHere)
-        runCatching { portal.uploadDiagnostics(r.verdict.name, r) }
+        currentCoroutineContext().ensureActive()
+        runCatching { portal.uploadDiagnostics(r.verdict.name, r) }.onFailure { if (it is CancellationException) throw it }
         return r
     }
 
-    private fun internetReachable(): Boolean {
+    private suspend fun internetReachable(): Boolean {
         // Cloudflare's IP-addressed endpoint needs no DNS, so it separates "no internet" from "DNS broken".
         for (url in listOf("https://1.1.1.1/cdn-cgi/trace", "https://8.8.8.8/")) {
+            currentCoroutineContext().ensureActive()
             val ok = runCatching {
-                Http.probeClient.newCall(Request.Builder().url(url).head().build()).execute().use { true }
-            }.getOrDefault(false)
+                Http.probeClient.newCall(Request.Builder().url(url).head().build()).consumeCancellable { true }
+            }.onFailure { if (it is CancellationException) throw it }.getOrDefault(false)
             if (ok) return true
         }
         return false
@@ -101,11 +110,13 @@ class Diagnoser(private val context: Context, private val db: AppDb, private val
         val u = url.toHttpUrlOrNull() ?: return HostFacts(url, url, null, null, null, "bad url", portalReachable)
         val hostPort = "${u.host}:${u.port}"
         val system = withTimeoutOrNull(6000) { runCatching { InetAddress.getAllByName(u.host).map { it.hostAddress!! } }.getOrNull() }
+        currentCoroutineContext().ensureActive()
         val public = publicDns(u.host)
         var tcpOk: Boolean? = null
         var tcpError: String? = null
         var connectMs: Long? = null
         for (target in Classifier.connectOrder(system, public)) {
+            currentCoroutineContext().ensureActive()
             try {
                 val started = System.nanoTime()
                 Socket().use { it.connect(InetSocketAddress(target, u.port), 4000) }
@@ -118,33 +129,36 @@ class Diagnoser(private val context: Context, private val db: AppDb, private val
                 tcpError = e.javaClass.simpleName
             }
         }
+        currentCoroutineContext().ensureActive()
         var status: Int? = null
         var html = false
         if (tcpOk == true && system != null && !Classifier.isSinkhole(system)) {
             runCatching {
-                Http.probeClient.newCall(Request.Builder().url("${u.scheme}://$hostPort/").build()).execute().use { res ->
+                Http.probeClient.newCall(Request.Builder().url("${u.scheme}://$hostPort/").build()).consumeCancellable { res ->
                     status = res.code
                     html = res.header("Content-Type").orEmpty().contains("html") &&
                         res.peekBody(4096).string().contains(Regex("(?i)blocked|court order|restricted|access denied"))
                 }
-            }
+            }.onFailure { if (it is CancellationException) throw it }
         }
+        currentCoroutineContext().ensureActive()
         return HostFacts(redact(url), hostPort, system, public, tcpOk, tcpError, portalReachable, status, html, connectMs)
     }
 
     /** DNS-over-HTTPS by IP address, so the home network's DNS (and any filter on it) is bypassed for this lookup only. */
-    private fun publicDns(host: String): List<String>? {
+    private suspend fun publicDns(host: String): List<String>? {
         if (host.matches(Regex("^[0-9.]+$")) || host.contains(':')) return listOf(host)
         for (endpoint in listOf("https://1.1.1.1/dns-query", "https://8.8.8.8/resolve")) {
+            currentCoroutineContext().ensureActive()
             val result = runCatching {
                 val req = Request.Builder().url("$endpoint?name=$host&type=A").header("Accept", "application/dns-json").build()
-                Http.probeClient.newCall(req).execute().use { res ->
-                    if (!res.isSuccessful) return@use null
+                Http.probeClient.newCall(req).consumeCancellable { res ->
+                    if (!res.isSuccessful) return@consumeCancellable null
                     val json = JsonParser.parseString(res.body!!.string()).asJsonObject
-                    val answers = json.getAsJsonArray("Answer") ?: return@use emptyList()
+                    val answers = json.getAsJsonArray("Answer") ?: return@consumeCancellable emptyList()
                     answers.mapNotNull { a -> a.asJsonObject.takeIf { it.get("type")?.asInt == 1 }?.get("data")?.asString }
                 }
-            }.getOrNull()
+            }.onFailure { if (it is CancellationException) throw it }.getOrNull()
             if (result != null) return result
         }
         return null
@@ -156,13 +170,13 @@ class Diagnoser(private val context: Context, private val db: AppDb, private val
             f == null || (f.tcpOk == true && !Classifier.isSinkhole(f.systemDns))
         }
 
-    private fun accountCheck(s: Source, server: String): AccountFacts? = runCatching {
-        Http.probeClient.newCall(Request.Builder().url(XtreamUrls.api(server, s.username!!, s.password.orEmpty())).build()).execute().use { res ->
-            if (!res.isSuccessful) return@use null
+    private suspend fun accountCheck(s: Source, server: String): AccountFacts? = runCatching {
+        Http.probeClient.newCall(Request.Builder().url(XtreamUrls.api(server, s.username!!, s.password.orEmpty())).build()).consumeCancellable { res ->
+            if (!res.isSuccessful) return@consumeCancellable null
             val a = XtreamParser.account(res.body!!.charStream())
             AccountFacts(a.auth, a.status, a.expiresAt, a.activeConnections, a.maxConnections)
         }
-    }.getOrNull()
+    }.onFailure { if (it is CancellationException) throw it }.getOrNull()
 
     /** Downloads up to ~1.5 MB of one live channel to measure real throughput to the stream host. */
     private suspend fun streamCheck(s: Source, server: String): StreamFacts? {
@@ -171,18 +185,21 @@ class Diagnoser(private val context: Context, private val db: AppDb, private val
         val started = System.currentTimeMillis()
         var bytes = 0L
         return try {
-            Http.client.newCall(Request.Builder().url(url).build()).execute().use { res ->
-                if (!res.isSuccessful) return StreamFacts(res.code, 0, System.currentTimeMillis() - started, null)
+            Http.client.newCall(Request.Builder().url(url).build()).consumeCancellable { res ->
+                if (!res.isSuccessful) return@consumeCancellable StreamFacts(res.code, 0, System.currentTimeMillis() - started, null)
                 val buf = ByteArray(32 * 1024)
                 val input = res.body!!.byteStream()
                 val firstByteAt = System.currentTimeMillis()
                 while (bytes < 1_500_000 && System.currentTimeMillis() - firstByteAt < 6000) {
+                    currentCoroutineContext().ensureActive()
                     val n = input.read(buf)
                     if (n < 0) break
                     bytes += n
                 }
                 StreamFacts(res.code, bytes, System.currentTimeMillis() - firstByteAt, null)
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             StreamFacts(null, bytes, System.currentTimeMillis() - started, e.javaClass.simpleName)
         }

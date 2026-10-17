@@ -2,6 +2,8 @@ package app.familytv.iptv
 
 import android.util.Xml
 import app.familytv.core.Http
+import app.familytv.core.consumeCancellable
+import okhttp3.OkHttpClient
 import app.familytv.data.AppDb
 import app.familytv.data.CategoryEntity
 import app.familytv.data.ChannelEntity
@@ -13,6 +15,9 @@ import app.familytv.data.SourceEntity
 import app.familytv.portal.Profile
 import app.familytv.portal.Source
 import app.familytv.sync.PlaybackStatus
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
@@ -28,8 +33,9 @@ import java.util.zip.GZIPInputStream
  * Lists are streamed straight from the network into SQLite in batches, so memory stays flat
  * no matter how big the provider's lists are.
  */
-class Catalog(private val db: AppDb) {
+class Catalog(private val db: AppDb, private val client: OkHttpClient = Http.client) {
     private val dao = db.catalog()
+    private val refreshGate = CatalogRefreshGate()
 
     /** [fraction] is 0..1 across the whole refresh; [detail] is a live count such as "12,400 channels". */
     data class Progress(val step: String, val fraction: Float, val detail: String? = null)
@@ -56,13 +62,20 @@ class Catalog(private val db: AppDb) {
             report(Progress(step, ((done + weight * within) / sources.coerceAtLeast(1)).coerceIn(0f, 1f), detail))
     }
 
-    suspend fun refresh(profile: Profile, onProgress: (Progress) -> Unit = {}) = withContext(Dispatchers.IO) {
+    suspend fun refresh(profile: Profile, onlyIfStale: Boolean = false, onProgress: (Progress) -> Unit = {}): Boolean =
+        refreshGate.run(onlyIfStale, stale = {
+            System.currentTimeMillis() - (dao.sources().minOfOrNull { it.lastRefresh } ?: 0) > 12 * HOUR
+        }) { refreshLocked(profile, onProgress) }
+
+    private suspend fun refreshLocked(profile: Profile, onProgress: (Progress) -> Unit) = withContext(Dispatchers.IO) {
+        currentCoroutineContext().ensureActive()
         dao.dropSourcesExcept(profile.sources.map { it.id }.ifEmpty { listOf("") })
         dao.dropOrphanChannels(); dao.dropOrphanMovies(); dao.dropOrphanSeries(); dao.dropOrphanCategories()
         val errors = mutableListOf<String>()
         val extras = profile.extraGuides.orEmpty().distinct().take(MAX_EXTRA_GUIDES)
         val t = Tracker(profile.sources.size + (if (extras.isEmpty()) 0 else 1), onProgress)
         for ((i, s) in profile.sources.withIndex()) {
+            currentCoroutineContext().ensureActive()
             t.startSource(i)
             try {
                 when (s.type) {
@@ -85,10 +98,13 @@ class Catalog(private val db: AppDb) {
     suspend fun activeServer(s: Source): Pair<String, XtAccount> = withContext(Dispatchers.IO) {
         var last: Exception? = null
         for (server in s.serverUrls.orEmpty()) {
+            currentCoroutineContext().ensureActive()
             try {
                 val acc = get(XtreamUrls.api(server, s.username!!, s.password.orEmpty())) { XtreamParser.account(it) }
                 return@withContext server.trimEnd('/') to acc
-            } catch (e: Exception) {
+            } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
                 last = e
             }
         }
@@ -157,7 +173,7 @@ class Catalog(private val db: AppDb) {
         val channels = ArrayList<ChannelEntity>(BATCH)
         val movies = ArrayList<MovieEntity>(BATCH)
         var n = 0
-        open(s.m3uUrl!!).use { res ->
+        open(s.m3uUrl!!) { res ->
             M3uParser.parse(reader(res)) { e ->
                 n++
                 if (n % BATCH == 0) t.rows(n, 20_000, "items")
@@ -202,7 +218,7 @@ class Catalog(private val db: AppDb) {
         if (wanted.isEmpty()) return
         val now = System.currentTimeMillis()
         try {
-            open(url).use { res ->
+            open(url) { res ->
                 val input = res.body!!.byteStream().let { if (isGzip(url, res)) GZIPInputStream(it, 64 * 1024) else it }
                 val parser = Xml.newPullParser().apply { setInput(input, null) }
                 dao.clearProgrammesFor(sourceId)
@@ -217,6 +233,8 @@ class Catalog(private val db: AppDb) {
                 }
                 if (pending.isNotEmpty()) dao.insertProgrammes(pending)
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             android.util.Log.w("Catalog", "guide load failed: ${e.javaClass.simpleName}")
         }
@@ -258,7 +276,7 @@ class Catalog(private val db: AppDb) {
             val guideChannels = ArrayList<XmltvChannel>()
             val wanted = HashSet<String>()
             try {
-                open(url).use { res ->
+                open(url) { res ->
                     val input = res.body!!.byteStream().let { if (isGzip(url, res)) GZIPInputStream(it, 64 * 1024) else it }
                     val parser = Xml.newPullParser().apply { setInput(input, null) }
                     val pending = ArrayList<ProgrammeEntity>(BATCH)
@@ -283,7 +301,9 @@ class Catalog(private val db: AppDb) {
                     }
                     if (pending.isNotEmpty()) dao.insertProgrammes(pending)
                 }
-            } catch (e: Exception) {
+            } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
                 errors += "guide ${n + 1}: ${e.message ?: e.javaClass.simpleName}"
             }
         }
@@ -364,7 +384,7 @@ class Catalog(private val db: AppDb) {
     private suspend fun <T> streamBatches(url: String, write: suspend (List<T>) -> Unit, progress: (Int) -> Unit, map: (XtStream) -> T) {
         val buf = ArrayList<T>(BATCH)
         var n = 0
-        open(url).use { res ->
+        open(url) { res ->
             XtreamParser.streams(reader(res)) { st ->
                 buf += map(st)
                 if (buf.size >= BATCH) { val chunk = buf.toList(); buf.clear(); runBlocking { write(chunk) }; n += chunk.size; progress(n) }
@@ -373,13 +393,13 @@ class Catalog(private val db: AppDb) {
         if (buf.isNotEmpty()) { write(buf); n += buf.size; progress(n) }
     }
 
-    private fun open(url: String): Response {
-        val res = Http.client.newCall(Request.Builder().url(url).build()).execute()
-        if (!res.isSuccessful) { res.close(); throw IOException("HTTP ${res.code}") }
-        return res
-    }
+    private suspend fun <T> open(url: String, consume: suspend (Response) -> T): T =
+        client.newCall(Request.Builder().url(url).build()).consumeCancellable { res ->
+            if (!res.isSuccessful) throw IOException("HTTP ${res.code}")
+            consume(res)
+        }
 
-    private fun <T> get(url: String, parse: (Reader) -> T): T = open(url).use { parse(reader(it)) }
+    private suspend fun <T> get(url: String, parse: (Reader) -> T): T = open(url) { parse(reader(it)) }
 
     private fun reader(res: Response): Reader = res.body!!.charStream().buffered(64 * 1024)
 

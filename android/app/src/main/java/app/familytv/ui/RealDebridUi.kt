@@ -34,6 +34,7 @@ import app.familytv.debrid.RealDebridException
 import app.familytv.trakt.PlayItem
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.CancellationException
 
 /** The profile's Real-Debrid files; empty without an account, so lookups simply find nothing. */
 @Composable
@@ -77,18 +78,22 @@ fun RdSwitchNotice(text: String, touch: Boolean, onBack: () -> Unit, modifier: M
 suspend fun playFromRealDebrid(ctx: Context, copy: RdCopy, title: String, item: PlayItem) = playRd(ctx, copy, title) { item.putInto(it) }
 
 /** Plays a Real-Debrid title the catalog doesn't have; its resume spot stays on this TV ([RdResume]). */
-suspend fun playRdOnly(ctx: Context, copy: RdCopy, title: String, resumeKey: String) =
-    playRd(ctx, copy, title) { it.putExtra(RdResume.EXTRA_KEY, resumeKey) }
+suspend fun playRdOnly(ctx: Context, copy: RdCopy, title: String, resumeKey: String, verify: suspend () -> Unit = {}) =
+    playRd(ctx, copy, title, verify) { it.putExtra(RdResume.EXTRA_KEY, resumeKey) }
 
-private suspend fun playRd(ctx: Context, copy: RdCopy, title: String, extras: (Intent) -> Intent) {
+private suspend fun playRd(ctx: Context, copy: RdCopy, title: String, verify: suspend () -> Unit = {}, extras: (Intent) -> Intent) {
     val url = try {
+        verify()
         ctx.app.realDebrid.streamUrl(copy)
+    } catch (e: CancellationException) {
+        throw e
     } catch (e: RealDebridException) {
         return toast(ctx, e.message ?: "Real-Debrid isn't answering.")
     } catch (e: Exception) {
         return toast(ctx, "Couldn't reach Real-Debrid. Check the internet connection.")
     }
     withContext(Dispatchers.Main) {
+        verify()
         val i = Intent(ctx, PlayerActivity::class.java)
             .putExtra(PlayerActivity.EXTRA_URL, url)
             .putExtra(PlayerActivity.EXTRA_TITLE, title)

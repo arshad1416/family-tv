@@ -1,0 +1,53 @@
+{
+  "fixtureOnly": true,
+  "exchanges": [
+    {
+      "method": "GET",
+      "path": "/api/device/config",
+      "status": 200,
+      "body": "{\"paired\":true,\"nickname\":null,\"profile\":{\"sources\":[{\"id\":\"src-fixture\",\"type\":\"m3u\",\"name\":\"Lawful fixture\",\"m3uUrl\":\"https://media.invalid/list.m3u\"}],\"parentalPin\":\"1234\",\"extraGuides\":[\"https://epgshare01.online/epgshare01/epg_ripper_CA2.xml.gz\",\"https://epgshare01.online/epgshare01/epg_ripper_US2.xml.gz\",\"https://epgshare01.online/epgshare01/epg_ripper_IN1.xml.gz\"]},\"commands\":[],\"latestApp\":null,\"trakt\":null,\"subtitlesApiKey\":null,\"tmdbApiKey\":\"synthetic-tmdb-metadata-key\",\"tvdbApiKey\":null,\"realDebrid\":null}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/device/progress?since=0",
+      "status": 200,
+      "body": "{\"profile\":\"ab1234cd5678ef90\",\"rows\":[],\"seq\":0,\"more\":false}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/device/config",
+      "status": 200,
+      "body": "{\"paired\":true,\"nickname\":null,\"profile\":{\"sources\":[{\"id\":\"src-fixture\",\"type\":\"m3u\",\"name\":\"Lawful fixture\",\"m3uUrl\":\"https://media.invalid/list.m3u\"}],\"parentalPin\":\"1234\",\"extraGuides\":[\"https://epgshare01.online/epgshare01/epg_ripper_CA2.xml.gz\",\"https://epgshare01.online/epgshare01/epg_ripper_US2.xml.gz\",\"https://epgshare01.online/epgshare01/epg_ripper_IN1.xml.gz\"]},\"commands\":[],\"latestApp\":null,\"trakt\":null,\"subtitlesApiKey\":null,\"tmdbApiKey\":\"synthetic-tmdb-metadata-key\",\"tvdbApiKey\":null,\"realDebrid\":null}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/device/realdebrid/api-key?profileId=ab1234cd5678ef90",
+      "status": 200,
+      "body": "{\"profileId\":\"ab1234cd5678ef90\",\"revision\":0,\"configured\":false,\"apiKey\":null}"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/device/realdebrid/api-key",
+      "status": 200,
+      "body": "{\"profileId\":\"ab1234cd5678ef90\",\"revision\":1,\"configured\":true}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/device/realdebrid/api-key?profileId=ab1234cd5678ef90",
+      "status": 200,
+      "body": "{\"profileId\":\"ab1234cd5678ef90\",\"revision\":1,\"configured\":true,\"apiKey\":\"fixture-only-never-a-real-account-key\"}"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/device/realdebrid/api-key",
+      "status": 200,
+      "body": "{\"profileId\":\"ab1234cd5678ef90\",\"revision\":2,\"configured\":false}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/device/realdebrid/api-key?profileId=ab1234cd5678ef90",
+      "status": 200,
+      "body": "{\"profileId\":\"ab1234cd5678ef90\",\"revision\":2,\"configured\":false,\"apiKey\":null}"
+    }
+  ]
+}

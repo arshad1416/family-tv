@@ -180,9 +180,6 @@ fun SeriesPage(profile: Profile, group: SeriesGroup, visible: List<CategoryEntit
     }
     val progress = rememberProgress()
     fun progressOf(e: XtreamParser.Episode): ProgressEntity? = progress[ProgressKey.episode(v.sourceId, v.seriesId, e.season, e.episode)]
-    val rdIndex = rememberRdIndex()
-    fun rdOf(e: XtreamParser.Episode): RdCopy? = rdIndex.episode(v.name, v.year, e.season, e.episode)
-
     val episodes = info?.episodes.orEmpty()
     val seasons = remember(episodes) { EpisodeGuide.seasons(episodes) }
     val lastPlayedSeason = remember(progress, v.key) {
@@ -226,8 +223,7 @@ fun SeriesPage(profile: Profile, group: SeriesGroup, visible: List<CategoryEntit
                     add("✓  Mark watched up to here" to { mark(before, true, "${before.size} episodes") })
                 }
                 add("▶  Play" to { playEpisode(scope, ctx, profile, v, e) })
-                rdOf(e)?.let { rd -> add("▶  Play from Real-Debrid  ·  ${rd.label}" to { playEpisodeFromRd(scope, ctx, v, e, rd) }) }
-            },
+                },
         )
     }
 
@@ -276,10 +272,6 @@ fun SeriesPage(profile: Profile, group: SeriesGroup, visible: List<CategoryEntit
                             Modifier.focusRequester(first),
                         )
                     }
-                    val nextRd = next?.let(::rdOf)
-                    if (next != null && nextRd != null) item("rd") {
-                        TvButton("▶  Play from Real-Debrid", { playEpisodeFromRd(scope, ctx, v, next, nextRd) })
-                    }
                     item("fav") {
                         TvButton(
                             if (favourite) "♥  In Favourites" else "♡  Add to Favourites",
@@ -295,10 +287,6 @@ fun SeriesPage(profile: Profile, group: SeriesGroup, visible: List<CategoryEntit
                         )
                     }
                 }
-            }
-            val nextRd = next?.let(::rdOf)
-            if (next != null && nextRd != null) item("rd-note") {
-                Text("S${next.season} E${next.episode} is also in your Real-Debrid account  ·  ${nextRd.label}", fontSize = 13.sp, color = Tv.Muted)
             }
             item("about") { ExpandableText(description ?: "No description", collapsedLines = if (phone) 4 else 3) }
             if (copies.size > 1) item("lang") {
@@ -328,7 +316,7 @@ fun SeriesPage(profile: Profile, group: SeriesGroup, visible: List<CategoryEntit
                     // The index keeps keys unique when a provider lists an episode twice.
                     itemsIndexed(inSeason, key = { i, e -> "${v.key}/$i/${e.id}" }) { _, e ->
                         EpisodeRow(
-                            e, cover, progressOf(e), rd = rdOf(e) != null,
+                            e, cover, progressOf(e), rd = false,
                             onFocus = { preview = e },
                             onClick = { if (form.touch) sheet = e else playEpisode(scope, ctx, profile, v, e) },
                             onLongClick = { episodeMenu(e) },
@@ -355,11 +343,10 @@ fun SeriesPage(profile: Profile, group: SeriesGroup, visible: List<CategoryEntit
         }
         sheet?.let { e ->
             val watched = progressOf(e)?.watched == true
-            val rd = rdOf(e)
             EpisodeSheet(
                 e, cover, progressOf(e), phone,
                 onPlay = { sheet = null; playEpisode(scope, ctx, profile, v, e) },
-                onPlayRd = rd?.let { { sheet = null; playEpisodeFromRd(scope, ctx, v, e, it) } },
+                onPlayRd = null,
                 onWatched = { mark(listOf(e), !watched, "Episode ${e.episode}") },
                 onClose = { sheet = null },
             )
@@ -367,18 +354,13 @@ fun SeriesPage(profile: Profile, group: SeriesGroup, visible: List<CategoryEntit
     }
 }
 
-private fun playEpisode(scope: CoroutineScope, ctx: android.content.Context, profile: Profile, v: SeriesEntity, e: XtreamParser.Episode) {
-    scope.launch {
-        Streams(ctx.app.db, profile).episode(v.sourceId, e)?.let {
-            play(ctx, it, "S${e.season} E${e.episode} ${EpisodeGuide.title(e)}", PlayItem.episode(v.sourceId, v.seriesId, v.name, e.season, e.episode))
-        }
-    }
-}
-
-private fun playEpisodeFromRd(scope: CoroutineScope, ctx: android.content.Context, v: SeriesEntity, e: XtreamParser.Episode, rd: RdCopy) {
-    scope.launch {
-        playFromRealDebrid(ctx, rd, "S${e.season} E${e.episode} ${EpisodeGuide.title(e)}", PlayItem.episode(v.sourceId, v.seriesId, v.name, e.season, e.episode))
-    }
+internal fun playEpisode(scope: CoroutineScope, ctx: android.content.Context, profile: Profile, v: SeriesEntity, e: XtreamParser.Episode) {
+    ctx.sourceActivity()?.chooseSource(CatalogSourceRequest(profile, "tv", v.tmdb, v.name, v.year,
+        PlayItem.episode(v.sourceId, v.seriesId, v.name, e.season, e.episode), e.season, e.episode,
+        "S${e.season} E${e.episode} ${EpisodeGuide.title(e)}", poster = v.poster, overview = v.plot, episodeName = EpisodeGuide.title(e),
+        iptv = IptvSourcePlayback({ Streams(ctx.app.db, profile).episode(v.sourceId, e) }, { url ->
+            play(ctx, url, "S${e.season} E${e.episode} ${EpisodeGuide.title(e)}", PlayItem.episode(v.sourceId, v.seriesId, v.name, e.season, e.episode))
+        })))
 }
 
 /** A row of selectable chips (languages, seasons); on TV a focusable row that remembers its place. */

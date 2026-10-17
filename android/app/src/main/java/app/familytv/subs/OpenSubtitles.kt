@@ -1,7 +1,11 @@
 package app.familytv.subs
 
+import app.familytv.core.consumeCancellable
+
 import com.google.gson.JsonParser
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
@@ -27,6 +31,7 @@ class OpenSubtitles(
     /** Tries the id searches first and falls back to the title; returns ranked results. */
     suspend fun search(r: SubtitleRequest): List<SubtitleHit> = withContext(Dispatchers.IO) {
         for (params in SubtitleSearch.queries(r)) {
+            currentCoroutineContext().ensureActive()
             val url = "${baseUrl.trimEnd('/')}/subtitles".toHttpUrl().newBuilder().apply {
                 params.forEach { (k, v) -> addQueryParameter(k, v) }
             }.build()
@@ -42,24 +47,26 @@ class OpenSubtitles(
         val res = JsonParser.parseString(call(Request.Builder().url("${baseUrl.trimEnd('/')}/download").post(body))).asJsonObject
         val link = res.get("link")?.takeIf { it.isJsonPrimitive }?.asString
             ?: throw SubtitleException(res.get("message")?.takeIf { it.isJsonPrimitive }?.asString ?: "No download link was returned.")
+        currentCoroutineContext().ensureActive()
         dir.mkdirs()
         // Keep only the latest few downloads.
         dir.listFiles()?.sortedByDescending { it.lastModified() }?.drop(4)?.forEach { it.delete() }
         val out = File(dir, "os-${hit.fileId}.srt")
-        client.newCall(Request.Builder().url(link).header("User-Agent", userAgent).build()).execute().use { r ->
+        client.newCall(Request.Builder().url(link).header("User-Agent", userAgent).build()).consumeCancellable { r ->
             if (!r.isSuccessful) throw SubtitleException("The subtitle file couldn't be downloaded (HTTP ${r.code}).")
             val bytes = r.body?.bytes() ?: ByteArray(0)
             if (bytes.isEmpty()) throw SubtitleException("The subtitle file was empty.")
+            currentCoroutineContext().ensureActive()
             out.writeBytes(bytes)
         }
         out
     }
 
-    private fun call(b: Request.Builder): String {
+    private suspend fun call(b: Request.Builder): String {
         val req = b.header("Api-Key", apiKey).header("User-Agent", userAgent).header("Accept", "application/json").build()
-        client.newCall(req).execute().use { res ->
+        return client.newCall(req).consumeCancellable { res ->
             val text = res.body?.string().orEmpty()
-            if (res.isSuccessful) return text
+            if (res.isSuccessful) return@consumeCancellable text
             val msg = runCatching { JsonParser.parseString(text).asJsonObject.get("message")?.asString }.getOrNull()
             throw SubtitleException(
                 when (res.code) {

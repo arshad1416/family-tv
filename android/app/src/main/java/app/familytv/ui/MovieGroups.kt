@@ -98,16 +98,14 @@ internal fun MovieCard(
     val scope = rememberCoroutineScope()
     val shown = remember(g) { pickCopy(ctx, g.copies, emptyMap()) }
     val p = g.progressIn(progress)
-    val rdIndex = rememberRdIndex()
-    val rd = rdIndex.movie(shown.name, shown.year)
     PosterCard(
         g.title, g.poster, modifier, width = width,
         favourite = g.favourite(favKeys),
         onFavourite = { toggleMovieFavourite(ctx, g, visible, favKeys) },
         watched = p?.watched == true, progress = ProgressRules.bar(p),
         onTrailer = movieTrailerAction(profile, shown),
-        rd = rd != null,
-        onMenu = { scope.launch { menus.open = movieMenu(ctx, profile, g, ctx.app.db.allCopies(g, visible), favKeys, progress, rd, scope) } },
+        rd = false,
+        onMenu = { scope.launch { menus.open = movieMenu(ctx, profile, g, ctx.app.db.allCopies(g, visible), favKeys, progress, null, scope) } },
         onFocus = onFocus,
     ) { scope.launch { playMovie(ctx, profile, g, visible, progress) } }
 }
@@ -141,12 +139,8 @@ fun movieMenu(
                         scope.launch { playMovieNow(ctx, profile, c) }
                     })
                 }
-            } else if (rd != null) {
-                add("▶  Play" to { scope.launch { playMovieNow(ctx, profile, pick) } })
             }
-            if (rd != null) {
-                add("▶  Play from Real-Debrid  ·  ${rd.label}" to { scope.launch { playFromRealDebrid(ctx, rd, pick.name, PlayItem.movie(pick.sourceId, pick.streamId, pick.name)) } })
-            }
+            if (copies.size == 1) add("▶  Choose IPTV or Torrentio source" to { scope.launch { playMovieNow(ctx, profile, pick) } })
             add((if (watched) "Mark as unwatched" else "✓  Mark as watched") to { markMovie(ctx, copies, pick, !watched, progress) })
             add((if (favourite) "♥  Remove from Favourites" else "♡  Add to Favourites") to { toggleMovieFavourite(ctx, all, emptySet(), favKeys, pick) })
         },

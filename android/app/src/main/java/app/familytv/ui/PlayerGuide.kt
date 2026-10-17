@@ -1,5 +1,8 @@
 package app.familytv.ui
 
+import app.familytv.core.foregroundTicks
+import androidx.lifecycle.compose.LocalLifecycleOwner
+
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
@@ -31,7 +34,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.derivedStateOf
@@ -145,7 +147,11 @@ fun PlayerGuide(
     categories: GuideCategories? = null,
 ) {
     val ctx = LocalContext.current
-    val now = produceState(System.currentTimeMillis()) { while (true) { delay(30_000); value = System.currentTimeMillis() } }
+    val clockLifecycle = LocalLifecycleOwner.current.lifecycle
+    val now = remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(clockLifecycle) {
+        clockLifecycle.foregroundTicks(30_000) { now.value = System.currentTimeMillis() }
+    }
     val start by remember { derivedStateOf { now.value / SLOT * SLOT } }
     val progs = rememberProgrammes(channels, from = start, hours = HOURS)
     val focus = remember { mutableStateOf<GuideFocus?>(null) }
