@@ -22,13 +22,14 @@ object Usage {
         UPDATE_INSTALL, EXIT_PROMPT, EXIT, ERROR,
     }
 
-    /** The only words a value may be besides a number: setting keys, player panels, what started playing, error kinds. */
+    /** The only words a value may be besides a number: setting keys, player panels, what started playing, error kinds, a server switch. */
     enum class Word {
         STREAM_QUALITY_LIVE, STREAM_QUALITY_MOVIES, STREAM_QUALITY_SERIES, PICTURE_SIZE, AUDIO_TRACK, SUBTITLES,
         RUN_CHECK, RELOAD_CHANNELS, PARENTAL_UNLOCK, CATEGORY_ORDER, TRAKT, OPEN_ON_START,
         INFO, MENU,
         LIVE, MOVIE, EPISODE,
         NETWORK, DECODER, TIMEOUT, SOURCE, OTHER,
+        SERVER_SWITCH,
     }
 
     /** As the portal takes it: [value] is a number, one [Word] in lower case, or null. */

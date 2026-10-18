@@ -49,6 +49,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.Tracks
 import androidx.media3.common.text.CueGroup
 import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.HttpDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
@@ -63,6 +64,7 @@ import app.familytv.data.ChannelEntity
 import app.familytv.data.Kind
 import app.familytv.data.NowNext
 import app.familytv.iptv.QualityPref
+import app.familytv.iptv.ServerSwitch
 import app.familytv.iptv.StreamQuality
 import app.familytv.iptv.Streams
 import app.familytv.player.CaptionPrefs
@@ -76,6 +78,7 @@ import app.familytv.player.StatsCollector
 import app.familytv.player.StreamStats
 import app.familytv.player.TrackLabels
 import app.familytv.portal.Profile
+import app.familytv.portal.Source
 import app.familytv.subs.MediaRef
 import app.familytv.subs.OpenSubtitles
 import app.familytv.subs.SubtitleHit
@@ -133,6 +136,8 @@ class PlayerActivity : ComponentActivity() {
     private var live = false
     private var url: String? = null
     private var openedAt = 0L
+    /** Looking for a backup server after repeated failures ([ServerSwitch]). */
+    private var switching = false
 
     // Overlay state, drawn by LiveOverlay / PlayerButtons / PlayerPanels in a ComposeView.
     private var overlayView: ComposeView? = null
@@ -206,7 +211,10 @@ class PlayerActivity : ComponentActivity() {
             override fun onPlayerError(error: PlaybackException) = onError(error)
             override fun onPlaybackStateChanged(state: Int) {
                 if (state == Player.STATE_BUFFERING) PlaybackStatus.bufferingEvents++
-                if (state == Player.STATE_READY) overlay.takeIf { it.tag == "error" }?.let { it.visibility = TextView.GONE; it.tag = null }
+                if (state == Player.STATE_READY) {
+                    overlay.takeIf { it.tag == "error" }?.let { it.visibility = TextView.GONE; it.tag = null }
+                    playingSource()?.let { ServerSwitch.played(it.id) }
+                }
             }
             override fun onTracksChanged(t: Tracks) = tracks.update(t)
             override fun onCues(cueGroup: CueGroup) {
@@ -568,6 +576,44 @@ class PlayerActivity : ComponentActivity() {
 
     private fun onError(error: PlaybackException) {
         PlaybackStatus.error("${error.errorCodeName} on $title")
+        if (!switching && trySwitch(error)) return
+        recover(error)
+    }
+
+    /** The Xtream line of what's playing (live channel, movie or episode). */
+    private fun playingSource(): Source? {
+        val id = if (live) (tuned ?: channels.getOrNull(index))?.sourceId else playItem?.sourceId
+        return profile?.sources?.firstOrNull { it.id == id && it.type == "xtream" }
+    }
+
+    /**
+     * Counts a server-side failure; on the third in a row, looks for one of the line's other
+     * servers that plays the same stream and carries on there. False when there's nothing to do.
+     */
+    private fun trySwitch(error: PlaybackException): Boolean {
+        val s = playingSource()?.takeIf { (it.serverUrls?.size ?: 0) > 1 } ?: return false
+        val failedUrl = url ?: return false
+        val from = ServerSwitch.serverOf(s, failedUrl) ?: return false
+        val status = (error.cause as? HttpDataSource.InvalidResponseCodeException)?.responseCode
+        val reason = ServerSwitch.classify(error.errorCode, status, error.cause) ?: return false
+        if (!ServerSwitch.failed(s.id, from)) return false
+        switching = true
+        lifecycleScope.launch {
+            val to = ServerSwitch.switch(s, failedUrl, from, reason, app.portal)
+            switching = false
+            if (url != failedUrl) return@launch // Zapped away meanwhile.
+            if (to == null) return@launch recover(error)
+            Usage.log(Usage.Action.ERROR, Usage.Word.SERVER_SWITCH)
+            retries = 0
+            tunedAt = System.currentTimeMillis()
+            start(ServerSwitch.swap(failedUrl, from, to), title, if (live) null else player.currentPosition)
+            show(ServerSwitch.NOTICE, 5000)
+        }
+        return true
+    }
+
+    /** Retries, then HLS, then the network check that tells the person why it won't play. */
+    private fun recover(error: PlaybackException) {
         val ch = tuned ?: channels.getOrNull(index)
         val p = profile
         // One-connection lines can refuse a new stream for a moment after the old one closes:

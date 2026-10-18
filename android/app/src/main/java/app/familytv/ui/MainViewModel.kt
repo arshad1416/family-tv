@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import app.familytv.app
 import app.familytv.diag.DiagnosisReport
+import app.familytv.iptv.ServerSwitch
 import app.familytv.portal.DeviceConfig
 import app.familytv.portal.LatestApp
 import app.familytv.portal.Profile
@@ -101,6 +102,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 app.sharedProgress.onSeq(hb.progressSeq)
                 offerUpdate(hb.latestApp)
                 Usage.send(app.portal)
+                s.config.profile?.let { ServerSwitch.retryFirst(it, app.db) }
             }
             else -> Unit
         }

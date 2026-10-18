@@ -9,7 +9,7 @@ import app.familytv.portal.Profile
 class Streams(private val db: AppDb, private val profile: Profile) {
     private suspend fun xtream(sourceId: String): Triple<String, String, String>? {
         val s = profile.sources.firstOrNull { it.id == sourceId && it.type == "xtream" } ?: return null
-        val server = db.catalog().source(sourceId)?.activeServer ?: s.serverUrls?.firstOrNull() ?: return null
+        val server = ServerSwitch.server(s, db.catalog().source(sourceId)?.activeServer) ?: return null
         return Triple(server, s.username.orEmpty(), s.password.orEmpty())
     }
 
