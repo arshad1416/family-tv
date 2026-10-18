@@ -39,6 +39,7 @@ import androidx.tv.material3.LocalContentColor
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import androidx.tv.material3.darkColorScheme
+import app.familytv.usage.Usage
 
 /** Dark navy palette with one strong blue for focus. */
 object Tv {
@@ -111,7 +112,8 @@ fun FocusBox(
                 if (onLongClick == null) {
                     Modifier.clickable(source, indication = null, onClick = onClick)
                 } else {
-                    Modifier.remoteLongPress(okPress, onClick, onLongClick).combinedClickable(source, indication = null, onLongClick = onLongClick, onClick = onClick)
+                    val held = { Usage.log(Usage.Action.HOLD_OK); onLongClick() }
+                    Modifier.remoteLongPress(okPress, onClick, held).combinedClickable(source, indication = null, onLongClick = held, onClick = onClick)
                 },
             ),
         contentAlignment = contentAlignment,

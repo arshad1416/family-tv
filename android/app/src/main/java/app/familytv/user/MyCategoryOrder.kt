@@ -2,6 +2,7 @@ package app.familytv.user
 
 import android.content.Context
 import app.familytv.data.Kind
+import app.familytv.usage.Usage
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -17,11 +18,13 @@ class MyCategoryOrder(context: Context) {
     val order: StateFlow<Map<String, List<String>>> = state
 
     fun set(kind: String, names: List<String>) {
+        Usage.log(Usage.Action.SETTING_CHANGE, Usage.Word.CATEGORY_ORDER)
         prefs.edit().putString(kind, names.joinToString(SEP)).apply()
         state.value = state.value + (kind to names)
     }
 
     fun reset(kind: String) {
+        Usage.log(Usage.Action.SETTING_CHANGE, Usage.Word.CATEGORY_ORDER)
         prefs.edit().remove(kind).apply()
         state.value = state.value - kind
     }

@@ -17,6 +17,7 @@ import app.familytv.sync.PlaybackStatus
 import app.familytv.sync.SyncWorker
 import app.familytv.trailer.MediaExtras
 import app.familytv.trakt.Trakt
+import app.familytv.usage.Usage
 import app.familytv.user.Favourites
 import app.familytv.user.MyCategoryOrder
 import app.familytv.user.SharedProgress
@@ -27,6 +28,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
 import java.util.concurrent.TimeUnit
 
 class FamilyTvApp : Application() {
@@ -61,9 +63,13 @@ class FamilyTvApp : Application() {
         super.onCreate()
         CrashLog.install(this)
         CrashLog.last(this)?.let { (trace, at) -> PlaybackStatus.lastCrash = trace; PlaybackStatus.lastCrashAt = at }
+        Usage.enabled = portal.cachedConfig?.profile?.usageStats == true
         registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
             override fun onActivityStarted(a: Activity) { started++ }
-            override fun onActivityStopped(a: Activity) { started-- }
+            override fun onActivityStopped(a: Activity) {
+                // Leaving the app (or Exit): send the usage stats now, the next check-in may be a while.
+                if (--started == 0) scope.launch { Usage.send(portal) }
+            }
             override fun onActivityCreated(a: Activity, b: Bundle?) = Unit
             override fun onActivityResumed(a: Activity) = Unit
             override fun onActivityPaused(a: Activity) = Unit

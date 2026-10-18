@@ -10,6 +10,7 @@ import app.familytv.portal.LatestApp
 import app.familytv.portal.Profile
 import app.familytv.sync.PlaybackStatus
 import app.familytv.update.Updater
+import app.familytv.usage.Usage
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -99,6 +100,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 app.commands.runAll(hb.commands, s.config.profile)
                 app.sharedProgress.onSeq(hb.progressSeq)
                 offerUpdate(hb.latestApp)
+                Usage.send(app.portal)
             }
             else -> Unit
         }
@@ -111,6 +113,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun reload() = viewModelScope.launch {
+        Usage.log(Usage.Action.SETTING_CHANGE, Usage.Word.RELOAD_CHANNELS)
         _screen.value = Screen.Loading
         app.db.clearAllTablesSafely()
         boot()
@@ -118,6 +121,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun runDiagnosis() = viewModelScope.launch {
         val p = profile ?: app.portal.cachedConfig?.profile ?: return@launch
+        Usage.log(Usage.Action.SETTING_CHANGE, Usage.Word.RUN_CHECK)
         diagnosing.value = true
         try {
             diagnosis.value = app.diagnoser.runAndReport(p, playingHere = false)

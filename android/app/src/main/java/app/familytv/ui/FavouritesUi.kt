@@ -39,6 +39,7 @@ import app.familytv.data.ChannelEntity
 import app.familytv.data.Kind
 import app.familytv.data.MovieEntity
 import app.familytv.data.SeriesEntity
+import app.familytv.usage.Usage
 import app.familytv.user.Favourites
 import app.familytv.user.FavouriteEntity
 import app.familytv.user.NewEpisodeList
@@ -80,6 +81,7 @@ fun toggleFavourite(ctx: Context, kind: String, sourceId: String, itemId: String
     val app = ctx.app
     app.scope.launch {
         val on = app.favourites.toggle(kind, sourceId, itemId, name)
+        Usage.log(if (on) Usage.Action.FAVOURITE_ADD else Usage.Action.FAVOURITE_REMOVE)
         withContext(Dispatchers.Main) { Toast.makeText(ctx.applicationContext, favouriteMessage(app, kind, on), Toast.LENGTH_SHORT).show() }
     }
 }
@@ -235,6 +237,7 @@ class ShowFavourites(private val rows: List<SeriesEntity>) {
  */
 fun toggleShowFavourite(ctx: Context, group: SeriesGroup, isFavourite: Boolean, preferred: SeriesEntity? = null) {
     val app = ctx.app
+    Usage.log(if (!isFavourite) Usage.Action.FAVOURITE_ADD else Usage.Action.FAVOURITE_REMOVE)
     app.scope.launch {
         val copies = app.db.allCopies(group)
         if (isFavourite) {

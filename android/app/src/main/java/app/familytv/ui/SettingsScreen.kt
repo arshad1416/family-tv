@@ -35,6 +35,7 @@ import app.familytv.portal.DeviceConfig
 import app.familytv.portal.Profile
 import app.familytv.start.OpenOnStart
 import app.familytv.sync.PlaybackStatus
+import app.familytv.usage.Usage
 import kotlinx.coroutines.delay
 import java.text.DateFormat
 import java.util.Date
@@ -109,11 +110,17 @@ private fun StreamQualityPanel() {
             TvButton("$label: ${pref.label}", {
                 menus.open = ItemMenu(
                     "Stream quality · $label",
-                    QualityPref.entries.map { q -> (if (q == pref) "✓  ${q.label}" else q.label) to { ctx.app.quality.set(kind, q) } },
+                    QualityPref.entries.map { q -> (if (q == pref) "✓  ${q.label}" else q.label) to { ctx.app.quality.set(kind, q); Usage.log(Usage.Action.SETTING_CHANGE, qualityWord(kind)) } },
                 )
             })
         }
     }
+}
+
+private fun qualityWord(kind: String) = when (kind) {
+    Kind.LIVE -> Usage.Word.STREAM_QUALITY_LIVE
+    Kind.MOVIE -> Usage.Word.STREAM_QUALITY_MOVIES
+    else -> Usage.Word.STREAM_QUALITY_SERIES
 }
 
 /**
@@ -134,7 +141,7 @@ private fun OpenOnStartPanel(profile: Profile?) {
             Text("On. Family TV opens by itself whenever this TV starts or wakes.", fontSize = 15.sp, color = Tv.Good)
         } else {
             Text("Your TV admin turned this on. This TV needs the Display over other apps permission for Family TV first.", fontSize = 14.sp, color = Tv.Muted)
-            TvButton("Allow", { noPage = !OpenOnStart.askPermission(ctx) })
+            TvButton("Allow", { Usage.log(Usage.Action.SETTING_CHANGE, Usage.Word.OPEN_ON_START); noPage = !OpenOnStart.askPermission(ctx) })
             if (noPage) {
                 Text("This TV has no page for it. From a computer, with network debugging on in the TV's developer options, run:", fontSize = 14.sp, color = Tv.Muted)
                 Text(OpenOnStart.ADB_GRANT, fontSize = 14.sp)
@@ -164,6 +171,7 @@ private fun ParentalPinPanel(profile: Profile?) {
             unlocked -> Text("Unlocked until the app restarts.", fontSize = 15.sp, color = Tv.Good)
             open -> PinPrompt(profile, Modifier.focusRequester(firstKey)) {
                 ctx.app.adultUnlocked.value = true
+                Usage.log(Usage.Action.SETTING_CHANGE, Usage.Word.PARENTAL_UNLOCK)
                 open = false
                 // The pad is gone; send focus back to the top of Settings.
                 if (!touch) entry.focus()

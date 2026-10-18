@@ -20,6 +20,7 @@ import app.familytv.iptv.language
 import app.familytv.iptv.releaseYear
 import app.familytv.portal.Profile
 import app.familytv.trakt.ProgressRules
+import app.familytv.usage.Usage
 import app.familytv.user.Favourites
 import app.familytv.user.MovieLanguages
 import app.familytv.user.ProgressEntity
@@ -149,6 +150,7 @@ private fun markMovie(ctx: Context, copies: List<MovieEntity>, pick: MovieEntity
     app.scope.launch {
         val targets = if (watched) listOf(pick) else copies.filter { progress[ProgressKey.movie(it.sourceId, it.streamId)]?.watched == true }.ifEmpty { listOf(pick) }
         targets.forEach { app.watched.movie(it.sourceId, it.streamId, watched) }
+        Usage.log(Usage.Action.MARK_WATCHED, if (watched) 1 else 0)
         toast(ctx, if (watched) "Marked as watched" else "Marked as unwatched")
     }
 }
@@ -162,6 +164,7 @@ private fun toggleMovieFavourite(ctx: Context, g: MovieGroup, visible: Set<Pair<
     app.scope.launch {
         val copies = app.db.allCopies(g, visible)
         val on = copies.filter { Favourites.key(Kind.MOVIE, it.sourceId, it.streamId) in favKeys }
+        Usage.log(if (on.isEmpty()) Usage.Action.FAVOURITE_ADD else Usage.Action.FAVOURITE_REMOVE)
         if (on.isNotEmpty()) on.forEach { app.favourites.toggle(Kind.MOVIE, it.sourceId, it.streamId, it.name) }
         else (preferred ?: pickCopy(ctx, copies, emptyMap())).let { app.favourites.toggle(Kind.MOVIE, it.sourceId, it.streamId, it.name) }
         toast(ctx, favouriteMessage(app, Kind.MOVIE, on.isEmpty()))
