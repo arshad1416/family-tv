@@ -378,7 +378,8 @@ function editProfile(p) {
     $("#app").innerHTML = '<div class="card"><label>Profile name</label><input id="pname" value="' + esc(draft.name) + '">' +
       '<label>Parental PIN (optional, asked before Adult Content opens on the Categories page)</label><input id="ppin" type="password" value="' + esc(draft.data.parentalPin) + '">' +
       '<label>Startup video</label><select id="psplash"><option value="">Family TV</option>' +
-      '<option value="the-nook"' + (draft.data.splash === "the-nook" ? " selected" : "") + '>The Nook (Airbnb guests)</option></select></div>' +
+      '<option value="the-nook"' + (draft.data.splash === "the-nook" ? " selected" : "") + '>The Nook (Airbnb guests)</option></select>' +
+      '<label><input type="checkbox" style="width:auto" id="popen"' + (draft.data.openOnStart ? " checked" : "") + '> Open when the TV turns on (each TV needs the Display over other apps permission once; its Settings page shows how)</label></div>' +
       draft.data.sources.map((s, i) => sourceForm(s, i, lineOf(s))).join("") + addLineCard(draft, lines, panel) + guidesCard(draft.data) + debridCard(draft) + (draft.id ? '<div class="card" id="rd-api-key"></div>' : '<div class="card muted small">Save the profile to add a Real-Debrid API key.</div>') + categoriesCard(draft, reported) +
       '<div class="row"><button class="b" id="adds">Add source</button><button class="b p" id="save">Save</button>' +
       (draft.id ? '<button class="b" id="delp">Delete profile</button>' : "") + '<button class="b" id="back">Back</button><span id="perr" class="err"></span></div>';
@@ -434,6 +435,7 @@ function editProfile(p) {
     draft.name = $("#pname").value;
     draft.data.parentalPin = $("#ppin").value || undefined;
     draft.data.splash = $("#psplash").value || undefined;
+    draft.data.openOnStart = $("#popen").checked || undefined;
     draft.data.extraGuides = $("#xg").value.split(/\\s+/).filter(Boolean);
     const pins = {};
     for (const line of $("#gp").value.split("\\n")) {

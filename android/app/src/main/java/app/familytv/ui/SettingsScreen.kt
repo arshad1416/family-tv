@@ -33,6 +33,7 @@ import app.familytv.data.Kind
 import app.familytv.iptv.QualityPref
 import app.familytv.portal.DeviceConfig
 import app.familytv.portal.Profile
+import app.familytv.start.OpenOnStart
 import app.familytv.sync.PlaybackStatus
 import kotlinx.coroutines.delay
 import java.text.DateFormat
@@ -81,6 +82,7 @@ fun SettingsScreen(vm: MainViewModel, config: DeviceConfig) {
                 if (config.trakt?.clientId != null) TraktPanel()
                 StreamQualityPanel()
                 PackageSorterPanel(config.profile)
+                OpenOnStartPanel(config.profile)
                 ParentalPinPanel(config.profile)
             }
         })
@@ -110,6 +112,33 @@ private fun StreamQualityPanel() {
                     QualityPref.entries.map { q -> (if (q == pref) "✓  ${q.label}" else q.label) to { ctx.app.quality.set(kind, q) } },
                 )
             })
+        }
+    }
+}
+
+/**
+ * Shown when the profile has Open when the TV turns on: whether this TV can do it yet, and how to
+ * give it the one permission it needs.
+ */
+@Composable
+private fun OpenOnStartPanel(profile: Profile?) {
+    if (profile?.openOnStart != true) return
+    val ctx = LocalContext.current
+    var state by remember { mutableStateOf(OpenOnStart.current(ctx)) }
+    var noPage by remember { mutableStateOf(false) }
+    // The permission is granted outside the app (its settings page or adb), so look again while this shows.
+    LaunchedEffect(Unit) { while (true) { state = OpenOnStart.current(ctx); delay(2_000) } }
+    Panel {
+        Text("Open when the TV turns on", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        if (state == OpenOnStart.State.READY) {
+            Text("On. Family TV opens by itself whenever this TV starts or wakes.", fontSize = 15.sp, color = Tv.Good)
+        } else {
+            Text("Your TV admin turned this on. This TV needs the Display over other apps permission for Family TV first.", fontSize = 14.sp, color = Tv.Muted)
+            TvButton("Allow", { noPage = !OpenOnStart.askPermission(ctx) })
+            if (noPage) {
+                Text("This TV has no page for it. From a computer, with network debugging on in the TV's developer options, run:", fontSize = 14.sp, color = Tv.Muted)
+                Text(OpenOnStart.ADB_GRANT, fontSize = 14.sp)
+            }
         }
     }
 }

@@ -36,6 +36,8 @@ export interface ProfileData {
   guidePins?: Record<string, string>;
   /** Startup video on the TVs: "the-nook" on the Airbnb guest profile; unset plays Family TV's. */
   splash?: Splash;
+  /** TVs open the app by themselves when they start or wake (the Airbnb guest TV); unset leaves that to the TV. */
+  openOnStart?: boolean;
 }
 
 export const SPLASHES = ["the-nook"] as const;
@@ -167,6 +169,9 @@ export function validateProfile(p: unknown): ProfileData {
   }
   if (d.splash === undefined || d.splash === null || (d.splash as string) === "") delete d.splash;
   else if (!SPLASHES.includes(d.splash)) throw new Error(`splash must be one of ${SPLASHES.join(", ")} or unset`);
+  if (d.openOnStart === true) d.openOnStart = true;
+  else if (d.openOnStart === undefined || d.openOnStart === null || d.openOnStart === false) delete d.openOnStart;
+  else throw new Error("openOnStart must be true, false or unset");
   return d;
 }
 

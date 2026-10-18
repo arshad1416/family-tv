@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Build
 import app.familytv.BuildConfig
 import app.familytv.core.Http
+import app.familytv.start.OpenOnStart
 import app.familytv.user.SharedProgressPage
 import app.familytv.user.SharedProgressRow
 import com.google.gson.Gson
@@ -20,6 +21,7 @@ class PortalException(val code: Int, message: String) : IOException(message)
 
 /** Talks to the Family TV portal (Cloudflare Worker). All calls are suspend and run on IO. */
 class PortalClient(context: Context, private val baseUrl: String = BuildConfig.PORTAL_URL.trimEnd('/')) {
+    private val appContext = context.applicationContext
     private val prefs = context.getSharedPreferences("portal", Context.MODE_PRIVATE)
     private val gson = Gson()
     private val jsonType = "application/json".toMediaType()
@@ -51,7 +53,12 @@ class PortalClient(context: Context, private val baseUrl: String = BuildConfig.P
     suspend fun config(): DeviceConfig {
         ensureRegistered()
         return try {
-            get("/api/device/config", DeviceConfig::class.java).also { if (it.paired) cachedConfig = it }
+            get("/api/device/config", DeviceConfig::class.java).also {
+                if (it.paired) {
+                    cachedConfig = it
+                    OpenOnStart.sync(appContext, it.profile?.openOnStart == true)
+                }
+            }
         } catch (e: PortalException) {
             if (e.code == 401) {
                 val stale = token

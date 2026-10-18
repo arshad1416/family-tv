@@ -28,6 +28,8 @@ data class Profile(
     val guidePins: Map<String, String>? = null,
     /** Startup video: "the-nook" on the Airbnb guest profile; unset plays Family TV's. */
     val splash: String? = null,
+    /** Open the app by itself when the TV starts or wakes (the Airbnb guest TV); see [app.familytv.start.OpenOnStart]. */
+    val openOnStart: Boolean? = null,
 )
 
 data class Command(val id: String, val type: String, val payload: Map<String, Any?>?)
