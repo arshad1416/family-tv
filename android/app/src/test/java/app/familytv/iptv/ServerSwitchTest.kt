@@ -11,6 +11,7 @@ import org.junit.Test
 import java.io.IOException
 import java.net.ConnectException
 import java.net.SocketException
+import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 
 class ServerSwitchTest {
@@ -18,14 +19,16 @@ class ServerSwitchTest {
 
     @Test fun onlyServerSideFailuresCount() {
         val io = PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS
-        assertEquals(Reason.SERVER_ERROR, ServerSwitch.classify(io, 503, null))
-        assertEquals(Reason.SERVER_ERROR, ServerSwitch.classify(io, 522, null))
+        assertEquals(Reason("HTTP 503", network = false), ServerSwitch.classify(io, 503, null))
+        assertEquals("HTTP 522", ServerSwitch.classify(io, 522, null)?.label)
         for (code in listOf(401, 403, 404, 451, 511, 513)) assertNull("$code", ServerSwitch.classify(io, code, null))
         val failed = PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED
-        assertEquals(Reason.NETWORK, ServerSwitch.classify(failed, null, IOException(UnknownHostException("main.example"))))
-        assertEquals(Reason.NETWORK, ServerSwitch.classify(failed, null, IOException(ConnectException("refused"))))
-        assertEquals(Reason.NETWORK, ServerSwitch.classify(failed, null, SocketException("Connection reset")))
-        assertEquals(Reason.NETWORK, ServerSwitch.classify(PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT, null, null))
+        assertEquals(Reason.CONNECTION, ServerSwitch.classify(failed, null, IOException(UnknownHostException("main.example"))))
+        assertEquals(Reason.CONNECTION, ServerSwitch.classify(failed, null, IOException(ConnectException("refused"))))
+        assertEquals(Reason.CONNECTION, ServerSwitch.classify(failed, null, SocketException("Connection reset")))
+        assertEquals(Reason.TIMEOUT, ServerSwitch.classify(failed, null, IOException(SocketTimeoutException())))
+        assertTrue(Reason.TIMEOUT.network && Reason.CONNECTION.network && !Reason.http(500).network)
+        assertEquals(Reason.TIMEOUT, ServerSwitch.classify(PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT, null, null))
         assertNull(ServerSwitch.classify(PlaybackException.ERROR_CODE_DECODING_FAILED, null, null))
         assertNull(ServerSwitch.classify(PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED, null, IOException(SocketException())))
     }

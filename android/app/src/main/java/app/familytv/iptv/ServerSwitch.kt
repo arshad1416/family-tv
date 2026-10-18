@@ -39,18 +39,23 @@ object ServerSwitch {
     const val RETRY_FIRST_MS = 6 * 3600_000L
     const val NOTICE = "Server not responding, switched to backup server."
 
-    enum class Reason {
-        /** HTTP 5xx, Cloudflare's 520-526 included. */
-        SERVER_ERROR,
-        /** Refused, reset, DNS failure or timeout, and the portal couldn't reach the server either. */
-        NETWORK,
-        /** The portal's first server passed its stream check again. */
-        FIRST_SERVER_BACK;
-
-        val wire: String get() = name.lowercase()
+    /**
+     * Why a stream failed, as the heartbeat reports it (same words as the Rust app): "HTTP 503" for
+     * a server error (Cloudflare's 520-526 included), "connection failed" for refused, reset or
+     * DNS, "timeout". [network] failures only count once the portal can't reach the server either.
+     */
+    data class Reason(val label: String, val network: Boolean) {
+        companion object {
+            fun http(status: Int) = Reason("HTTP $status", network = false)
+            val CONNECTION = Reason("connection failed", network = true)
+            val TIMEOUT = Reason("timeout", network = true)
+            /** The portal's first server passed its stream check again. */
+            val FIRST_SERVER_BACK = Reason("first server back", network = false)
+        }
     }
 
     private var prefs: SharedPreferences? = null
+    private const val PATH = "path."
     private val failures = Failures()
     @Volatile private var lastRetry = 0L
 
@@ -78,12 +83,13 @@ object ServerSwitch {
      * 401/403/404/451/511/513 and other 4xx (line, channel or local network problems), decoder and format errors never do.
      */
     fun classify(errorCode: Int, httpStatus: Int?, cause: Throwable?): Reason? {
-        if (httpStatus != null) return if (httpStatus in 500..599 && httpStatus !in NOT_SERVER) Reason.SERVER_ERROR else null
+        if (httpStatus != null) return if (httpStatus in 500..599 && httpStatus !in NOT_SERVER) Reason.http(httpStatus) else null
         if (errorCode !in 2000..2999) return null
-        if (errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT) return Reason.NETWORK
+        if (errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT) return Reason.TIMEOUT
         return generateSequence(cause) { it.cause }.take(8).firstNotNullOfOrNull {
             when (it) {
-                is UnknownHostException, is ConnectException, is SocketTimeoutException, is SocketException -> Reason.NETWORK
+                is SocketTimeoutException -> Reason.TIMEOUT
+                is UnknownHostException, is ConnectException, is SocketException -> Reason.CONNECTION
                 else -> null
             }
         }
@@ -105,19 +111,19 @@ object ServerSwitch {
     suspend fun switch(s: Source, url: String, from: String, reason: Reason, portal: PortalClient): String? {
         val others = s.serverUrls.orEmpty().map { it.trimEnd('/') }.filter { it != from }.distinct()
         if (others.isEmpty()) return null
-        if (reason == Reason.NETWORK) {
+        if (reason.network) {
             val edge = runCatching { portal.reachability(listOf(from)) }.getOrNull()?.firstOrNull() ?: return null
             if (edge.ok) return null // Cloudflare reaches it: this TV's network, not the server.
         }
         val to = others.firstOrNull { streamAnswers(swap(url, from, it)) } ?: return null
-        choose(s, from, to, reason)
+        choose(s, from, to, reason, url.removePrefix(from))
         return to
     }
 
     /**
      * App start, then every 6 h: back to the portal's first server for lines that moved off it,
-     * once a stream check on it passes. Waits while something plays, since a second stream can
-     * cost a one-connection line the one on screen.
+     * once the stream that failed plays there again. Waits while something plays, since a second
+     * stream can cost a one-connection line the one on screen.
      */
     suspend fun retryFirst(profile: Profile, db: AppDb, now: Long = System.currentTimeMillis()) {
         if (now - lastRetry < RETRY_FIRST_MS || PlaybackStatus.title != null) return
@@ -126,22 +132,27 @@ object ServerSwitch {
             val current = chosen(s) ?: continue
             val first = s.serverUrls?.firstOrNull()?.trimEnd('/') ?: continue
             if (current == first) continue
-            val ch = db.catalog().anyChannel(s.id) ?: continue
-            if (streamAnswers(XtreamUrls.live(first, s.username.orEmpty(), s.password.orEmpty(), ch.streamId))) {
-                choose(s, current, first, Reason.FIRST_SERVER_BACK)
+            // The stream that failed; any channel if the TV lost it.
+            val path = prefs?.getString("$PATH${s.id}", null)
+                ?: db.catalog().anyChannel(s.id)?.let { XtreamUrls.live(first, s.username.orEmpty(), s.password.orEmpty(), it.streamId).removePrefix(first) }
+                ?: continue
+            if (streamAnswers(first + path)) {
+                choose(s, current, first, Reason.FIRST_SERVER_BACK, null)
             }
         }
     }
 
-    private fun choose(s: Source, from: String, to: String, reason: Reason) {
+    /** [path]: the failed stream's URL after the server, kept on this TV to retry the first server with. */
+    private fun choose(s: Source, from: String, to: String, reason: Reason, path: String?) {
         val first = s.serverUrls?.firstOrNull()?.trimEnd('/')
         val at = System.currentTimeMillis()
         prefs?.edit()?.apply {
-            if (to == first) remove(s.id) else putString(s.id, to)
-            putString("last.from", hostOf(from)).putString("last.to", hostOf(to)).putLong("last.at", at).putString("last.reason", reason.wire)
+            if (to == first) remove(s.id).remove("$PATH${s.id}") else putString(s.id, to)
+            if (path != null) putString("$PATH${s.id}", path)
+            putString("last.from", hostOf(from)).putString("last.to", hostOf(to)).putLong("last.at", at).putString("last.reason", reason.label)
         }?.apply()
         failures.clear(s.id)
-        PlaybackStatus.serverSwitch = event(hostOf(from), hostOf(to), at, reason.wire)
+        PlaybackStatus.serverSwitch = event(hostOf(from), hostOf(to), at, reason.label)
     }
 
     private fun lastSwitch(): Map<String, Any?>? = prefs?.takeIf { it.contains("last.at") }?.let {
