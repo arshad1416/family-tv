@@ -48,6 +48,7 @@ import androidx.tv.material3.SurfaceDefaults
 import androidx.tv.material3.Text
 import app.familytv.BuildConfig
 import app.familytv.app
+import app.familytv.start.OpenOnStart
 import app.familytv.sync.CommandRunner
 import kotlinx.coroutines.launch
 import java.util.Calendar
@@ -128,6 +129,12 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         vm.start()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Picks up the Display over other apps permission as soon as the TV's settings page returns here.
+        OpenOnStart.sync(this)
     }
 
     override fun onStop() {

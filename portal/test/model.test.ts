@@ -43,6 +43,11 @@ describe("validateProfile", () => {
     expect("splash" in validateProfile({ sources: [], splash: "" as never })).toBe(false);
     expect(() => validateProfile({ sources: [], splash: "other" as never })).toThrow(/splash/);
   });
+  it("keeps Open when the TV turns on only when it's on", () => {
+    expect(validateProfile({ sources: [], openOnStart: true }).openOnStart).toBe(true);
+    expect("openOnStart" in validateProfile({ sources: [], openOnStart: false })).toBe(false);
+    expect(() => validateProfile({ sources: [], openOnStart: "yes" as never })).toThrow(/openOnStart/);
+  });
 });
 
 describe("profileHosts", () => {

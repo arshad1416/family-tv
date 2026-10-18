@@ -19,6 +19,8 @@ object PlaybackStatus {
     @Volatile var guide: Map<String, Any?>? = null
     /** The last new-episodes check: per favourite show, newest episode, furthest watched and the count (see [NewEpisodes]). */
     @Volatile var followed: Map<String, Any?>? = null
+    /** "ready" or "needs-permission" when the profile has Open when the TV turns on; null when it's off. */
+    @Volatile var openOnStart: String? = null
 
     fun started(t: String) {
         title = t; startedAt = System.currentTimeMillis(); bufferingEvents = 0; bitrateKbps = null; droppedFrames = 0
@@ -38,5 +40,6 @@ object PlaybackStatus {
         "lastCrash" to lastCrash?.let { mapOf("at" to lastCrashAt, "trace" to it.take(4000)) },
         "guide" to guide,
         "followed" to followed,
+        "openOnStart" to openOnStart,
     )
 }
