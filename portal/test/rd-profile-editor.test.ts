@@ -46,7 +46,7 @@ class Element {
 }
 const settle = async () => {for(let i=0;i<30;i++)await Promise.resolve();};
 const profile = (id="ab12",name="Home") => ({id,name,data:{sources:[],extraGuides:[]}});
-function editor(write?: (path:string, opts:RequestInit)=>Promise<unknown>) {
+function editor(write?: (path:string, opts:RequestInit)=>Promise<unknown>, reported: Record<string,{names:string[]}> = {}, stored = new Map<string,string>()) {
   const document=new Element("document",{},true);document.innerHTML='<main id="app"></main>';
   const calls:{path:string;opts:RequestInit}[]=[];
   const states=new Map<string,{revision:number;configured:boolean;maskedPreview:string|null}>();
@@ -57,14 +57,14 @@ function editor(write?: (path:string, opts:RequestInit)=>Promise<unknown>) {
       if(opts.method) {if(write)result=await write(path,opts);else {const b=JSON.parse(opts.body as string);state={revision:b.revision+1,configured:opts.method==="PUT",maskedPreview:opts.method==="PUT"?b.apiKey.slice(0,4)+"********"+b.apiKey.slice(-4):null};states.set(id,state);result={profileId:id,...state};}}
       else result={profileId:id,...state};
     }
-    else if(path.endsWith("/categories"))result={reported:{}};
+    else if(path.endsWith("/categories"))result={reported};
     else if(path==="/api/admin/lines")result={configured:false,lines:[]};
     else if(path==="/api/admin/profiles")result={profiles:[profile(),profile("cd34","Other")]};
     else result={ok:true};
     return new Response(JSON.stringify(result),{headers:{"content-type":"application/json"}});
   };
   const script=ADMIN_PAGE.split('<script>')[1].split('</script>')[0];
-  const api=runInNewContext(script.slice(0,script.lastIndexOf('\ndocument.querySelectorAll("nav button")'))+'\n({editProfile})', {document,fetch,Response,localStorage:{getItem:()=>"admin"},confirm:()=>true});
+  const api=runInNewContext(script.slice(0,script.lastIndexOf('\ndocument.querySelectorAll("nav button")'))+'\n({editProfile})', {document,fetch,Response,localStorage:{getItem:(k:string)=>k==="ftv_admin"?"admin":stored.get(k)??null,setItem:(k:string,v:string)=>stored.set(k,v)},confirm:()=>true});
   const get=(selector:string)=>{const el=document.querySelector(selector);if(!el)throw new Error('Missing element '+selector);return el;};
   return {document,calls,get,open:(p: unknown=profile())=>api.editProfile(p)};
 }
@@ -124,5 +124,25 @@ describe("real profile editor credential integration",()=>{
     finish({profileId:'ab12',revision:2,configured:false});await pending;await settle();
     expect(e.get('#pname').value).toBe('Other');expect(e.get('[data-status]')).toBe(newStatus);expect(newStatus.textContent).toBe(text);expect(e.get('#rdkey').value).toBe('');
     expect(e.calls.filter(c=>c.opts.method==='PUT'&&c.path.endsWith('/api-key')).map(c=>c.path)).toEqual(['/api/admin/profiles/ab12/realdebrid/api-key']);
+  });
+});
+
+describe("category list folding",()=>{
+  const live={live:{names:["News","Sports","Kids"]}};
+  it("starts closed, opens on its header, and remembers that in this browser",async()=>{
+    const stored=new Map<string,string>();const e=editor(undefined,live,stored);e.open();await settle();
+    const fold=()=>e.get('[data-catfold]');
+    expect(fold().textContent).toBe('▸ Live TV: 3 categories');expect(e.document.querySelector('#catlist')).toBeNull();
+    fold().onclick!();await settle();
+    expect(fold().textContent).toBe('▾ Live TV: 3 categories');expect(e.get('#catlist').querySelectorAll('[data-cat]').length).toBe(3);
+    expect(JSON.parse(stored.get('ftv_cats_open')!)).toEqual({live:true});
+    const again=editor(undefined,live,stored);again.open();await settle();expect(again.get('#catlist').querySelectorAll('[data-cat]').length).toBe(3);
+  });
+  it("keeps hidden categories and order when saved with the list closed",async()=>{
+    const e=editor(undefined,live);
+    e.open({id:'ab12',name:'Home',data:{sources:[],extraGuides:[],hiddenCategories:['Kids'],categoryOrder:{live:['Sports','News','Kids']}}});await settle();
+    expect(e.document.querySelector('#catlist')).toBeNull();await e.get('#save').onclick!();await settle();
+    const sent=JSON.parse(e.calls.find(c=>c.path==='/api/admin/profiles/ab12'&&c.opts.method==='PUT')!.opts.body as string);
+    expect(sent.data).toMatchObject({hiddenCategories:['Kids'],categoryOrder:{live:['Sports','News','Kids']}});
   });
 });
