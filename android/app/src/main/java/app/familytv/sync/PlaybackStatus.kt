@@ -21,6 +21,8 @@ object PlaybackStatus {
     @Volatile var followed: Map<String, Any?>? = null
     /** "ready" or "needs-permission" when the profile has Open when the TV turns on; null when it's off. */
     @Volatile var openOnStart: String? = null
+    /** The last automatic server switch, host names only (see [app.familytv.iptv.ServerSwitch]). */
+    @Volatile var serverSwitch: Map<String, Any?>? = null
 
     fun started(t: String) {
         title = t; startedAt = System.currentTimeMillis(); bufferingEvents = 0; bitrateKbps = null; droppedFrames = 0
@@ -41,5 +43,6 @@ object PlaybackStatus {
         "guide" to guide,
         "followed" to followed,
         "openOnStart" to openOnStart,
+        "serverSwitch" to serverSwitch,
     )
 }

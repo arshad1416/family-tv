@@ -65,7 +65,7 @@ class UsageTest {
             assertEquals(
                 "stream_quality_live stream_quality_movies stream_quality_series picture_size audio_track subtitles run_check " +
                     "reload_channels parental_unlock category_order trakt open_on_start info menu live movie episode network decoder " +
-                    "timeout source other",
+                    "timeout source other server_switch",
                 Word.entries.joinToString(" ") { it.wire },
             )
         }

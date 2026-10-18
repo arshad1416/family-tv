@@ -25,6 +25,8 @@ export const USAGE_WORDS = [
   "live", "movie", "episode",
   // play_fail, error
   "network", "decoder", "timeout", "source", "other",
+  // error: the app moved to a backup server
+  "server_switch",
 ] as const;
 
 export const USAGE_BATCH_MAX = 500;

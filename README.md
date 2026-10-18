@@ -41,6 +41,11 @@ passwords on a remote, and when a TV goes black the portal tells you why.
   screens and buttons get used (screen, action and a number or fixed word, e.g. time on a page or a
   search's result count) to `POST /api/device/usage`, never what's watched or searched. The portal
   keeps them 30 days in D1 `usage_events`; the allowed names are in `portal/src/usage.ts`.
+- **Automatic server switch:** after 3 server-side stream failures in a row within 10 minutes (HTTP
+  5xx, or a connection/DNS failure the portal's reachability check confirms), the TV moves the line
+  to the first of its other servers that plays the same stream within 5 s, and says "Server not
+  responding, switched to backup server." The choice stays on that TV; the first server is retried
+  at app start and every 6 hours. The heartbeat's `serverSwitch` shows the last move (host names only).
 - **Stream quality** (Settings): one choice each for Live TV, Movies and Series: Auto, Always prefer
   4K, HD, 1080p or 720p, kept on that TV. Movies and shows open the copy nearest that quality (after a
   part-watched copy and the family's language). Live TV starts HLS streams on the nearest picture

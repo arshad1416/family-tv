@@ -81,10 +81,13 @@ class Catalog(private val db: AppDb) {
         if (errors.isNotEmpty() && errors.size == profile.sources.size) throw IOException(errors.joinToString("; "))
     }
 
-    /** Picks the first server URL that answers with a valid login, so backup URLs just work. */
+    /**
+     * Picks the first server URL that answers with a valid login, so backup URLs just work. A server
+     * this TV switched to after stream failures goes first ([ServerSwitch]).
+     */
     suspend fun activeServer(s: Source): Pair<String, XtAccount> = withContext(Dispatchers.IO) {
         var last: Exception? = null
-        for (server in s.serverUrls.orEmpty()) {
+        for (server in (listOfNotNull(ServerSwitch.chosen(s)) + s.serverUrls.orEmpty()).distinctBy { it.trimEnd('/') }) {
             try {
                 val acc = get(XtreamUrls.api(server, s.username!!, s.password.orEmpty())) { XtreamParser.account(it) }
                 return@withContext server.trimEnd('/') to acc
@@ -341,20 +344,20 @@ class Catalog(private val db: AppDb) {
 
     /** Seasons, episodes (with stills and synopses) and the show's own plot, from get_series_info. */
     suspend fun seriesInfo(sourceId: String, seriesId: String, s: Source): XtreamParser.SeriesInfo = withContext(Dispatchers.IO) {
-        val server = dao.source(sourceId)?.activeServer ?: s.serverUrls!!.first()
+        val server = ServerSwitch.server(s, dao.source(sourceId)?.activeServer)!!
         get(XtreamUrls.api(server, s.username!!, s.password.orEmpty(), "get_series_info", mapOf("series_id" to seriesId))) { XtreamParser.seriesInfo(it) }
     }
 
     /** TMDB/IMDb ids and year from get_vod_info or get_series_info (Xtream only). */
     suspend fun infoIds(sourceId: String, id: String, s: Source, series: Boolean): XtInfoIds = withContext(Dispatchers.IO) {
-        val server = dao.source(sourceId)?.activeServer ?: s.serverUrls!!.first()
+        val server = ServerSwitch.server(s, dao.source(sourceId)?.activeServer)!!
         val (action, param) = if (series) "get_series_info" to "series_id" else "get_vod_info" to "vod_id"
         get(XtreamUrls.api(server, s.username!!, s.password.orEmpty(), action, mapOf(param to id))) { XtreamParser.infoIds(it) }
     }
 
     /** get_vod_info's trailer and TMDB id for a movie (Xtream only). */
     suspend fun vodInfo(sourceId: String, streamId: String, s: Source): XtreamParser.VodInfo = withContext(Dispatchers.IO) {
-        val server = dao.source(sourceId)?.activeServer ?: s.serverUrls!!.first()
+        val server = ServerSwitch.server(s, dao.source(sourceId)?.activeServer)!!
         get(XtreamUrls.api(server, s.username!!, s.password.orEmpty(), "get_vod_info", mapOf("vod_id" to streamId))) { XtreamParser.vodInfo(it) }
     }
 

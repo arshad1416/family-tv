@@ -10,6 +10,7 @@ import app.familytv.core.CrashLog
 import app.familytv.data.AppDb
 import app.familytv.diag.Diagnoser
 import app.familytv.iptv.Catalog
+import app.familytv.iptv.ServerSwitch
 import app.familytv.portal.PortalClient
 import app.familytv.sync.CommandRunner
 import app.familytv.sync.NewEpisodes
@@ -64,6 +65,7 @@ class FamilyTvApp : Application() {
         CrashLog.install(this)
         CrashLog.last(this)?.let { (trace, at) -> PlaybackStatus.lastCrash = trace; PlaybackStatus.lastCrashAt = at }
         Usage.enabled = portal.cachedConfig?.profile?.usageStats == true
+        ServerSwitch.init(this)
         registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
             override fun onActivityStarted(a: Activity) { started++ }
             override fun onActivityStopped(a: Activity) {
