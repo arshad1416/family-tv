@@ -38,6 +38,8 @@ export interface ProfileData {
   splash?: Splash;
   /** TVs open the app by themselves when they start or wake (the Airbnb guest TV); unset leaves that to the TV. */
   openOnStart?: boolean;
+  /** TVs send anonymous feature use (screens and buttons, never what's watched or searched); unset sends nothing. */
+  usageStats?: boolean;
 }
 
 export const SPLASHES = ["the-nook"] as const;
@@ -172,6 +174,9 @@ export function validateProfile(p: unknown): ProfileData {
   if (d.openOnStart === true) d.openOnStart = true;
   else if (d.openOnStart === undefined || d.openOnStart === null || d.openOnStart === false) delete d.openOnStart;
   else throw new Error("openOnStart must be true, false or unset");
+  if (d.usageStats === true) d.usageStats = true;
+  else if (d.usageStats === undefined || d.usageStats === null || d.usageStats === false) delete d.usageStats;
+  else throw new Error("usageStats must be true, false or unset");
   return d;
 }
 

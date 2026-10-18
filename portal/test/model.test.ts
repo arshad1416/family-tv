@@ -48,6 +48,11 @@ describe("validateProfile", () => {
     expect("openOnStart" in validateProfile({ sources: [], openOnStart: false })).toBe(false);
     expect(() => validateProfile({ sources: [], openOnStart: "yes" as never })).toThrow(/openOnStart/);
   });
+  it("keeps Usage stats only when it's on", () => {
+    expect(validateProfile({ sources: [], usageStats: true }).usageStats).toBe(true);
+    expect("usageStats" in validateProfile({ sources: [], usageStats: false })).toBe(false);
+    expect(() => validateProfile({ sources: [], usageStats: 1 as never })).toThrow(/usageStats/);
+  });
 });
 
 describe("profileHosts", () => {

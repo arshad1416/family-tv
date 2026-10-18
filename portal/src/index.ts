@@ -4,6 +4,7 @@ import { probe } from "./reachability";
 import { ADMIN_PAGE } from "./admin-page";
 import { preferServer, suggestions } from "./advice";
 import { daysLeft, loginFromLineUrl, Panel, PanelError, RENEW_MONTHS } from "./panel";
+import { USAGE_APPS, USAGE_BATCH_MAX, USAGE_KEEP_MS, usageEvent } from "./usage";
 
 export interface Env {
   DB: D1Database;
@@ -738,6 +739,29 @@ async function progressPull(req: Request, env: Env, url: URL) {
   return json({ profile: profileId, rows, seq: results.length ? results[results.length - 1].seq : since, more: results.length === PROGRESS_PAGE });
 }
 
+/**
+ * Anonymous usage stats from a TV, kept only for profiles with Usage stats on (`on: false` tells the
+ * TV to stop queueing). Rows past 30 days go as new ones arrive.
+ */
+async function usagePush(req: Request, env: Env) {
+  const d = await requireDevice(req, env);
+  if (!d.profile_id) throw new HttpError(403, "device not paired");
+  const b = await body<{ app?: unknown; appVersion?: unknown; events?: unknown }>(req);
+  if (!Array.isArray(b.events) || b.events.length > USAGE_BATCH_MAX) throw new HttpError(400, `events: a list of up to ${USAGE_BATCH_MAX}`);
+  if (typeof b.app !== "string" || !(USAGE_APPS as readonly string[]).includes(b.app)) throw new HttpError(400, `app: one of ${USAGE_APPS.join(", ")}`);
+  if (!(await loadProfile(env, d.profile_id))?.usageStats) return json({ ok: true, on: false, saved: 0 });
+  const now = Date.now();
+  const version = clip(typeof b.appVersion === "string" ? b.appVersion : null, 40);
+  const events = b.events.map((e) => usageEvent(e, now)).filter((e) => e !== null);
+  const stmts = events.map((e) =>
+    env.DB.prepare("INSERT INTO usage_events (device_id, profile_id, app, app_version, at, screen, action, value) VALUES (?,?,?,?,?,?,?,?)")
+      .bind(d.id, d.profile_id, b.app, version, e.at, e.screen, e.action, e.value),
+  );
+  stmts.push(env.DB.prepare("DELETE FROM usage_events WHERE at < ?").bind(now - USAGE_KEEP_MS));
+  await env.DB.batch(stmts);
+  return json({ ok: true, on: true, saved: events.length });
+}
+
 // ---------- admin API ----------
 
 async function adminDevices(env: Env) {
@@ -1285,6 +1309,7 @@ export async function handle(req: Request, env: Env): Promise<Response> {
   if (m === "POST" && p === "/api/device/realdebrid/unlink") return rdDisconnect(env, await requirePaired(req, env));
   if (m === "GET" && p === "/api/device/progress") return progressPull(req, env, url);
   if (m === "POST" && p === "/api/device/progress") return progressPush(req, env);
+  if (m === "POST" && p === "/api/device/usage") return usagePush(req, env);
   let mm = p.match(/^\/api\/device\/commands\/([a-f0-9]+)\/ack$/);
   if (m === "POST" && mm) return deviceAck(req, env, mm[1]);
 

@@ -5,6 +5,7 @@ import android.os.Build
 import app.familytv.BuildConfig
 import app.familytv.core.Http
 import app.familytv.start.OpenOnStart
+import app.familytv.usage.Usage
 import app.familytv.user.SharedProgressPage
 import app.familytv.user.SharedProgressRow
 import com.google.gson.Gson
@@ -57,6 +58,7 @@ class PortalClient(context: Context, private val baseUrl: String = BuildConfig.P
                 if (it.paired) {
                     cachedConfig = it
                     OpenOnStart.sync(appContext, it.profile?.openOnStart == true)
+                    Usage.enabled = it.profile?.usageStats == true
                 }
             }
         } catch (e: PortalException) {
@@ -103,6 +105,10 @@ class PortalClient(context: Context, private val baseUrl: String = BuildConfig.P
     suspend fun progressPush(rows: List<SharedProgressRow>) {
         post("/api/device/progress", mapOf("rows" to rows), Map::class.java)
     }
+
+    /** Anonymous usage events (up to 500); false when the profile has Usage stats off. */
+    suspend fun usage(app: String, appVersion: String, events: List<Usage.Event>): Boolean =
+        post("/api/device/usage", mapOf("app" to app, "appVersion" to appVersion, "events" to events), Map::class.java)["on"] != false
 
     private suspend fun <T> get(path: String, type: Class<T>): T = call(Request.Builder().url(baseUrl + path).get(), type, true)
 

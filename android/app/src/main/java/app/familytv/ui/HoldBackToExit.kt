@@ -4,6 +4,7 @@ import android.app.Activity
 import android.app.AlertDialog
 import android.content.DialogInterface
 import android.view.KeyEvent
+import app.familytv.usage.Usage
 
 /**
  * Holding Back on any screen asks whether to leave the app. A short press still does what Back
@@ -34,9 +35,10 @@ class HoldBackToExit(private val activity: Activity) {
     private fun ask() {
         if (dialog?.isShowing == true || activity.isFinishing) return
         val press = heldPress
+        Usage.log(Usage.Action.EXIT_PROMPT)
         dialog = AlertDialog.Builder(activity, android.R.style.Theme_DeviceDefault_Dialog_Alert)
             .setTitle("Exit Family TV?")
-            .setPositiveButton("Exit") { _, _ -> activity.finishAffinity() }
+            .setPositiveButton("Exit") { _, _ -> Usage.log(Usage.Action.EXIT); activity.finishAffinity() }
             .setNegativeButton("Cancel", null)
             // The release of the same held press lands on the dialog; it mustn't cancel it.
             .setOnKeyListener { _, code, ev -> code == KeyEvent.KEYCODE_BACK && ev.downTime == press }

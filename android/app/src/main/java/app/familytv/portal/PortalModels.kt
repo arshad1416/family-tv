@@ -30,6 +30,8 @@ data class Profile(
     val splash: String? = null,
     /** Open the app by itself when the TV starts or wakes (the Airbnb guest TV); see [app.familytv.start.OpenOnStart]. */
     val openOnStart: Boolean? = null,
+    /** Send anonymous feature use (screens and buttons, never what's watched or searched); see [app.familytv.usage.Usage]. */
+    val usageStats: Boolean? = null,
 )
 
 data class Command(val id: String, val type: String, val payload: Map<String, Any?>?)

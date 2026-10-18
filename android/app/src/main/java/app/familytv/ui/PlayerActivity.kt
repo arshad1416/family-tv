@@ -5,6 +5,7 @@ import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
@@ -84,6 +85,7 @@ import app.familytv.sync.PlaybackStatus
 import app.familytv.trakt.PlayItem
 import app.familytv.user.ProgressKey
 import app.familytv.trakt.PlaybackTracker
+import app.familytv.usage.Usage
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -130,6 +132,7 @@ class PlayerActivity : ComponentActivity() {
     private var tracker: PlaybackTracker? = null
     private var live = false
     private var url: String? = null
+    private var openedAt = 0L
 
     // Overlay state, drawn by LiveOverlay / PlayerButtons / PlayerPanels in a ComposeView.
     private var overlayView: ComposeView? = null
@@ -179,6 +182,8 @@ class PlayerActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        openedAt = SystemClock.elapsedRealtime()
+        Usage.opened(Usage.Screen.PLAYER)
         profile = app.portal.cachedConfig?.profile
         val form = formFactor()
         touch = form.touch
@@ -258,6 +263,7 @@ class PlayerActivity : ComponentActivity() {
             view.useController = true
             view.setControllerVisibilityListener(PlayerView.ControllerVisibilityListener { vodControls = it == View.VISIBLE })
             start(vodUrl, title)
+            Usage.log(Usage.Action.PLAY_START, if (playItem?.kind == ProgressKey.MOVIE) Usage.Word.MOVIE else Usage.Word.EPISODE)
             tracker = PlaybackTracker.attach(this, intent, player)
         } else {
             view.useController = false
@@ -321,6 +327,7 @@ class PlayerActivity : ComponentActivity() {
     }
 
     private fun pickAspect(a: Aspect) {
+        Usage.log(Usage.Action.SETTING_CHANGE, Usage.Word.PICTURE_SIZE)
         aspect.set(a)
         applyAspect()
     }
@@ -417,6 +424,7 @@ class PlayerActivity : ComponentActivity() {
         hideControls()
         buttonsActive = false
         panel = p
+        Usage.log(Usage.Screen.PLAYER_MENU, Usage.Action.OPEN, panelWord(p))
         panelBack.isEnabled = true
         syncOverlayFocus()
     }
@@ -526,6 +534,7 @@ class PlayerActivity : ComponentActivity() {
             if (play !== ch) title = "${ch.num}  ${play.name}"
             val url = Streams(app.db, p).live(play) ?: return@launch show("$title\nThis channel has no stream address.", 4000, isError = true)
             start(url, title)
+            Usage.log(Usage.Action.PLAY_START, Usage.Word.LIVE)
         }
     }
 
@@ -578,6 +587,7 @@ class PlayerActivity : ComponentActivity() {
             lifecycleScope.launch { Streams(app.db, p).live(ch, "m3u8")?.let { start(it, title) } }
             return
         }
+        Usage.log(Usage.Action.PLAY_FAIL, failWord(error))
         show("Can't play this right now. Checking why…", 0, isError = true)
         if (p == null) return
         lifecycleScope.launch {
@@ -789,6 +799,7 @@ class PlayerActivity : ComponentActivity() {
 
     private fun zap(delta: Int) {
         if (channels.isEmpty()) return
+        Usage.log(if (delta < 0) Usage.Action.ZAP_UP else Usage.Action.ZAP_DOWN)
         // With a Stream quality set, versions of one channel ("CTV HD", "CTV 4K") play the same one: step past them.
         val key = channels.getOrNull(index)?.takeIf { app.quality[Kind.LIVE] != QualityPref.AUTO }?.let { StreamQuality.channelKey(it.name) }.orEmpty()
         var steps = 0
@@ -810,10 +821,26 @@ class PlayerActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        Usage.left(Usage.Screen.PLAYER, (SystemClock.elapsedRealtime() - openedAt) / 1000)
         PlaybackStatus.stopped()
         tracker?.finish()
         player.release()
         super.onDestroy()
+    }
+
+    private fun failWord(e: PlaybackException) = when (e.errorCode) {
+        PlaybackException.ERROR_CODE_TIMEOUT, PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT -> Usage.Word.TIMEOUT
+        in 2000..2999 -> Usage.Word.NETWORK
+        in 3000..3999 -> Usage.Word.SOURCE
+        in 4000..4999 -> Usage.Word.DECODER
+        else -> Usage.Word.OTHER
+    }
+
+    private fun panelWord(p: PlayerPanel) = when (p) {
+        PlayerPanel.Menu -> Usage.Word.MENU
+        PlayerPanel.Captions -> Usage.Word.SUBTITLES
+        PlayerPanel.Tracks -> Usage.Word.AUDIO_TRACK
+        PlayerPanel.Info -> Usage.Word.INFO
     }
 
     companion object {

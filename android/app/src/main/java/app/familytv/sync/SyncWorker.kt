@@ -5,6 +5,7 @@ import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import app.familytv.app
 import app.familytv.update.Updater
+import app.familytv.usage.Usage
 
 /** Periodic background check-in: heartbeat, run queued commands, share watched marks, refresh lists twice a day, look for new episodes. */
 class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
@@ -22,6 +23,7 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
             if (stale) config.profile?.let { app.commands.refreshCatalog(it) }
             config.profile?.let { runCatching { app.newEpisodes.checkIfDue(it) } }
             runCatching { CategoryReport.sendIfChanged(app) }
+            Usage.send(app.portal)
             Result.success()
         } catch (e: Exception) {
             Result.retry()

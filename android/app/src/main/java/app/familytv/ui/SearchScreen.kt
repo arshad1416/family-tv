@@ -48,6 +48,7 @@ import app.familytv.data.searchChannels
 import app.familytv.data.searchMovies
 import app.familytv.data.searchSeries
 import app.familytv.portal.Profile
+import app.familytv.usage.Usage
 import app.familytv.user.Favourites
 import kotlinx.coroutines.delay
 
@@ -57,7 +58,9 @@ private data class Results(
     val channels: List<ChannelEntity> = emptyList(),
     val movies: List<MovieEntity> = emptyList(),
     val series: List<SeriesEntity> = emptyList(),
-)
+) {
+    val count get() = channels.size + movies.size + series.size
+}
 
 @Composable
 fun SearchScreen(vm: MainViewModel, profile: Profile) {
@@ -85,6 +88,7 @@ fun SearchScreen(vm: MainViewModel, profile: Profile) {
                 m, s,
             )
         }
+        if (q.length >= 2) value.count.let { Usage.log(if (it == 0) Usage.Action.SEARCH_EMPTY else Usage.Action.SEARCH_SUBMIT, it) }
     }
     val progs = rememberProgrammes(results.channels)
     val favs = rememberFavourites()
@@ -129,12 +133,12 @@ fun SearchScreen(vm: MainViewModel, profile: Profile) {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(bottom = 40.dp)) {
                 if (r.channels.isNotEmpty()) item("ch") {
                     Shelf("Channels") {
-                        itemsIndexed(r.channels, key = { _, c -> "${c.sourceId}/${c.streamId}" }) { _, c ->
+                        itemsIndexed(r.channels, key = { _, c -> "${c.sourceId}/${c.streamId}" }) { i, c ->
                             ChannelCard(
                                 c, c.epgId?.let { progs[it] }?.firstOrNull(),
                                 favourite = Favourites.key(Kind.LIVE, c.sourceId, c.streamId) in favKeys,
                                 onFavourite = { toggleFavourite(ctx, Kind.LIVE, c.sourceId, c.streamId, c.name) },
-                            ) { playLive(ctx, c.sourceId, c.categoryId, 0, c.streamId) }
+                            ) { Usage.log(Usage.Action.SEARCH_PICK, i); playLive(ctx, c.sourceId, c.categoryId, 0, c.streamId) }
                         }
                     }
                 }
@@ -147,13 +151,13 @@ fun SearchScreen(vm: MainViewModel, profile: Profile) {
                 }
                 if (shows.isNotEmpty()) item("se") {
                     Shelf("Series") {
-                        itemsIndexed(shows, key = { _, g -> g.key }) { _, g ->
+                        itemsIndexed(shows, key = { _, g -> g.key }) { i, g ->
                             val on = showFavs.has(g)
                             PosterCard(
                                 g.title, g.poster, entryPoint(nav.back == g.key),
                                 favourite = on,
                                 onFavourite = { toggleShowFavourite(ctx, g, on) },
-                            ) { nav.open = g }
+                            ) { Usage.log(Usage.Action.SEARCH_PICK, i); nav.open = g }
                         }
                     }
                 }

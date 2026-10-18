@@ -9,9 +9,11 @@ import android.os.Build
 import android.net.Uri
 import android.provider.Settings
 import app.familytv.BuildConfig
+import app.familytv.app
 import app.familytv.core.Http
 import app.familytv.portal.LatestApp
 import app.familytv.sync.PlaybackStatus
+import app.familytv.usage.Usage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -67,6 +69,9 @@ object Updater {
         Build.VERSION.SDK_INT < 26 || canRequestPackageInstalls()
 
     private suspend fun install(context: Context, latest: LatestApp, silent: Boolean) = withContext(Dispatchers.IO) {
+        // The install replaces this app, so send what's queued first.
+        Usage.log(Usage.Screen.UPDATE, Usage.Action.UPDATE_INSTALL, if (silent) 1 else 0)
+        runCatching { Usage.send(context.app.portal) }
         val installer = context.packageManager.packageInstaller
         val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL).apply {
             setAppPackageName(context.packageName)

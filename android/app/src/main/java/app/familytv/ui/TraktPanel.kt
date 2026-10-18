@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Text
 import app.familytv.app
 import app.familytv.trakt.Trakt
+import app.familytv.usage.Usage
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.text.DateFormat
@@ -61,7 +62,7 @@ fun TraktPanel(modifier: Modifier = Modifier) {
         when (val s = state) {
             is Trakt.State.SignedOut -> {
                 s.message?.let { Text(it, fontSize = 15.sp, color = Tv.Warn) }
-                TvButton("Connect Trakt", { moveFocus = true; trakt.startLink() }, Modifier.focusRequester(primary))
+                TvButton("Connect Trakt", { moveFocus = true; Usage.log(Usage.Action.SETTING_CHANGE, Usage.Word.TRAKT); trakt.startLink() }, Modifier.focusRequester(primary))
             }
             is Trakt.State.Linking -> LinkCode(s.userCode, s.url, s.url.trimEnd('/') + "/" + s.userCode, s.expiresAt, touch) { TvButton("Cancel", { moveFocus = true; trakt.cancelLink() }, Modifier.focusRequester(primary)) }
             is Trakt.State.SignedIn -> {

@@ -65,6 +65,8 @@ import app.familytv.portal.Profile
 import app.familytv.trailer.SeasonExtras
 import app.familytv.trakt.PlayItem
 import app.familytv.trakt.ProgressRules
+import app.familytv.usage.TrackScreen
+import app.familytv.usage.Usage
 import app.familytv.user.ProgressEntity
 import app.familytv.user.ProgressKey
 import app.familytv.user.SeriesLanguages
@@ -148,6 +150,7 @@ fun SeriesNav.Host(vm: MainViewModel, profile: Profile, content: @Composable () 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun SeriesPage(profile: Profile, group: SeriesGroup, visible: List<CategoryEntity>, onBack: () -> Unit) {
+    TrackScreen(Usage.Screen.SERIES_PAGE)
     val ctx = LocalContext.current
     val app = ctx.app
     val scope = rememberCoroutineScope()
@@ -216,6 +219,7 @@ fun SeriesPage(profile: Profile, group: SeriesGroup, visible: List<CategoryEntit
     fun mark(eps: List<XtreamParser.Episode>, watched: Boolean, what: String) {
         app.scope.launch {
             app.watched.episodes(v.sourceId, v.seriesId, eps.map { it.season to it.episode }, watched)
+            Usage.log(Usage.Screen.SERIES_PAGE, Usage.Action.MARK_WATCHED, if (watched) 1 else 0)
             toast(ctx, "$what ${if (watched) "marked as watched" else "marked as unwatched"}")
         }
     }

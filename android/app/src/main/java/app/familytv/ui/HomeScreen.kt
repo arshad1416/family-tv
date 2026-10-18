@@ -84,6 +84,8 @@ import app.familytv.portal.Profile
 import app.familytv.sync.NewEpisodes
 import app.familytv.sync.PlaybackStatus
 import app.familytv.trakt.PlayItem
+import app.familytv.usage.TrackScreen
+import app.familytv.usage.Usage
 import app.familytv.user.Favourites
 import coil.compose.AsyncImage
 import kotlinx.coroutines.delay
@@ -109,6 +111,18 @@ enum class Page(val label: String, val icon: ImageVector) {
     Series("Series", Icons.AutoMirrored.Filled.List),
     Search("Search", Icons.Filled.Search),
     Settings("Settings", Icons.Outlined.Settings),
+    ;
+
+    /** This page in the usage stats. */
+    val usage: Usage.Screen get() = when (this) {
+        Home -> Usage.Screen.HOME
+        Categories -> Usage.Screen.CATEGORIES
+        Live -> Usage.Screen.LIVE
+        Movies -> Usage.Screen.MOVIES
+        Series -> Usage.Screen.SERIES
+        Search -> Usage.Screen.SEARCH
+        Settings -> Usage.Screen.SETTINGS
+    }
 }
 
 /** Where focus lands the first time it moves from the rail into a page. */
@@ -152,6 +166,7 @@ private fun PageBody(page: Page, vm: MainViewModel, config: DeviceConfig, profil
 
 @Composable
 private fun PageContent(page: Page, vm: MainViewModel, config: DeviceConfig, profile: Profile, onNavigate: (Page) -> Unit) {
+    TrackScreen(page.usage)
     when (page) {
         Page.Home -> HomePage(vm, profile, onNavigate)
         Page.Categories -> CategoriesScreen(vm, profile)
@@ -178,7 +193,7 @@ fun HomeScreen(vm: MainViewModel, config: DeviceConfig) {
     val entry = remember { PageEntry() }
 
     // Back inside a page goes to the rail; Back on the rail leaves the app as before.
-    BackHandler(enabled = contentFocused) { runCatching { rail.getValue(page).requestFocus() } }
+    BackHandler(enabled = contentFocused) { Usage.log(Usage.Action.BACK); runCatching { rail.getValue(page).requestFocus() } }
     LaunchedEffect(Unit) { runCatching { rail.getValue(page).requestFocus() } }
 
     Box(Modifier.fillMaxSize().background(Tv.Bg)) {
