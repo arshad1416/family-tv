@@ -10,6 +10,10 @@ CREATE TABLE addons (
   updated_at INTEGER NOT NULL
 );
 
+-- Membership: while it runs, owned add-ons work; past it they pause (still owned) until it's
+-- renewed. Empty means a member with no end date, which is every profile until subscriptions exist.
+ALTER TABLE profiles ADD COLUMN membership_until INTEGER;  -- ms
+
 -- One row per profile and add-on: a purchase covers every TV on the profile.
 CREATE TABLE addon_purchases (
   profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,

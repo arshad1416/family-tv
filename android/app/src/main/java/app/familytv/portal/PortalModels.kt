@@ -55,6 +55,8 @@ data class DeviceConfig(
     val tvdbApiKey: String? = null,
     /** Paid add-ons for this TV's profile; see [app.familytv.addons.Addons]. Missing means none. */
     val addons: List<AddonInfo>? = null,
+    /** When the profile's membership ends (ms); null means no end. Past it, owned add-ons pause. */
+    val membershipUntil: Long? = null,
 )
 
 /** An add-on as the portal reports it: state is active, paused, available or not_offered. */

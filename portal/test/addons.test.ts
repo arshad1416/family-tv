@@ -100,6 +100,33 @@ describe("add-ons on the portal", () => {
     expect(list.purchases).toMatchObject([{ profile_id: "aa", status: "revoked", source: "manual" }]);
   });
 
+  it("pauses owned add-ons when the membership lapses and brings them back free on renewal", async () => {
+    const env = await setup();
+    await admin(env, "POST", "/api/admin/addons", { id: "multiview", name: "Multiview", status: "available" });
+    await admin(env, "POST", "/api/admin/addons", { id: "recorder", name: "Recorder", status: "available" });
+    await admin(env, "POST", "/api/admin/profiles/aa/addons/multiview", { owned: true });
+    await admin(env, "POST", "/api/admin/profiles/aa/addons/recorder", { owned: true });
+    await admin(env, "POST", "/api/admin/profiles/aa/addons/recorder", { owned: false });
+    const states = async () => Object.fromEntries(((await config(env, "lounge")).addons as { id: string; state: string }[]).map((a) => [a.id, a.state]));
+
+    const before = await refreshes(env, "lounge");
+    expect((await admin(env, "PUT", "/api/admin/profiles/aa/membership", { until: Date.now() - 1000 })).status).toBe(200);
+    expect(await refreshes(env, "lounge")).toBe(before + 1);
+    expect(await states()).toEqual({ multiview: "paused", recorder: "available" });
+
+    const renewed = Date.now() + 30 * 24 * 3600_000;
+    await admin(env, "PUT", "/api/admin/profiles/aa/membership", { until: renewed });
+    expect(await states()).toEqual({ multiview: "active", recorder: "available" });
+    expect(((await config(env, "lounge")) as unknown as { membershipUntil: number }).membershipUntil).toBe(renewed);
+
+    await admin(env, "PUT", "/api/admin/profiles/aa/membership", { until: null });
+    expect(((await config(env, "lounge")) as unknown as { membershipUntil: number | null }).membershipUntil).toBeNull();
+    const list = (await (await admin(env, "GET", "/api/admin/addons")).json()) as { memberships: Record<string, number | null> };
+    expect(list.memberships).toEqual({ aa: null, bb: null });
+    expect((await admin(env, "PUT", "/api/admin/profiles/aa/membership", { until: "soon" })).status).toBe(400);
+    expect((await admin(env, "PUT", "/api/admin/profiles/cc/membership", { until: null })).status).toBe(404);
+  });
+
   it("refuses bad input", async () => {
     const env = await setup();
     await admin(env, "POST", "/api/admin/addons", { id: "multiview", name: "Multiview" });

@@ -602,6 +602,18 @@ async function renderAddons() {
   let html = '<div class="card"><h3 style="margin-top:0">Add-ons</h3><p class="muted small">Extra features already built into the TV apps, bought once per profile: ' +
     "one purchase covers every TV on that profile. Drafts stay hidden from TVs. Buying isn't set up yet, so use Grant to give a profile an add-on by hand.</p>" +
     (data.addons.length ? "" : '<p class="muted">No add-ons yet.</p>') + "</div>";
+  // Membership: past its end date a profile's add-ons pause (still owned) and come back free when it's renewed.
+  const day = (t) => { if (!t) return ""; const d = new Date(t); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); };
+  if (profiles.length) {
+    html += '<div class="card"><h3 style="margin-top:0">Membership</h3><p class="muted small">After the end date, the add-ons on that profile pause; they work again, with no new charge, once the date is moved forward. Leave it empty for no end.</p>' +
+      '<table><tr><th>Profile</th><th>Member until</th><th></th></tr>';
+    for (const pr of profiles) {
+      const until = data.memberships[pr.id];
+      html += "<tr><td>" + esc(pr.name) + (until && until <= Date.now() ? ' <span class="err small">lapsed</span>' : "") + '</td><td><input type="date" style="width:auto" data-mu="' + esc(pr.id) + '" value="' + day(until) + '"></td>' +
+        '<td><button class="b" data-musave="' + esc(pr.id) + '">Save</button></td></tr>';
+    }
+    html += "</table></div>";
+  }
   data.addons.forEach((a, i) => {
     html += '<div class="card"><div class="row"><strong>' + esc(a.name) + '</strong><span class="muted small">' + esc(a.id) + " · updated " + ago(a.updated_at) + "</span></div>" +
       '<div class="grid"><div><label>Name</label><input data-an="' + i + '" value="' + esc(a.name) + '"></div><div><label>Status</label>' + addonStatusSelect('data-as="' + i + '"', a.status) + "</div></div>" +
@@ -628,6 +640,12 @@ async function renderAddons() {
     const i = b.dataset.asave, a = data.addons[+i];
     const body = { name: $('[data-an="' + i + '"]').value, description: $('[data-ad="' + i + '"]').value, status: $('[data-as="' + i + '"]').value };
     try { await api("/api/admin/addons/" + encodeURIComponent(a.id), { method: "PUT", body: JSON.stringify(body) }); renderAddons(); } catch (e) { fail(e); }
+  }));
+  document.querySelectorAll("[data-musave]").forEach((b) => (b.onclick = async () => {
+    const v = $('[data-mu="' + b.dataset.musave + '"]').value;
+    // The end of that day on this computer's clock.
+    const until = v ? new Date(v + "T23:59:59").getTime() : null;
+    try { await api("/api/admin/profiles/" + b.dataset.musave + "/membership", { method: "PUT", body: JSON.stringify({ until }) }); renderAddons(); } catch (e) { fail(e); }
   }));
   document.querySelectorAll("[data-grant]").forEach((b) => (b.onclick = async () => {
     const a = data.addons[+b.dataset.grant], pr = profiles.find((x) => x.id === b.dataset.pid), give = b.dataset.owned === "1";

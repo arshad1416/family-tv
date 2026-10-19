@@ -25,7 +25,7 @@ export interface DeviceAddon {
 
 /**
  * The add-ons a profile's TVs see. Drafts are left out. An owned add-on is active while the
- * profile is a member and paused (still owned) otherwise; one not owned, or refunded or revoked,
+ * profile is a member and paused (still owned) otherwise, coming back free on renewal; one not owned, or refunded or revoked,
  * can be bought while it's available and is no longer offered once retired.
  */
 export function addonStates(addons: AddonRow[], purchases: Map<string, PurchaseStatus>, member: boolean): DeviceAddon[] {

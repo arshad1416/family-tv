@@ -5,7 +5,7 @@ import { ADMIN_PAGE } from "./admin-page";
 import { preferServer, suggestions } from "./advice";
 import { daysLeft, loginFromLineUrl, Panel, PanelError, RENEW_MONTHS } from "./panel";
 import { USAGE_APPS, USAGE_BATCH_MAX, USAGE_KEEP_MS, usageEvent } from "./usage";
-import { addonStates, validateAddon, type AddonRow, type PurchaseStatus } from "./addons";
+import { addonStates, validateAddon, type AddonRow, type DeviceAddon, type PurchaseStatus } from "./addons";
 
 export interface Env {
   DB: D1Database;
@@ -220,25 +220,28 @@ async function deviceConfig(req: Request, env: Env) {
     tmdbApiKey: tmdbApiKey(env),
     tvdbApiKey: tvdbApiKey(env),
     realDebrid: await rdAccount(env, d.profile_id),
-    addons: await profileAddons(env, d.profile_id),
+    ...(await profileAddons(env, d.profile_id)),
   });
 }
 
 /**
- * The profile's add-ons as its TVs see them. There are no memberships yet, so every profile
- * counts as a member and nothing it owns is ever paused.
+ * The profile's add-ons as its TVs see them, and when its membership ends (null: no end). TVs
+ * also pause owned add-ons themselves once that time passes, without waiting for a new config.
  */
-async function profileAddons(env: Env, profileId: string) {
+async function profileAddons(env: Env, profileId: string): Promise<{ addons: DeviceAddon[]; membershipUntil: number | null }> {
   try {
-    const [addons, purchases] = await Promise.all([
+    const [addons, purchases, profile] = await Promise.all([
       env.DB.prepare("SELECT id, name, description, status FROM addons ORDER BY name").all<AddonRow>(),
       env.DB.prepare("SELECT addon_id, status FROM addon_purchases WHERE profile_id = ?").bind(profileId).all<{ addon_id: string; status: PurchaseStatus }>(),
+      env.DB.prepare("SELECT membership_until FROM profiles WHERE id = ?").bind(profileId).first<{ membership_until: number | null }>(),
     ]);
-    return addonStates(addons.results, new Map(purchases.results.map((p) => [p.addon_id, p.status])), true);
+    const until = profile?.membership_until ?? null;
+    const member = until === null || until > Date.now();
+    return { addons: addonStates(addons.results, new Map(purchases.results.map((p) => [p.addon_id, p.status])), member), membershipUntil: until };
   } catch (e) {
     // Deployed before migration 0009: TVs still get their config, with no add-ons.
     console.error(e);
-    return [];
+    return { addons: [], membershipUntil: null };
   }
 }
 
@@ -953,11 +956,22 @@ async function adminSaveProfile(req: Request, env: Env, id: string | null) {
 // ---------- add-ons ----------
 
 async function adminAddons(env: Env) {
-  const [addons, purchases] = await Promise.all([
+  const [addons, purchases, members] = await Promise.all([
     env.DB.prepare("SELECT id, name, description, status, updated_at FROM addons ORDER BY name").all(),
     env.DB.prepare("SELECT profile_id, addon_id, status, source, updated_at FROM addon_purchases").all(),
+    env.DB.prepare("SELECT id, membership_until FROM profiles").all<{ id: string; membership_until: number | null }>(),
   ]);
-  return json({ addons: addons.results, purchases: purchases.results });
+  return json({ addons: addons.results, purchases: purchases.results, memberships: Object.fromEntries(members.results.map((r) => [r.id, r.membership_until])) });
+}
+
+/** Sets when a profile's membership ends (null: no end). Renewing brings owned add-ons back at no charge. */
+async function adminMembership(req: Request, env: Env, profileId: string) {
+  const b = await body<{ until?: unknown }>(req);
+  if (b.until !== null && !(typeof b.until === "number" && Number.isSafeInteger(b.until) && b.until > 0)) throw new HttpError(400, "until must be a time in ms, or null for no end");
+  if (!(await env.DB.prepare("SELECT id FROM profiles WHERE id = ?").bind(profileId).first())) throw new HttpError(404, "profile not found");
+  await env.DB.prepare("UPDATE profiles SET membership_until = ? WHERE id = ?").bind(b.until, profileId).run();
+  await refreshProfileTvs(env, profileId);
+  return json({ ok: true });
 }
 
 async function adminSaveAddon(req: Request, env: Env, id: string | null) {
@@ -1402,6 +1416,7 @@ export async function handle(req: Request, env: Env): Promise<Response> {
     if (m === "GET" && p === "/api/admin/addons") return adminAddons(env);
     if (m === "POST" && p === "/api/admin/addons") return adminSaveAddon(req, env, null);
     if (m === "PUT" && (mm = p.match(/^\/api\/admin\/addons\/([a-z0-9][a-z0-9_-]{1,39})$/))) return adminSaveAddon(req, env, mm[1]);
+    if (m === "PUT" && (mm = p.match(/^\/api\/admin\/profiles\/([a-f0-9]+)\/membership$/))) return adminMembership(req, env, mm[1]);
     if (m === "POST" && (mm = p.match(/^\/api\/admin\/profiles\/([a-f0-9]+)\/addons\/([a-z0-9][a-z0-9_-]{1,39})$/))) return adminProfileAddon(req, env, mm[1], mm[2]);
     if (m === "GET" && p === "/api/admin/panel") return adminPanel(env);
     if (m === "GET" && p === "/api/admin/lines") return adminLines(env, url.searchParams.get("refresh") === "1");

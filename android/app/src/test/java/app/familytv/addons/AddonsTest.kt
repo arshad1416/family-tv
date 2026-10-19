@@ -48,6 +48,16 @@ class AddonsTest {
         assertEquals("Paused: can't reach the portal", list[0].line)
     }
 
+    @Test fun ownedAddOnsPauseOnceTheMembershipEndsAndComeBackWhenRenewed() {
+        val owned = AddonInfo("multiview", "Multiview", "active")
+        val lapsed = DeviceConfig(paired = true, addons = listOf(owned), membershipUntil = now)
+        assertFalse(active("multiview", lapsed))
+        assertEquals("Paused: renew your subscription", Addons.list(lapsed, now, now, known).single().line)
+        assertEquals("lapsed beats offline", "Paused: renew your subscription", Addons.list(lapsed, 0, now, known).single().line)
+        assertTrue(active("multiview", lapsed.copy(membershipUntil = now + 1)))
+        assertTrue("no end", active("multiview", lapsed.copy(membershipUntil = null)))
+    }
+
     @Test fun settingsSaysPlainlyWhereEachAddOnStands() {
         val c = config(
             AddonInfo("multiview", "Multiview", "active"),
@@ -59,7 +69,7 @@ class AddonsTest {
         )
         val list = Addons.list(c, now, now, known + "trivia")
         assertEquals(listOf("Multiview", "recorder", "Trivia", "Karaoke"), list.map { it.name })
-        assertEquals(listOf("On", "Paused: membership ended", "Buy on the portal", "Needs a newer version of the app"), list.map { it.line })
+        assertEquals(listOf("On", "Paused: renew your subscription", "Buy on the portal", "Needs a newer version of the app"), list.map { it.line })
         assertEquals("No longer offered", Addons.list(config(AddonInfo("trivia", "Trivia", "not_offered")), now, now, known + "trivia").single().line)
     }
 }
