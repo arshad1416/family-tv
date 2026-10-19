@@ -35,4 +35,11 @@ object ProgressRules {
 
     /** Fraction for the progress line on a poster or episode (0 when there is none to show). */
     fun bar(p: ProgressEntity?): Float = if (p == null || isWatched(p.percent)) 0f else (p.percent / 100f).coerceIn(0f, 1f)
+
+    /**
+     * Continue watching, newest first: the started, unwatched movies or episodes of [kind]
+     * ([app.familytv.user.ProgressKey.MOVIE] or [app.familytv.user.ProgressKey.EPISODE]), one per film or show (its latest).
+     */
+    fun continueWatching(rows: Collection<ProgressEntity>, kind: String): List<ProgressEntity> =
+        rows.filter { it.kind == kind && started(it) }.sortedByDescending { it.updatedAt }.distinctBy { it.sourceId to it.itemId }
 }

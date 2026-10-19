@@ -8,6 +8,7 @@ import java.text.Normalizer
  * Search matching, the same as the Rust app's: every word typed must start a word of the name,
  * ignoring case and accents ("pokemon" finds "Pokémon: The Movie", "star wa" finds "Star Wars").
  * When that finds fewer than asked for, names that merely contain the text fill the rest.
+ * Styled letters count as plain ones ([Names.clean]: "raw" finds "ᴿᴬᵂ").
  */
 object SearchText {
     private val MARKS = Regex("\\p{Mn}+")
@@ -17,7 +18,7 @@ object SearchText {
 
     /** Lower case, accents dropped, split on anything that isn't a letter or digit. */
     fun words(text: String): List<String> =
-        MARKS.replace(Normalizer.normalize(text, Normalizer.Form.NFD), "").lowercase().split(SEPARATORS).filter { it.isNotEmpty() }
+        MARKS.replace(Normalizer.normalize(Names.clean(text), Normalizer.Form.NFD), "").lowercase().split(SEPARATORS).filter { it.isNotEmpty() }
 
     /** The stored form, a space before every word (" pokemon the movie"), so `LIKE '% poke%'` is a word-prefix match. */
     fun index(name: String): String = words(name).joinToString("") { " $it" }

@@ -51,11 +51,22 @@ class PortalClient(context: Context, private val baseUrl: String = BuildConfig.P
     /** Forget this device (portal removed it); the next call registers again and shows a new code. */
     fun reset() = prefs.edit().clear().apply()
 
+    /**
+     * The portal dropped this TV after it was set up (its token was rejected, or it was unpaired),
+     * so the pairing screen says so until it pairs again. A network error never sets it.
+     */
+    var unpaired: Boolean
+        get() = prefs.getBoolean("unpaired", false)
+        private set(v) = prefs.edit().putBoolean("unpaired", v).apply()
+
     suspend fun config(): DeviceConfig {
         ensureRegistered()
         return try {
             get("/api/device/config", DeviceConfig::class.java).also {
-                if (it.paired) {
+                if (!it.paired) {
+                    if (cachedConfig != null) unpaired = true
+                } else {
+                    unpaired = false
                     cachedConfig = it
                     OpenOnStart.sync(appContext, it.profile?.openOnStart == true)
                     Usage.enabled = it.profile?.usageStats == true
@@ -65,7 +76,13 @@ class PortalClient(context: Context, private val baseUrl: String = BuildConfig.P
             if (e.code == 401) {
                 val stale = token
                 // Only forget the device once, even if several callers saw the same 401.
-                registerLock.withLock { if (token == stale) reset() }
+                registerLock.withLock {
+                    if (token == stale) {
+                        val wasSetUp = cachedConfig != null
+                        reset()
+                        if (wasSetUp) unpaired = true
+                    }
+                }
                 ensureRegistered()
                 get("/api/device/config", DeviceConfig::class.java)
             } else throw e

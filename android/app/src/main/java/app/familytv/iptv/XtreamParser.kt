@@ -187,9 +187,17 @@ object XtreamParser {
     }
 
     /** What get_vod_info adds for a movie's trailer: the YouTube id and the TMDB id to ask TMDB with. */
-    data class VodInfo(val trailer: String?, val tmdb: String?)
+    data class VodInfo(
+        val trailer: String?,
+        val tmdb: String?,
+        val plot: String? = null,
+        val cover: String? = null,
+        val rating: String? = null,
+        val durationSecs: Int? = null,
+        val year: Int? = null,
+    )
 
-    /** get_vod_info: the movie's YouTube trailer ("info.youtube_trailer") and TMDB id. */
+    /** get_vod_info: the movie's YouTube trailer ("info.youtube_trailer"), TMDB id, and what its details page shows. */
     fun vodInfo(reader: Reader): VodInfo {
         val r = JsonReader(reader).apply { isLenient = true }
         if (r.peek() != JsonToken.BEGIN_OBJECT) { r.skipValue(); return VodInfo(null, null) }
@@ -199,7 +207,14 @@ object XtreamParser {
             if (r.nextName() == "info" && r.peek() == JsonToken.BEGIN_OBJECT) info = readFlatObject(r) else r.skipValue()
         }
         r.endObject()
-        return VodInfo(Trailers.youtubeId(info["youtube_trailer"] ?: info["trailer"]), tmdbId(info["tmdb_id"] ?: info["tmdb"]))
+        return VodInfo(
+            Trailers.youtubeId(info["youtube_trailer"] ?: info["trailer"]), tmdbId(info["tmdb_id"] ?: info["tmdb"]),
+            plot = text(info["plot"] ?: info["description"] ?: info["overview"]),
+            cover = url(info["movie_image"]) ?: url(info["cover_big"]),
+            rating = text(info["rating"])?.takeUnless { it.toDoubleOrNull() == 0.0 },
+            durationSecs = info["duration_secs"]?.toDoubleOrNull()?.toInt()?.takeIf { it > 0 } ?: EpisodeGuide.seconds(info["duration"]),
+            year = text(info["releasedate"] ?: info["release_date"])?.take(4)?.toIntOrNull()?.takeIf { it > 1880 },
+        )
     }
 
     /** Reads a list of flat objects (or an object of them), skipping anything else. */

@@ -60,7 +60,7 @@ class PlaybackTracker private constructor(
     }
 
     private fun resume() {
-        if (player.currentPosition > 10_000) return // already moved on
+        if (item.fromStart || player.currentPosition > 10_000) return // Start over, or already moved on
         val at = ProgressRules.resumeAt(saved, duration()) ?: return
         player.seekTo(at)
         Toast.makeText(activity, "Resuming from ${clock(at)}", Toast.LENGTH_SHORT).show()
@@ -95,7 +95,8 @@ class PlaybackTracker private constructor(
         fun attach(activity: ComponentActivity, intent: Intent, player: Player): PlaybackTracker? =
             PlayItem.from(intent)?.let { PlaybackTracker(activity, it, player) }
 
-        private fun clock(ms: Long): String {
+        /** "42:10", or "1:42:10" past an hour. */
+        fun clock(ms: Long): String {
             val s = ms / 1000
             return if (s >= 3600) "%d:%02d:%02d".format(s / 3600, s / 60 % 60, s % 60) else "%d:%02d".format(s / 60, s % 60)
         }

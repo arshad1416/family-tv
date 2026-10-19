@@ -1,0 +1,9 @@
+<resources>
+    <!-- Android 12+ shows a system launch screen first; keep it the app's dark background. -->
+    <style name="Theme.FamilyTv" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/app_background</item>
+        <item name="android:colorBackground">@color/app_background</item>
+        <item name="android:windowSplashScreenBackground">@color/app_background</item>
+        <item name="android:windowSplashScreenIconBackgroundColor">@color/app_background</item>
+    </style>
+</resources>

@@ -56,6 +56,7 @@ import app.familytv.app
 import app.familytv.data.CategoryEntity
 import app.familytv.data.ChannelEntity
 import app.familytv.data.Kind
+import app.familytv.data.displayName
 import app.familytv.portal.Profile
 import app.familytv.user.Favourites
 import kotlinx.coroutines.delay
@@ -254,7 +255,7 @@ private fun CategoryList(c: GuideCategories) {
                 modifier = Modifier.fillMaxWidth().then(if (i == start) Modifier.focusRequester(first) else Modifier),
             ) { focused ->
                 Text(
-                    cat.name, Modifier.padding(horizontal = 16.dp, vertical = 10.dp), fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    cat.displayName, Modifier.padding(horizontal = 16.dp, vertical = 10.dp), fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     color = if (cat == c.shown && !focused) Tv.Accent else Tv.Text,
                 )
             }

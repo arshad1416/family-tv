@@ -164,6 +164,20 @@ class ProgressRulesTest {
     }
 
     @Test
+    fun continueWatchingIsLatestStartedPerShowNewestFirst() {
+        fun ep(series: String, e: Int, percent: Float, at: Long) =
+            ProgressEntity("e/s/$series/1/$e", "episode", "s", series, season = 1, episode = e, percent = percent, updatedAt = at)
+        val rows = listOf(
+            ep("a", 1, 40f, 100), ep("a", 2, 30f, 300), // two started: the later one stands for the show
+            ep("b", 1, 90f, 500), // watched: not continuing
+            ep("c", 4, 10f, 200),
+            ProgressEntity("m/s/9", "movie", "s", "9", percent = 50f, updatedAt = 900), // another kind
+        )
+        val out = ProgressRules.continueWatching(rows, "episode")
+        assertEquals(listOf("a" to 2, "c" to 4), out.map { it.itemId to it.episode })
+    }
+
+    @Test
     fun streamWithNoLengthStillShowsResume() {
         assertTrue(ProgressRules.started(p(0f, positionMs = 90_000)))
         assertFalse(ProgressRules.started(p(0f, positionMs = 10_000)))

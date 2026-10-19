@@ -28,6 +28,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -36,6 +37,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
@@ -56,6 +58,7 @@ import app.familytv.app
 import app.familytv.data.AppDb
 import app.familytv.data.CategoryEntity
 import app.familytv.data.Kind
+import app.familytv.data.Names
 import app.familytv.data.SeriesEntity
 import app.familytv.iptv.EpisodeGuide
 import app.familytv.iptv.SeriesTitles
@@ -86,7 +89,7 @@ val SeriesEntity.groupKey get() = titleKey.ifEmpty { SeriesTitles.parse(name).ke
  */
 class SeriesGroup(val key: String, val copies: List<SeriesEntity>) {
     val first get() = copies.first()
-    val title: String get() = SeriesTitles.parse(first.name).title
+    val title: String get() = Names.clean(SeriesTitles.parse(first.name).title)
     val poster: String? get() = copies.firstNotNullOfOrNull { it.poster }
     val plot: String? get() = copies.firstNotNullOfOrNull { it.plot }
 }
@@ -110,12 +113,17 @@ suspend fun AppDb.copyIds(sourceId: String, seriesId: String): List<Pair<String,
     return (listOf(row) + allCopies(SeriesGroup(row.key, listOf(row)))).map { it.sourceId to it.seriesId }.distinct()
 }
 
-/** Which show has its page open, and which poster to refocus when it closes. */
+/** Which show (or film) has its page open, and which poster to refocus when it closes. */
 class SeriesNav {
     var open by mutableStateOf<SeriesGroup?>(null)
     var back by mutableStateOf<String?>(null)
     var refocus = false
+    /** The film whose details page is open, and the categories its other copies may come from. */
+    var movie by mutableStateOf<Pair<MovieGroup, Set<Pair<String, String>>>?>(null)
 }
+
+/** The [SeriesNav] a poster sits under, so a movie poster can open its details page there. */
+val LocalSeriesNav = staticCompositionLocalOf<SeriesNav?> { null }
 
 @Composable
 fun rememberSeriesNav() = remember { SeriesNav() }
@@ -126,10 +134,13 @@ fun SeriesNav.Host(vm: MainViewModel, profile: Profile, content: @Composable () 
     val entry = pageEntry()
     val visible = categories(profile, Kind.SERIES)
     val o = open
+    val m = movie
     if (o != null) {
         SeriesPage(profile, o, visible) { back = o.key; refocus = true; open = null }
+    } else if (m != null) {
+        MoviePage(profile, m.first, m.second) { back = m.first.key; refocus = true; movie = null }
     } else {
-        content()
+        CompositionLocalProvider(LocalSeriesNav provides this) { content() }
         LaunchedEffect(Unit) {
             if (!refocus) return@LaunchedEffect
             refocus = false
@@ -211,8 +222,10 @@ fun SeriesPage(profile: Profile, group: SeriesGroup, visible: List<CategoryEntit
     val providerSeason = info?.seasons?.firstOrNull { it.number == season }
     val seasonOverview = providerSeason?.overview ?: extras?.overview
     val seasonTrailer = providerSeason?.trailer ?: extras?.trailer
+    // The episode last left part-watched (where Continue watching leads), else the next one up.
     val next = remember(episodes, progress) {
-        EpisodeGuide.nextUp(episodes, { progressOf(it)?.watched == true }, { ProgressRules.started(progressOf(it)) })
+        episodes.filter { ProgressRules.started(progressOf(it)) }.maxByOrNull { progressOf(it)?.updatedAt ?: 0 }
+            ?: EpisodeGuide.nextUp(episodes, { progressOf(it)?.watched == true }, { ProgressRules.started(progressOf(it)) })
     }
     val seasonWatched = inSeason.isNotEmpty() && inSeason.all { progressOf(it)?.watched == true }
     val menus = LocalItemMenus.current
@@ -245,7 +258,7 @@ fun SeriesPage(profile: Profile, group: SeriesGroup, visible: List<CategoryEntit
     val favourite = remember(favRows, all) { ShowFavourites(favRows).has(all) }
     val cover = info?.cover ?: v.poster ?: group.poster
     val description = info?.plot ?: v.plot ?: group.plot
-    val title = SeriesTitles.parse(v.name).title
+    val title = Names.clean(SeriesTitles.parse(v.name).title)
 
     var sheet by remember(v.key) { mutableStateOf<XtreamParser.Episode?>(null) }
     var preview by remember(v.key, season) { mutableStateOf<XtreamParser.Episode?>(null) }

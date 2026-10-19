@@ -8,6 +8,7 @@ import app.familytv.diag.DiagnosisReport
 import app.familytv.iptv.ServerSwitch
 import app.familytv.portal.DeviceConfig
 import app.familytv.portal.LatestApp
+import app.familytv.portal.PortalException
 import app.familytv.portal.Profile
 import app.familytv.sync.PlaybackStatus
 import app.familytv.update.Updater
@@ -21,7 +22,7 @@ import kotlinx.coroutines.launch
 
 sealed interface Screen {
     data object Loading : Screen
-    data class Pairing(val code: String, val expires: Long) : Screen
+    data class Pairing(val code: String, val expires: Long, val unpaired: Boolean = false) : Screen
     data class Syncing(val step: String, val fraction: Float = 0f, val detail: String? = null) : Screen
     data class Ready(val config: DeviceConfig) : Screen
     data class Failed(val message: String) : Screen
@@ -64,7 +65,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
         if (!config.paired) {
-            _screen.value = Screen.Pairing(config.pairCode.orEmpty(), config.pairExpires ?: 0)
+            _screen.value = Screen.Pairing(config.pairCode.orEmpty(), config.pairExpires ?: 0, app.portal.unpaired)
             return
         }
         val profile = config.profile ?: return
@@ -103,6 +104,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 offerUpdate(hb.latestApp)
                 Usage.send(app.portal)
                 s.config.profile?.let { ServerSwitch.retryFirst(it, app.db) }
+            }.onFailure {
+                // Token rejected: the portal forgot this TV, so show why with a new code.
+                if ((it as? PortalException)?.code == 401) boot()
             }
             else -> Unit
         }
