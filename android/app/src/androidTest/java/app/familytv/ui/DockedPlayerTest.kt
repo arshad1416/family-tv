@@ -3,6 +3,7 @@ package app.familytv.ui
 import android.app.Instrumentation
 import android.app.UiAutomation
 import android.content.res.Configuration
+import android.os.ParcelFileDescriptor
 import android.os.SystemClock
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -52,6 +53,9 @@ class DockedPlayerTest {
 
     @Before fun setUp() {
         instrumentation.uiAutomation.setRotation(UiAutomation.ROTATION_FREEZE_0)
+        // Full screen hides the system bars, and the first time it does Android shows a "viewing full screen"
+        // hint in its own window, which takes the keys until someone taps Got it. Mark it already seen.
+        shell("settings put secure immersive_mode_confirmations confirmed")
         val file = File(target.filesDir, "test-clip.mp4")
         instrumentation.context.assets.open("clip.mp4").use { input -> file.outputStream().use { input.copyTo(it) } }
         clip = file.toURI().toString()
@@ -231,9 +235,14 @@ class DockedPlayerTest {
                 "${activity.dock.mode}, back=${activity.dock.current?.backState}, playing=${activity.dock.current?.isPlaying}, " +
                     "windowFocus=${activity.hasWindowFocus()}, focused=${activity.currentFocus?.javaClass?.simpleName}"
             }
-            throw AssertionError("Timed out waiting for $what (player: $state)")
+            val focusedWindow = shell("dumpsys window").lineSequence().firstOrNull { "mCurrentFocus" in it }?.trim()
+            throw AssertionError("Timed out waiting for $what (player: $state; system: $focusedWindow)")
         }
     }
+
+    private fun shell(command: String): String =
+        ParcelFileDescriptor.AutoCloseInputStream(instrumentation.uiAutomation.executeShellCommand(command))
+            .bufferedReader().use { it.readText() }
 
     private fun <T> main(block: () -> T): T {
         var out: Result<T>? = null
