@@ -36,6 +36,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.addPathNodes
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.min
 import androidx.compose.ui.viewinterop.AndroidView
@@ -65,6 +66,15 @@ class DockedPlayer(private val activity: ComponentActivity) : PlayerHost {
     override val docked get() = controller != null && !full
     override val canDock get() = true
     private val fullScreen get() = controller != null && full
+
+    // For the instrumented tests (main thread only).
+    internal val current: PlayerController? get() = controller
+    internal val mode: String get() = when {
+        controller == null -> "closed"
+        full -> "full"
+        tablet() && landscape() -> "side"
+        else -> "docked"
+    }
 
     fun play(intent: Intent) {
         // Lines allow one connection: the old stream stops before the new one starts.
@@ -264,7 +274,7 @@ fun DockedControls(
     onFullScreen: () -> Unit,
 ) {
     Box(Modifier.fillMaxSize()) {
-        if (live) Box(Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures(onDoubleTap = { onFullScreen() }, onTap = { onTap() }) })
+        if (live) Box(Modifier.fillMaxSize().testTag("docked_video").pointerInput(Unit) { detectTapGestures(onDoubleTap = { onFullScreen() }, onTap = { onTap() }) })
         if (visible) {
             SmallRound(Icons.Filled.Close, "Close player", Modifier.align(Alignment.TopStart).padding(8.dp), onClose)
             SmallRound(FullScreenIcon, "Full screen", Modifier.align(Alignment.TopEnd).padding(8.dp), onFullScreen)

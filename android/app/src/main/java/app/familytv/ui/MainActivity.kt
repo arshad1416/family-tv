@@ -61,6 +61,8 @@ class MainActivity : ComponentActivity() {
     val dock = DockedPlayer(this)
     /** The startup video while it shows (see [SplashVideo]). */
     private var splash by mutableStateOf<Int?>(null)
+    /** For the instrumented tests: keys are swallowed while the startup video plays. */
+    internal val splashing get() = splash != null
     private var splashSkipped by mutableStateOf(false)
 
     // androidx marks this restricted, but overriding the platform method is fine.
