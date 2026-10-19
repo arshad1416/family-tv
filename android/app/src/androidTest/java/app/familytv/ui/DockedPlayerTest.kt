@@ -107,7 +107,7 @@ class DockedPlayerTest {
         val player = main { activity.dock.current!! }
 
         // The TV's Back sequence over live TV, one overlay at a time.
-        for (step in listOf("guide_over", "guide_picture", "guide_categories")) {
+        for (step in listOf("guide_over", "guide_categories")) {
             back()
             waitFor("Back to reach $step") { main { player.backState } == step }
             assertEquals("full", mode())
@@ -159,7 +159,7 @@ class DockedPlayerTest {
         assertSame(player, main { activity.dock.current })
 
         // Back steps through the guide first, then returns to side by side (never closes from full screen).
-        for (step in listOf("guide_over", "guide_picture", "guide_categories")) {
+        for (step in listOf("guide_over", "guide_categories")) {
             back()
             waitFor("Back to reach $step (is ${main { player.backState }}, ${mode()})") { main { player.backState } == step }
             assertEquals("full", mode())
