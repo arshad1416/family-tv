@@ -6,6 +6,7 @@ import android.content.res.Configuration
 import android.os.SystemClock
 import android.view.KeyEvent
 import android.view.MotionEvent
+import androidx.compose.ui.test.ComposeTimeoutException
 import androidx.compose.ui.test.doubleClick
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -156,7 +157,7 @@ class DockedPlayerTest {
         while (mode() == "full" && presses < 6) {
             back()
             presses++
-            SystemClock.sleep(600)
+            compose.waitForIdle()
         }
         waitMode("side")
         assertSame("same player back side by side", player, main { activity.dock.current })
@@ -215,13 +216,13 @@ class DockedPlayerTest {
         instrumentation.sendPointerSync(MotionEvent.obtain(down, down + 50, MotionEvent.ACTION_UP, x, y, 0))
     }
 
+    /** Waits through the Compose rule: its test clock (the startup video's timers, fades) only moves while the rule waits. */
     private fun waitFor(what: String, timeoutMs: Long = 10_000, ok: () -> Boolean) {
-        val end = SystemClock.uptimeMillis() + timeoutMs
-        while (SystemClock.uptimeMillis() < end) {
-            if (ok()) return
-            SystemClock.sleep(200)
+        try {
+            compose.waitUntil(timeoutMs) { ok() }
+        } catch (e: ComposeTimeoutException) {
+            throw AssertionError("Timed out waiting for $what")
         }
-        throw AssertionError("Timed out waiting for $what")
     }
 
     private fun <T> main(block: () -> T): T {
