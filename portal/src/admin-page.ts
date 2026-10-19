@@ -310,6 +310,13 @@ function mountRdApiKey(draft, card) {
 // Category order and visibility, per kind. Rows are what the profile's TVs reported, saved order first.
 const KINDS = [["live", "Live TV"], ["movie", "Movies"], ["series", "TV Shows"]];
 let catKind = "live";
+// Which kinds' lists are open; closed by default, remembered in this browser.
+let catOpen = {};
+try { catOpen = JSON.parse(localStorage.getItem("ftv_cats_open") || "{}") || {}; } catch {}
+const toggleCats = () => {
+  catOpen = { ...catOpen, [catKind]: !catOpen[catKind] };
+  try { localStorage.setItem("ftv_cats_open", JSON.stringify(catOpen)); } catch {}
+};
 function categoryRows(draft, reported) {
   const saved = (draft.data.categoryOrder || {})[catKind] || [];
   const seen = new Set(), rows = [];
@@ -323,7 +330,10 @@ function categoriesCard(draft, reported) {
   let html = '<div class="card"><h3 style="margin-top:0">Categories</h3><div class="row" style="margin-bottom:8px">' +
     KINDS.map(([k, label]) => '<button class="b' + (k === catKind ? " p" : "") + '" data-kind="' + k + '">' + label + "</button>").join("") +
     '<span class="muted small">Drag by the handle (or use the buttons) to order, and tick to show or hide what the TVs on this profile list. Saved with the profile.</span></div>';
-  if (!rows.length) html += '<p class="muted small">No categories reported yet. Open Family TV on a TV with this profile and come back in a minute.</p>';
+  if (!rows.length) return html + '<p class="muted small">No categories reported yet. Open Family TV on a TV with this profile and come back in a minute.</p></div>';
+  const open = !!catOpen[catKind];
+  html += '<button class="b" data-catfold aria-expanded="' + open + '">' + (open ? "▾ " : "▸ ") + KINDS.find(([k]) => k === catKind)[1] + ": " + rows.length + (rows.length === 1 ? " category" : " categories") + "</button>";
+  if (!open) return html + "</div>";
   html += '<div id="catlist">' + rows.map((n, i) => '<div class="row cat" data-cat="' + i + '" style="gap:6px;padding:4px 0;border-top:1px solid var(--line)">' +
     '<span class="grip" data-drag title="Drag to move">⠿</span>' +
     '<input type="checkbox" style="width:auto" data-show="' + i + '"' + (hidden.has(n.toLowerCase()) ? "" : " checked") + ">" +
@@ -419,6 +429,7 @@ function editProfile(p) {
       } catch (e) { $("#pncreate").disabled = false; $("#plmsg").innerHTML = '<span class="err">' + esc(e.message) + "</span>"; }
     };
     document.querySelectorAll("[data-kind]").forEach((b) => (b.onclick = () => { collect(); catKind = b.dataset.kind; paint(); }));
+    document.querySelectorAll("[data-catfold]").forEach((b) => (b.onclick = () => { collect(); toggleCats(); paint(); }));
     document.querySelectorAll("[data-drag]").forEach((h) => (h.onpointerdown = (e) => dragCat(e, h)));
     document.querySelectorAll("[data-top]").forEach((b) => (b.onclick = () => moveCat(+b.dataset.top, 0)));
     document.querySelectorAll("[data-up]").forEach((b) => (b.onclick = () => moveCat(+b.dataset.up, +b.dataset.up - 1)));
