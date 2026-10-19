@@ -66,6 +66,15 @@ class DockedPlayer(private val activity: ComponentActivity) : PlayerHost {
     override val canDock get() = true
     private val fullScreen get() = controller != null && full
 
+    // For the instrumented tests (main thread only).
+    internal val current: PlayerController? get() = controller
+    internal val mode: String get() = when {
+        controller == null -> "closed"
+        full -> "full"
+        tablet() && landscape() -> "side"
+        else -> "docked"
+    }
+
     fun play(intent: Intent) {
         // Lines allow one connection: the old stream stops before the new one starts.
         controller?.let(::release)

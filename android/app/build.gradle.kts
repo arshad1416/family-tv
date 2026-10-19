@@ -108,5 +108,10 @@ dependencies {
     testImplementation("org.robolectric:robolectric:4.13")
     testImplementation(composeBom)
     testImplementation("androidx.compose.ui:ui-test-junit4")
+    // Player tests on an emulator or device: ./gradlew connectedDebugAndroidTest
+    androidTestImplementation(composeBom)
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    androidTestImplementation("androidx.test.ext:junit:1.1.5")
+    androidTestImplementation("androidx.test:runner:1.5.0")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 }

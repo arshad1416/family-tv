@@ -214,6 +214,18 @@ class PlayerController(
     /** Docked controls' play/pause button. */
     private var paused by mutableStateOf(false)
 
+    // For the instrumented tests (main thread only).
+    internal val playbackPosition: Long get() = player.currentPosition
+    internal val isPlaying: Boolean get() = player.isPlaying
+    /** What Back would close or step through next. */
+    internal val backState: String get() = when {
+        panel != null -> "panel"
+        guideOpen -> "mini_guide"
+        bigGuide == GuideMode.Over -> "guide_over"
+        bigGuide == GuideMode.Picture -> if (guideCategories) "guide_categories" else "guide_picture"
+        else -> "none"
+    }
+
     init {
         openedAt = SystemClock.elapsedRealtime()
         Usage.opened(Usage.Screen.PLAYER)
