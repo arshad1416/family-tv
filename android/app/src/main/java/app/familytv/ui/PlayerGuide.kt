@@ -163,7 +163,7 @@ fun PlayerGuide(
         repeat(5) { withFrameNanos { }; if (entry.attached > 0 && runCatching { entry.requester.requestFocus() }.isSuccess) return@LaunchedEffect }
     }
     // Turning solid as the video shrinks reads as one move; the activity animates the video over the same time.
-    val backdrop by animateColorAsState(if (mode == GuideMode.Picture) Color(0xFF0B0F18) else Color(0xD9060A14), tween(PlayerActivity.VIDEO_MOVE_MS.toInt()), label = "backdrop")
+    val backdrop by animateColorAsState(if (mode == GuideMode.Picture) Color(0xFF0B0F18) else Color(0xD9060A14), tween(PlayerController.VIDEO_MOVE_MS.toInt()), label = "backdrop")
     Box(
         Modifier.fillMaxSize().drawBehind {
             // The video shows through a hole, since anything drawn over the player's surface hides it.
@@ -186,8 +186,8 @@ fun PlayerGuide(
                     // The list slides in from the left and pushes the grid over, rather than covering it.
                     AnimatedVisibility(
                         categories.open,
-                        enter = expandHorizontally(tween(PlayerActivity.VIDEO_MOVE_MS.toInt())) + fadeIn(tween(PlayerActivity.VIDEO_MOVE_MS.toInt())),
-                        exit = shrinkHorizontally(tween(PlayerActivity.VIDEO_MOVE_MS.toInt())) + fadeOut(tween(PlayerActivity.VIDEO_MOVE_MS.toInt())),
+                        enter = expandHorizontally(tween(PlayerController.VIDEO_MOVE_MS.toInt())) + fadeIn(tween(PlayerController.VIDEO_MOVE_MS.toInt())),
+                        exit = shrinkHorizontally(tween(PlayerController.VIDEO_MOVE_MS.toInt())) + fadeOut(tween(PlayerController.VIDEO_MOVE_MS.toInt())),
                     ) { CategoryList(categories) }
                 }
                 Column(Modifier.weight(1f)) {

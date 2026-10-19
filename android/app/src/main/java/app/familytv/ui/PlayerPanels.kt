@@ -69,7 +69,7 @@ enum class PlayerPanel { Menu, Captions, Tracks, Info }
 private val PanelBg = Color(0xF2060A14)
 
 /**
- * Draws the open panel on the right. On TV the list panels take D-pad focus (PlayerActivity hands
+ * Draws the open panel on the right. On TV the list panels take D-pad focus (PlayerController hands
  * focus to this ComposeView); Info is passive so the remote keeps zapping or seeking while the
  * numbers update. On touch, a tap outside the panel closes it.
  */

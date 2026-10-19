@@ -1,6 +1,7 @@
 package app.familytv.ui
 
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.animateDpAsState
@@ -723,19 +724,25 @@ fun Logo(url: String?, sizeDp: Int) {
 fun time(t: Long): String = DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(t))
 
 fun playLive(ctx: Context, sourceId: String, categoryId: String, index: Int, streamId: String? = null) {
-    ctx.startActivity(
+    ctx.startPlayer(
         Intent(ctx, PlayerActivity::class.java)
-            .putExtra(PlayerActivity.EXTRA_SOURCE, sourceId)
-            .putExtra(PlayerActivity.EXTRA_CATEGORY, categoryId)
-            .putExtra(PlayerActivity.EXTRA_INDEX, index)
-            .putExtra(PlayerActivity.EXTRA_STREAM, streamId),
+            .putExtra(PlayerController.EXTRA_SOURCE, sourceId)
+            .putExtra(PlayerController.EXTRA_CATEGORY, categoryId)
+            .putExtra(PlayerController.EXTRA_INDEX, index)
+            .putExtra(PlayerController.EXTRA_STREAM, streamId),
     )
 }
 
 /** [item] names the catalog movie or episode, so the player can resume it and tell Trakt. */
 fun play(ctx: Context, url: String, title: String, item: PlayItem? = null) {
-    val i = Intent(ctx, PlayerActivity::class.java).putExtra(PlayerActivity.EXTRA_URL, url).putExtra(PlayerActivity.EXTRA_TITLE, title)
-    ctx.startActivity(item?.putInto(i) ?: i)
+    val i = Intent(ctx, PlayerActivity::class.java).putExtra(PlayerController.EXTRA_URL, url).putExtra(PlayerController.EXTRA_TITLE, title)
+    ctx.startPlayer(item?.putInto(i) ?: i)
+}
+
+/** Phones and tablets play at the top of the home screen ([DockedPlayer]); TV opens [PlayerActivity]. */
+private fun Context.startPlayer(intent: Intent) {
+    val main = generateSequence(this) { (it as? ContextWrapper)?.baseContext }.firstOrNull { it is MainActivity } as MainActivity?
+    if (main != null && main.formFactor().touch) main.dock.play(intent) else startActivity(intent)
 }
 
 /** [fromStart]: Start over, from the beginning whatever the resume point. */

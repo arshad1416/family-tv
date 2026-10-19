@@ -2,6 +2,7 @@ package app.familytv.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
@@ -42,6 +43,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -54,6 +56,7 @@ import app.familytv.data.ChannelEntity
 import app.familytv.data.NowNext
 import app.familytv.data.ProgrammeEntity
 import app.familytv.data.displayName
+import kotlin.math.abs
 
 private val GUIDE_W = 440.dp
 
@@ -64,7 +67,7 @@ private fun List<NowNext>?.nowAndNext(now: Long): Pair<NowNext?, NowNext?> {
 
 /**
  * Live TV overlays drawn over the video: the info banner along the bottom and the mini guide on
- * the left. PlayerActivity owns the state and the keys; this only draws and handles list focus.
+ * the left. PlayerController owns the state and the keys; this only draws and handles list focus.
  */
 @Composable
 fun LiveOverlay(
@@ -78,8 +81,18 @@ fun LiveOverlay(
     touch: TouchControls? = null,
 ) {
     Box(Modifier.fillMaxSize().safeDrawingPadding()) {
-        // Touch: a tap on the video shows the controls (or closes the guide); it sits under everything else.
-        if (touch != null) Box(Modifier.fillMaxSize().clickable(remember { MutableInteractionSource() }, indication = null, onClick = touch.onTap))
+        // Touch: a tap on the video shows the controls (or closes the guide), and a swipe up or down
+        // changes channel like the remote's up and down; it sits under everything else.
+        if (touch != null) Box(
+            Modifier.fillMaxSize()
+                .pointerInput(touch.onZap) {
+                    var drag = 0f
+                    detectVerticalDragGestures(onDragStart = { drag = 0f }, onDragEnd = {
+                        if (abs(drag) > SWIPE_DP.toPx()) touch.onZap(if (drag < 0) -1 else 1)
+                    }) { _, dy -> drag += dy }
+                }
+                .clickable(remember { MutableInteractionSource() }, indication = null, onClick = touch.onTap),
+        )
         if (guideOpen) MiniGuide(channels, playing, programmes, onTune, onFocusChannel, focusPlaying = touch == null)
         // A phone has no room for the banner beside the guide; the guide already shows what's on.
         if (!(guideOpen && touch != null)) banner?.let { channels.getOrNull(it) }?.let { ch ->
@@ -100,6 +113,8 @@ fun LiveOverlay(
         }
     }
 }
+
+private val SWIPE_DP = 48.dp
 
 /** Touch controls for live TV on phones and tablets; null on TV, where the remote drives everything. */
 class TouchControls(
