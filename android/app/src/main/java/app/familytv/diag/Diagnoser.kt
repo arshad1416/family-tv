@@ -66,7 +66,12 @@ class Diagnoser(private val context: Context, private val db: AppDb, private val
                 if (!playingHere && findings.none { it.verdict.severity >= 3 }) {
                     streamFacts = streamCheck(s, server)
                     val portalOk = hostFacts.firstOrNull { it.host == hostOf(server) }?.portalReachable
-                    streamFacts?.let { Classifier.stream(it, portalOk)?.let(findings::add) }
+                    streamFacts?.let {
+                        val settled = Classifier.streamPlayed(findings, hostOf(server), it)
+                        findings.clear()
+                        findings += settled
+                        Classifier.stream(it, portalOk)?.let(findings::add)
+                    }
                 }
             }
         }

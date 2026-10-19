@@ -58,6 +58,21 @@ class ClassifierTest {
         assertEquals(Verdict.NETWORK_BLOCKED, Classifier.stream(StreamFacts(null, 0, 100, "SocketException"), true)!!.verdict)
     }
 
+    @Test fun rootPageServerErrorIsOnlyANoteWhenTheStreamPlays() {
+        // The Oct 18 report: the server answers 520 on "/" but the stream test got 200, 1.5 MB in 656 ms.
+        val root = Classifier.host(host(status = 520))!!
+        assertEquals(Verdict.SERVER_ERROR, root.verdict)
+        val played = StreamFacts(200, 1_500_000, 656, null)
+        assertNull(Classifier.stream(played, true))
+        val settled = Classifier.streamPlayed(listOf(root), "line.example:8080", played)
+        assertEquals(Verdict.OK, Classifier.overall(settled, true))
+        assertEquals("Root page: Server answered HTTP 520. The stream played (HTTP 200, 1464 KB in 656 ms).", settled.single().detail)
+        // A stream that failed, or another server's error, still counts.
+        assertEquals(listOf(root), Classifier.streamPlayed(listOf(root), "line.example:8080", StreamFacts(200, 0, 656, null)))
+        assertEquals(listOf(root), Classifier.streamPlayed(listOf(root), "line.example:8080", StreamFacts(502, 0, 100, null)))
+        assertEquals(listOf(root), Classifier.streamPlayed(listOf(root), "backup.example:80", played))
+    }
+
     @Test fun overallPicksMostSevereAndNoInternetWins() {
         val f = listOf(Finding(Verdict.SLOW_CONNECTION, null, ""), Finding(Verdict.SERVER_DOWN, null, ""), Finding(Verdict.DNS_FILTERED, null, ""))
         assertEquals(Verdict.DNS_FILTERED, Classifier.overall(f, true))
