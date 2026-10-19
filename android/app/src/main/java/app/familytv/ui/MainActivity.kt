@@ -1,6 +1,7 @@
 package app.familytv.ui
 
 import android.annotation.SuppressLint
+import android.content.res.Configuration
 import android.os.Bundle
 import android.view.KeyEvent
 import androidx.activity.ComponentActivity
@@ -17,7 +18,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
@@ -57,6 +57,8 @@ class MainActivity : ComponentActivity() {
     private val vm: MainViewModel by viewModels()
     private var message by mutableStateOf<String?>(null)
     private val exit = HoldBackToExit(this)
+    /** Phones and tablets: the player at the top of this screen (TV uses [PlayerActivity]). */
+    val dock = DockedPlayer(this)
     /** The startup video while it shows (see [SplashVideo]). */
     private var splash by mutableStateOf<Int?>(null)
     private var splashSkipped by mutableStateOf(false)
@@ -69,7 +71,17 @@ class MainActivity : ComponentActivity() {
             if (event.action == KeyEvent.ACTION_UP) splashSkipped = true
             return true
         }
-        return exit.onKey(event) || super.dispatchKeyEvent(event)
+        return dock.onKey(event) || exit.onKey(event) || super.dispatchKeyEvent(event)
+    }
+
+    override fun onUserInteraction() {
+        super.onUserInteraction()
+        dock.onUserInteraction()
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        dock.onConfigurationChanged()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -85,8 +97,8 @@ class MainActivity : ComponentActivity() {
               val menus = remember { ItemMenus() }
               CompositionLocalProvider(LocalFormFactor provides rememberFormFactor(), LocalItemMenus provides menus) {
                 Surface(modifier = Modifier.fillMaxSize(), colors = SurfaceDefaults.colors(containerColor = Tv.Bg, contentColor = Tv.Text)) {
-                    // Android 15 draws edge to edge; keep clear of a phone's status and navigation bars.
-                    Box(Modifier.fillMaxSize().safeDrawingPadding()) {
+                    // Android 15 draws edge to edge; the host keeps clear of a phone's status and navigation bars.
+                    dock.Host {
                         val screen by vm.screen.collectAsState()
                         when (val s = screen) {
                             Screen.Loading -> Box(Modifier.fillMaxSize()) // The startup video covers it; no text to flash.
@@ -129,6 +141,7 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         vm.start()
+        dock.onStart()
     }
 
     override fun onResume() {
@@ -138,8 +151,14 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onStop() {
+        dock.onStop()
         vm.stop()
         super.onStop()
+    }
+
+    override fun onDestroy() {
+        dock.close()
+        super.onDestroy()
     }
 }
 
