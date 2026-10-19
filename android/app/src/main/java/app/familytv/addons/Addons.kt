@@ -7,8 +7,8 @@ import app.familytv.portal.PortalClient
  * Paid add-ons: features already built into the app that the portal switches on for a profile,
  * bought once per add-on (parity checklist, "Spec: Paid add-ons framework"). The portal is the only
  * authority: a feature runs only while the last config says its add-on is active, the profile's
- * membership hasn't ended, and the portal answered this TV (config or heartbeat) within [OFFLINE_MS]. The app never keeps a
- * "paid" flag of its own.
+ * membership hasn't ended, and the portal answered this TV (config or heartbeat) within
+ * [OFFLINE_MS]. The app never keeps a "paid" flag of its own.
  */
 object Addons {
     /** Add-on ids this version of the app has a feature for. Others are listed but never turn anything on. */
