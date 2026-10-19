@@ -53,7 +53,12 @@ data class DeviceConfig(
     val tmdbApiKey: String? = null,
     /** TheTVDB v4 key from the portal's Worker secret; null skips the TVDB fallback. */
     val tvdbApiKey: String? = null,
+    /** Paid add-ons for this TV's profile; see [app.familytv.addons.Addons]. Missing means none. */
+    val addons: List<AddonInfo>? = null,
 )
+
+/** An add-on as the portal reports it: state is active, paused, available or not_offered. */
+data class AddonInfo(val id: String? = null, val name: String? = null, val state: String? = null)
 
 /** The Trakt app's public client id. The secret stays in the portal. */
 data class TraktPortal(val clientId: String? = null)

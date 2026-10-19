@@ -38,7 +38,7 @@ table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:7px 6px;
 </style>
 </head>
 <body>
-<header><h1>Family TV</h1><nav><button data-tab="devices" class="on">Devices</button><button data-tab="profiles">Profiles</button><button data-tab="lines">Lines</button></nav></header>
+<header><h1>Family TV</h1><nav><button data-tab="devices" class="on">Devices</button><button data-tab="profiles">Profiles</button><button data-tab="lines">Lines</button><button data-tab="addons">Add-ons</button></nav></header>
 <main id="app"></main>
 <script>
 const $ = (s, el = document) => el.querySelector(s);
@@ -588,12 +588,66 @@ async function renderLines(refresh) {
   };
 }
 
+// Paid add-ons: features already in the TV apps, switched on per profile. No checkout yet, so a
+// purchase is granted here by hand.
+const ADDON_STATUS = [["draft", "Draft (hidden from TVs)"], ["available", "Available"], ["retired", "Retired (no longer sold; owners keep it)"]];
+function addonStatusSelect(attr, value) {
+  return '<select ' + attr + ">" + ADDON_STATUS.map(([v, l]) => '<option value="' + v + '"' + (v === value ? " selected" : "") + ">" + l + "</option>").join("") + "</select>";
+}
+
+async function renderAddons() {
+  const [data, p] = await Promise.all([api("/api/admin/addons"), api("/api/admin/profiles")]);
+  profiles = p.profiles;
+  const owned = (pid, aid) => data.purchases.find((x) => x.profile_id === pid && x.addon_id === aid);
+  let html = '<div class="card"><h3 style="margin-top:0">Add-ons</h3><p class="muted small">Extra features already built into the TV apps, bought once per profile: ' +
+    "one purchase covers every TV on that profile. Drafts stay hidden from TVs. Buying isn't set up yet, so use Grant to give a profile an add-on by hand.</p>" +
+    (data.addons.length ? "" : '<p class="muted">No add-ons yet.</p>') + "</div>";
+  data.addons.forEach((a, i) => {
+    html += '<div class="card"><div class="row"><strong>' + esc(a.name) + '</strong><span class="muted small">' + esc(a.id) + " · updated " + ago(a.updated_at) + "</span></div>" +
+      '<div class="grid"><div><label>Name</label><input data-an="' + i + '" value="' + esc(a.name) + '"></div><div><label>Status</label>' + addonStatusSelect('data-as="' + i + '"', a.status) + "</div></div>" +
+      '<label>Description</label><input data-ad="' + i + '" value="' + esc(a.description) + '">' +
+      '<p><button class="b" data-asave="' + i + '">Save</button></p>';
+    if (profiles.length) {
+      html += '<table><tr><th>Profile</th><th>Owns it</th><th></th></tr>';
+      for (const pr of profiles) {
+        const o = owned(pr.id, a.id), has = o && o.status === "owned";
+        html += "<tr><td>" + esc(pr.name) + "</td><td>" + (has ? '<span class="ok">Yes</span>' : o ? '<span class="muted">' + esc(o.status) + "</span>" : '<span class="muted">No</span>') +
+          '</td><td><button class="b" data-grant="' + i + '" data-pid="' + esc(pr.id) + '" data-owned="' + (has ? "0" : "1") + '">' + (has ? "Revoke" : "Grant") + "</button></td></tr>";
+      }
+      html += "</table>";
+    }
+    html += "</div>";
+  });
+  html += '<div class="card"><h3 style="margin-top:0">New add-on</h3><p class="muted small">The id must match the one the TV apps know the feature by; it cannot be changed later.</p><div class="grid">' +
+    '<div><label>Id</label><input id="naid" placeholder="multiview"></div><div><label>Name</label><input id="naname"></div>' +
+    "<div><label>Status</label>" + addonStatusSelect('id="nastatus"', "draft") + "</div></div>" +
+    '<label>Description</label><input id="nadesc"><p><button class="b p" id="nacreate">Add</button></p></div><div id="admsg" class="small"></div>';
+  $("#app").innerHTML = html;
+  const fail = (e) => { $("#admsg").innerHTML = '<span class="err">' + esc(e.message) + "</span>"; };
+  document.querySelectorAll("[data-asave]").forEach((b) => (b.onclick = async () => {
+    const i = b.dataset.asave, a = data.addons[+i];
+    const body = { name: $('[data-an="' + i + '"]').value, description: $('[data-ad="' + i + '"]').value, status: $('[data-as="' + i + '"]').value };
+    try { await api("/api/admin/addons/" + encodeURIComponent(a.id), { method: "PUT", body: JSON.stringify(body) }); renderAddons(); } catch (e) { fail(e); }
+  }));
+  document.querySelectorAll("[data-grant]").forEach((b) => (b.onclick = async () => {
+    const a = data.addons[+b.dataset.grant], pr = profiles.find((x) => x.id === b.dataset.pid), give = b.dataset.owned === "1";
+    if (!confirm((give ? "Give " : "Take ") + a.name + (give ? " to " : " away from ") + pr.name + "? Its TVs update within a minute.")) return;
+    b.disabled = true;
+    try { await api("/api/admin/profiles/" + pr.id + "/addons/" + encodeURIComponent(a.id), { method: "POST", body: JSON.stringify({ owned: give }) }); renderAddons(); }
+    catch (e) { b.disabled = false; fail(e); }
+  }));
+  $("#nacreate").onclick = async () => {
+    const body = { id: $("#naid").value.trim(), name: $("#naname").value, description: $("#nadesc").value, status: $("#nastatus").value };
+    try { await api("/api/admin/addons", { method: "POST", body: JSON.stringify(body) }); renderAddons(); } catch (e) { fail(e); }
+  };
+}
+
 async function render() {
   if (!token) return askToken();
   document.querySelectorAll("nav button").forEach((b) => b.classList.toggle("on", b.dataset.tab === tab));
   try {
     if (!Object.keys(verdicts).length) verdicts = await api("/api/admin/verdicts");
-    if (tab === "devices") await renderDevices(); else if (tab === "lines") await renderLines(); else await renderProfiles();
+    if (tab === "devices") await renderDevices(); else if (tab === "lines") await renderLines(); else if (tab === "addons") await renderAddons(); else await renderProfiles();
   } catch (e) { if (token) $("#app").innerHTML = '<div class="card err">' + esc(e.message) + "</div>"; }
 }
 document.querySelectorAll("nav button").forEach((b) => (b.onclick = () => { tab = b.dataset.tab; render(); }));
