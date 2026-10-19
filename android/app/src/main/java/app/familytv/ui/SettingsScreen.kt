@@ -129,7 +129,7 @@ private fun qualityWord(kind: String) = when (kind) {
 @Composable
 private fun AddonsPanel(config: DeviceConfig) {
     val ctx = LocalContext.current
-    val addons = remember(config) { Addons.list(config, ctx.app.portal.configAt, System.currentTimeMillis()) }
+    val addons = remember(config) { Addons.list(config, ctx.app.portal.contactAt, System.currentTimeMillis()) }
     if (addons.isEmpty()) return
     LaunchedEffect(Unit) { Usage.log(Usage.Screen.ADDONS, Usage.Action.OPEN) }
     Panel {
