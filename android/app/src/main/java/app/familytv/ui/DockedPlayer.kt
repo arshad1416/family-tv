@@ -36,7 +36,6 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.addPathNodes
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.min
 import androidx.compose.ui.viewinterop.AndroidView
@@ -274,7 +273,7 @@ fun DockedControls(
     onFullScreen: () -> Unit,
 ) {
     Box(Modifier.fillMaxSize()) {
-        if (live) Box(Modifier.fillMaxSize().testTag("docked_video").pointerInput(Unit) { detectTapGestures(onDoubleTap = { onFullScreen() }, onTap = { onTap() }) })
+        if (live) Box(Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures(onDoubleTap = { onFullScreen() }, onTap = { onTap() }) })
         if (visible) {
             SmallRound(Icons.Filled.Close, "Close player", Modifier.align(Alignment.TopStart).padding(8.dp), onClose)
             SmallRound(FullScreenIcon, "Full screen", Modifier.align(Alignment.TopEnd).padding(8.dp), onFullScreen)

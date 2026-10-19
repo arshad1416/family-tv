@@ -7,12 +7,9 @@ import android.os.SystemClock
 import android.view.KeyEvent
 import android.view.MotionEvent
 import androidx.compose.ui.test.ComposeTimeoutException
-import androidx.compose.ui.test.doubleClick
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
-import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performTouchInput
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -149,7 +146,8 @@ class DockedPlayerTest {
         val player = main { activity.dock.current!! }
         assertTrue(waitPlaying(player))
 
-        compose.onNodeWithTag("docked_video").performTouchInput { doubleClick() }
+        // A real double tap through the system, like a finger (Compose's own touch injection skips window focus).
+        tapVideo(times = 2, atY = 0.5f)
         waitMode("full")
         assertSame(player, main { activity.dock.current })
 
@@ -160,17 +158,7 @@ class DockedPlayerTest {
             assertEquals("full", mode())
         }
         back()
-        val routed = runCatching { waitMode("side") }
-        if (routed.isFailure) {
-            // Tell apart "Back never reached the activity" from "the player ignored it".
-            main {
-                activity.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_BACK))
-                activity.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_BACK))
-            }
-            val direct = runCatching { waitMode("side") }
-            throw AssertionError("${routed.exceptionOrNull()?.message}; Back sent straight to the activity: " +
-                if (direct.isSuccess) "worked" else "${direct.exceptionOrNull()?.message}")
-        }
+        waitMode("side")
         assertSame("same player back side by side", player, main { activity.dock.current })
         assertTrue(waitPlaying(player))
 
@@ -211,23 +199,27 @@ class DockedPlayerTest {
 
     private fun orientation() = main { activity.resources.configuration.orientation }
 
-    /** Back through the activity, as the gesture or Back button sends it. */
+    /** Back through the system, as the gesture or Back button sends it; it goes to the window with focus. */
     private fun back() {
+        waitFor("the app's window to have focus") { main { activity.hasWindowFocus() } }
         instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
         instrumentation.waitForIdleSync()
     }
 
-    /** A tap on the middle of the video, which shows the film's controls. */
-    private fun tapVideo() {
+    /** Taps on the video through the system, like a finger: one shows the film's controls, two go full screen on live. */
+    private fun tapVideo(times: Int = 1, atY: Float = 0.15f) {
         val (x, y) = main {
             val v = activity.dock.current!!.root
             val at = IntArray(2).also(v::getLocationOnScreen)
             // Top middle: clear of the close and full-screen buttons and of the film's play button.
-            (at[0] + v.width / 2f) to (at[1] + v.height * 0.15f)
+            (at[0] + v.width / 2f) to (at[1] + v.height * atY)
         }
-        val down = SystemClock.uptimeMillis()
-        instrumentation.sendPointerSync(MotionEvent.obtain(down, down, MotionEvent.ACTION_DOWN, x, y, 0))
-        instrumentation.sendPointerSync(MotionEvent.obtain(down, down + 50, MotionEvent.ACTION_UP, x, y, 0))
+        repeat(times) {
+            val down = SystemClock.uptimeMillis()
+            instrumentation.sendPointerSync(MotionEvent.obtain(down, down, MotionEvent.ACTION_DOWN, x, y, 0))
+            instrumentation.sendPointerSync(MotionEvent.obtain(down, down + 40, MotionEvent.ACTION_UP, x, y, 0))
+            if (it < times - 1) SystemClock.sleep(80)
+        }
     }
 
     /** Waits through the Compose rule: its test clock (the startup video's timers, fades) only moves while the rule waits. */
