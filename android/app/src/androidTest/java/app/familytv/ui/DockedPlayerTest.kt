@@ -160,7 +160,17 @@ class DockedPlayerTest {
             assertEquals("full", mode())
         }
         back()
-        waitMode("side")
+        val routed = runCatching { waitMode("side") }
+        if (routed.isFailure) {
+            // Tell apart "Back never reached the activity" from "the player ignored it".
+            main {
+                activity.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_BACK))
+                activity.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_BACK))
+            }
+            val direct = runCatching { waitMode("side") }
+            throw AssertionError("${routed.exceptionOrNull()?.message}; Back sent straight to the activity: " +
+                if (direct.isSuccess) "worked" else "${direct.exceptionOrNull()?.message}")
+        }
         assertSame("same player back side by side", player, main { activity.dock.current })
         assertTrue(waitPlaying(player))
 
@@ -225,7 +235,10 @@ class DockedPlayerTest {
         try {
             compose.waitUntil(timeoutMs) { ok() }
         } catch (e: ComposeTimeoutException) {
-            val state = main { "${activity.dock.mode}, back=${activity.dock.current?.backState}, playing=${activity.dock.current?.isPlaying}" }
+            val state = main {
+                "${activity.dock.mode}, back=${activity.dock.current?.backState}, playing=${activity.dock.current?.isPlaying}, " +
+                    "windowFocus=${activity.hasWindowFocus()}, focused=${activity.currentFocus?.javaClass?.simpleName}"
+            }
             throw AssertionError("Timed out waiting for $what (player: $state)")
         }
     }
