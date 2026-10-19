@@ -223,7 +223,7 @@ fun PlayerGuide(
                     open -> "OK: show this category   ·   Right: back to the guide   ·   Back: leave live TV"
                     mode == GuideMode.Picture && categories != null -> "OK: watch here, OK again: full screen   ·   Back: categories"
                     mode == GuideMode.Picture -> "OK: watch here, OK again: full screen   ·   Back: leave live TV"
-                    else -> "OK: watch in a small picture   ·   Back: smaller picture"
+                    else -> "OK: watch in a small picture   ·   Back: categories"
                 },
                 fontSize = 13.sp, color = Tv.Muted, modifier = Modifier.padding(vertical = 10.dp),
             )

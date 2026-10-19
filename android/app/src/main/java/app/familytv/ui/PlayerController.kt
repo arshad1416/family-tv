@@ -194,11 +194,11 @@ class PlayerController(
     private var touch = false
     private var controls by mutableStateOf(false)
     private var controlsJob: Job? = null
-    /** TV live: Back opens the guide over the video, then shrinks the video, then opens the categories, then leaves. */
+    /** TV live: Back opens the guide over the video, then shrinks the video with the categories open, then leaves. */
     private val guideBack = object : OnBackPressedCallback(false) {
         override fun handleOnBackPressed() = when {
             bigGuide == GuideMode.Off -> openBigGuide()
-            bigGuide == GuideMode.Over -> showBigGuide(GuideMode.Picture)
+            bigGuide == GuideMode.Over -> showGuideCategories()
             !guideCategories -> guideCategories = true
             else -> host.close()
         }
@@ -743,7 +743,7 @@ class PlayerController(
             buttonsActive -> leaveButtons()
             guideOpen -> closeGuide()
             live && channels.isNotEmpty() && bigGuide == GuideMode.Off -> openBigGuide()
-            bigGuide == GuideMode.Over -> showBigGuide(GuideMode.Picture)
+            bigGuide == GuideMode.Over -> showGuideCategories()
             bigGuide == GuideMode.Picture && !guideCategories -> guideCategories = true
             else -> {
                 if (bigGuide != GuideMode.Off) closeBigGuide()
@@ -828,6 +828,12 @@ class PlayerController(
         bigGuideJob?.cancel()
         if (mode == GuideMode.Over) closeBigGuideLater()
         layoutVideo()
+    }
+
+    /** Back from the guide over the video: the small picture with the categories already open. */
+    private fun showGuideCategories() {
+        showBigGuide(GuideMode.Picture)
+        guideCategories = true
     }
 
     private fun closeBigGuide() {
