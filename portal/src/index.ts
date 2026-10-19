@@ -229,11 +229,17 @@ async function deviceConfig(req: Request, env: Env) {
  * counts as a member and nothing it owns is ever paused.
  */
 async function profileAddons(env: Env, profileId: string) {
-  const [addons, purchases] = await Promise.all([
-    env.DB.prepare("SELECT id, name, description, status FROM addons ORDER BY name").all<AddonRow>(),
-    env.DB.prepare("SELECT addon_id, status FROM addon_purchases WHERE profile_id = ?").bind(profileId).all<{ addon_id: string; status: PurchaseStatus }>(),
-  ]);
-  return addonStates(addons.results, new Map(purchases.results.map((p) => [p.addon_id, p.status])), true);
+  try {
+    const [addons, purchases] = await Promise.all([
+      env.DB.prepare("SELECT id, name, description, status FROM addons ORDER BY name").all<AddonRow>(),
+      env.DB.prepare("SELECT addon_id, status FROM addon_purchases WHERE profile_id = ?").bind(profileId).all<{ addon_id: string; status: PurchaseStatus }>(),
+    ]);
+    return addonStates(addons.results, new Map(purchases.results.map((p) => [p.addon_id, p.status])), true);
+  } catch (e) {
+    // Deployed before migration 0009: TVs still get their config, with no add-ons.
+    console.error(e);
+    return [];
+  }
 }
 
 async function deviceHeartbeat(req: Request, env: Env) {

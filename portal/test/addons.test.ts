@@ -126,3 +126,14 @@ describe("add-ons on the portal", () => {
     expect(() => new Function(script)).not.toThrow();
   });
 });
+
+describe("before migration 0009", () => {
+  it("still gives TVs their config, with no add-ons", async () => {
+    const env = await setup();
+    await env.DB.prepare("DROP TABLE addon_purchases").run();
+    await env.DB.prepare("DROP TABLE addons").run();
+    const res = await worker.fetch(new Request("https://portal.test/api/device/config", { headers: { authorization: "Bearer lounge-token" } }), env);
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { addons: unknown[] }).addons).toEqual([]);
+  });
+});
