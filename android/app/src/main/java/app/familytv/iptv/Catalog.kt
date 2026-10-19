@@ -7,6 +7,7 @@ import app.familytv.data.CategoryEntity
 import app.familytv.data.ChannelEntity
 import app.familytv.data.Kind
 import app.familytv.data.MovieEntity
+import app.familytv.data.Names
 import app.familytv.data.ProgrammeEntity
 import app.familytv.data.SeriesEntity
 import app.familytv.data.SourceEntity
@@ -123,7 +124,9 @@ class Catalog(private val db: AppDb) {
 
         t.step("Loading channels", 0.2f)
         streamBatches(XtreamUrls.api(server, user, pass, "get_live_streams"), { dao.upsertChannels(it) }, { t.rows(it, 5_000, "channels") }) { st ->
-            ChannelEntity(s.id, st.id, st.name, st.num, st.icon, st.categoryId, st.epgId, null, st.catchupDays, gen)
+            // Heading rows ("##### 4K #####") aren't channels; leave them out of every list.
+            if (Names.isSeparator(st.name)) null
+            else ChannelEntity(s.id, st.id, st.name, st.num, st.icon, st.categoryId, st.epgId, null, st.catchupDays, gen)
         }
         dao.pruneChannels(s.id, gen)
 
@@ -175,7 +178,7 @@ class Catalog(private val db: AppDb) {
                         titleKey = parsed.key, lang = parsed.lang ?: SeriesTitles.fromCategory(e.group) ?: SeriesTitles.ORIGINAL,
                     )
                     if (movies.size >= BATCH) { runBlocking { dao.upsertMovies(movies.toList()) }; movies.clear() }
-                } else {
+                } else if (!Names.isSeparator(e.name)) {
                     liveCats.getOrPut(e.group) { liveCats.size }
                     channels += ChannelEntity(s.id, id, e.name, e.chno ?: n, e.logo, e.group, e.tvgId, e.url, e.catchupDays, gen)
                     if (channels.size >= BATCH) { runBlocking { dao.upsertChannels(channels.toList()) }; channels.clear() }
@@ -363,13 +366,13 @@ class Catalog(private val db: AppDb) {
 
     // --- streaming helpers ---
 
-    /** Streams an Xtream list and writes it [BATCH] rows at a time (runs on an IO thread). */
-    private suspend fun <T> streamBatches(url: String, write: suspend (List<T>) -> Unit, progress: (Int) -> Unit, map: (XtStream) -> T) {
+    /** Streams an Xtream list and writes it [BATCH] rows at a time (runs on an IO thread); [map] returns null for a row to leave out. */
+    private suspend fun <T : Any> streamBatches(url: String, write: suspend (List<T>) -> Unit, progress: (Int) -> Unit, map: (XtStream) -> T?) {
         val buf = ArrayList<T>(BATCH)
         var n = 0
         open(url).use { res ->
             XtreamParser.streams(reader(res)) { st ->
-                buf += map(st)
+                map(st)?.let { buf += it }
                 if (buf.size >= BATCH) { val chunk = buf.toList(); buf.clear(); runBlocking { write(chunk) }; n += chunk.size; progress(n) }
             }
         }

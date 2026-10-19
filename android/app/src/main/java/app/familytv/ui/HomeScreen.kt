@@ -77,7 +77,9 @@ import app.familytv.data.CategoryEntity
 import app.familytv.data.ChannelEntity
 import app.familytv.data.Kind
 import app.familytv.data.MovieEntity
+import app.familytv.data.Names
 import app.familytv.data.NowNext
+import app.familytv.data.displayName
 import app.familytv.iptv.Streams
 import app.familytv.portal.DeviceConfig
 import app.familytv.portal.Profile
@@ -451,7 +453,7 @@ private fun HomePage(vm: MainViewModel, profile: Profile, onNavigate: (Page) -> 
         if (!touch) emptyList() else buildList {
             onNow.take(3).forEachIndexed { i, c ->
                 val p = c.epgId?.let { progs[it] }?.firstOrNull()
-                add(HeroItem(p?.title ?: c.name, "Live now  ·  ${c.num}  ${c.name}", c.logo, poster = false) { playLive(ctx, c.sourceId, c.categoryId, i) })
+                add(HeroItem(p?.title ?: c.displayName, "Live now  ·  ${c.num}  ${c.displayName}", c.logo, poster = false) { playLive(ctx, c.sourceId, c.categoryId, i) })
             }
             recent.take(3).forEach { g ->
                 add(HeroItem(g.title, "New movie", g.poster, poster = true) { scope.launch { playMovie(ctx, profile, g, movieKeys, progress) } })
@@ -477,15 +479,16 @@ private fun HomePage(vm: MainViewModel, profile: Profile, onNavigate: (Page) -> 
                 if (favRow.isNotEmpty()) item("favourites") {
                     Shelf("Favourites") {
                         itemsIndexed(favRow, key = { _, (k, _) -> k }) { i, (_, x) ->
-                            val entry = if (firstRow < 0) openedFromFavourites && x is SeriesGroup && nav.back == x.key else firstRow == 3 && i == 0
+                            val entry = if (firstRow < 0) openedFromFavourites && nav.back != null && nav.back == ((x as? SeriesGroup)?.key ?: (x as? MovieGroup)?.key) else firstRow == 3 && i == 0
                             when (x) {
                                 is ChannelEntity -> PosterCard(
-                                    x.name, x.logo, entryPoint(entry), logo = true, favourite = true,
+                                    x.displayName, x.logo, entryPoint(entry), logo = true, favourite = true,
                                     onFavourite = { toggleFavourite(ctx, Kind.LIVE, x.sourceId, x.streamId, x.name) },
-                                    onFocus = { hero.value = Hero(x.name, "Favourite channel  ·  ${x.num}", null) },
+                                    onFocus = { hero.value = Hero(x.displayName, "Favourite channel  ·  ${x.num}", null) },
                                 ) { playLive(ctx, x.sourceId, x.categoryId, 0, x.streamId) }
                                 is MovieGroup -> MovieCard(
                                     x, entryPoint(entry), profile = profile, visible = movieKeys, favKeys = favKeys, progress = progress,
+                                    onOpen = { openedFromFavourites = true },
                                     onFocus = { hero.value = Hero(x.title, "Favourite movie", null) },
                                 )
                                 is SeriesGroup -> PosterCard(
@@ -504,7 +507,7 @@ private fun HomePage(vm: MainViewModel, profile: Profile, onNavigate: (Page) -> 
                             ChannelCard(c, p.firstOrNull(), entryPoint(firstRow == 0 && i == 0),
                                 favourite = Favourites.key(Kind.LIVE, c.sourceId, c.streamId) in favKeys,
                                 onFavourite = { toggleFavourite(ctx, Kind.LIVE, c.sourceId, c.streamId, c.name) },
-                                onFocus = { hero.value = Hero(p.firstOrNull()?.title ?: c.name, "${c.num}  ${c.name}", p.firstOrNull()?.let { "${time(it.start)} – ${time(it.stop)}" + (p.getOrNull(1)?.let { n -> "   ·   Next: ${n.title}" } ?: "") }) },
+                                onFocus = { hero.value = Hero(p.firstOrNull()?.title ?: c.displayName, "${c.num}  ${c.displayName}", p.firstOrNull()?.let { "${time(it.start)} – ${time(it.stop)}" + (p.getOrNull(1)?.let { n -> "   ·   Next: ${n.title}" } ?: "") }) },
                             ) { playLive(ctx, c.sourceId, c.categoryId, i) }
                         }
                     }
@@ -513,7 +516,9 @@ private fun HomePage(vm: MainViewModel, profile: Profile, onNavigate: (Page) -> 
                     Shelf("Recently added movies", viewAll(Page.Movies)) {
                         itemsIndexed(recent, key = { _, g -> g.key }) { i, g ->
                             MovieCard(
-                                g, entryPoint(firstRow == 1 && i == 0), profile = profile, visible = movieKeys, favKeys = favKeys, progress = progress,
+                                g, entryPoint(if (firstRow < 0) !openedFromFavourites && nav.back == g.key else firstRow == 1 && i == 0),
+                                profile = profile, visible = movieKeys, favKeys = favKeys, progress = progress,
+                                onOpen = { openedFromFavourites = false },
                                 onFocus = { hero.value = Hero(g.title, "Movie", g.first.rating?.takeIf { it.isNotBlank() && it != "0" }?.let { "Rating $it" }) },
                             )
                         }
@@ -584,8 +589,8 @@ fun ChannelCard(
             Logo(c.logo, 64)
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text("${c.num}  ${c.name}", fontSize = 13.sp, color = if (focused) Tv.Text else Tv.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(now?.title ?: c.name, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text("${c.num}  ${c.displayName}", fontSize = 13.sp, color = if (focused) Tv.Text else Tv.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(now?.title ?: c.displayName, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 if (now != null) {
                     Spacer(Modifier.height(6.dp))
                     ProgressLine(progress(now.start, now.stop), fill = if (focused) Tv.Text else Tv.Accent)
@@ -683,7 +688,7 @@ private fun isAdult(c: CategoryEntity) = ADULT.containsMatchIn(c.name)
 
 private fun arranged(all: List<CategoryEntity>, profile: Profile?, mine: List<String>, keep: (CategoryEntity) -> Boolean): List<CategoryEntity> {
     val hidden = profile?.hiddenCategories.orEmpty().map { it.lowercase() }.toSet()
-    val shown = all.filter { c -> c.name.lowercase() !in hidden && keep(c) }
+    val shown = all.filter { c -> c.name.lowercase() !in hidden && !Names.isSeparator(c.name) && keep(c) }
     fun rank(names: List<String>?) = names.orEmpty().withIndex().associate { (i, n) -> n.lowercase() to i }
     val own = rank(mine)
     val order = rank(profile?.categoryOrder?.get(all.firstOrNull()?.kind))
@@ -733,6 +738,7 @@ fun play(ctx: Context, url: String, title: String, item: PlayItem? = null) {
     ctx.startActivity(item?.putInto(i) ?: i)
 }
 
-suspend fun playMovieNow(ctx: Context, profile: Profile, m: MovieEntity) {
-    Streams(ctx.app.db, profile).movie(m)?.let { play(ctx, it, m.name, PlayItem.movie(m.sourceId, m.streamId, m.name)) }
+/** [fromStart]: Start over, from the beginning whatever the resume point. */
+suspend fun playMovieNow(ctx: Context, profile: Profile, m: MovieEntity, fromStart: Boolean = false) {
+    Streams(ctx.app.db, profile).movie(m)?.let { play(ctx, it, m.name, PlayItem.movie(m.sourceId, m.streamId, m.name).copy(fromStart = fromStart)) }
 }

@@ -14,7 +14,7 @@ import app.familytv.portal.PortalClient
  * Anonymous usage stats") so both apps' rows line up; the portal drops any other name.
  */
 object Usage {
-    enum class Screen { HOME, LIVE, GUIDE, MOVIES, SERIES, SERIES_PAGE, CATEGORIES, SPORTS, SEARCH, SETTINGS, PLAYER, PLAYER_MENU, PAIRING, UPDATE }
+    enum class Screen { HOME, LIVE, GUIDE, MOVIES, SERIES, SERIES_PAGE, MOVIE_PAGE, CATEGORIES, SPORTS, SEARCH, SETTINGS, PLAYER, PLAYER_MENU, PAIRING, UPDATE }
 
     enum class Action {
         OPEN, LEAVE, BACK, SELECT, HOLD_OK, FAVOURITE_ADD, FAVOURITE_REMOVE, MARK_WATCHED, ZAP_UP, ZAP_DOWN,

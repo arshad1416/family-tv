@@ -55,6 +55,7 @@ import app.familytv.data.ChannelEntity
 import app.familytv.data.Kind
 import app.familytv.data.NowNext
 import app.familytv.data.ProgrammeEntity
+import app.familytv.data.displayName
 import app.familytv.portal.Profile
 import app.familytv.trailer.ShowExtras
 import app.familytv.user.Favourites
@@ -187,11 +188,11 @@ internal fun GuideHeader(focus: MutableState<GuideFocus?>, now: State<Long>, pic
             }
         }
         Column(Modifier.weight(1f)) {
-            Text(f?.prog?.title ?: f?.channel?.name ?: "Guide", fontSize = 26.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(f?.prog?.title ?: f?.channel?.displayName ?: "Guide", fontSize = 26.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             f?.let {
                 val p = it.prog
                 Text(
-                    listOfNotNull("${it.channel.num}  ${it.channel.name}", p?.let { "${time(it.start)} – ${time(it.stop)}  ·  ${(it.stop - it.start) / 60_000} min" }).joinToString("   ·   "),
+                    listOfNotNull("${it.channel.num}  ${it.channel.displayName}", p?.let { "${time(it.start)} – ${time(it.stop)}  ·  ${(it.stop - it.start) / 60_000} min" }).joinToString("   ·   "),
                     fontSize = 15.sp, color = Tv.Accent, maxLines = 1, modifier = Modifier.padding(top = 2.dp),
                 )
             }
@@ -283,7 +284,7 @@ internal fun GuideRow(
                     Text("${c.num}", Modifier.width(42.dp), fontSize = 14.sp, color = Tv.Muted)
                     Logo(c.logo, 40)
                     Spacer(Modifier.width(10.dp))
-                    Text(c.name, Modifier.weight(1f), fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(c.displayName, Modifier.weight(1f), fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     if (favourite) MarkBadge(favourite = true, size = 18.dp)
                 }
             }
@@ -292,7 +293,7 @@ internal fun GuideRow(
                 Box(Modifier.width(d.gridW).fillMaxHeight().nowLine(d, start, now, Tv.Accent)) {
                     val cells = list.filter { minOf(it.stop, end) > maxOf(it.start, start) }
                     if (cells.isEmpty()) {
-                        GuideCell(if (compact) c.name else "No guide information", if (compact) "No guide information" else null, 0.dp, d.slotW * 4, onAir = false, entryPoint(entry), { onFocus(null) }, onPlay, onFavourite)
+                        GuideCell(if (compact) c.displayName else "No guide information", if (compact) "No guide information" else null, 0.dp, d.slotW * 4, onAir = false, entryPoint(entry), { onFocus(null) }, onPlay, onFavourite)
                     }
                     cells.forEachIndexed { i, p ->
                         val s = maxOf(p.start, start)

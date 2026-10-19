@@ -89,8 +89,8 @@ class MainActivity : ComponentActivity() {
                     Box(Modifier.fillMaxSize().safeDrawingPadding()) {
                         val screen by vm.screen.collectAsState()
                         when (val s = screen) {
-                            Screen.Loading -> Centered { Text("Starting…", fontSize = 22.sp) }
-                            is Screen.Pairing -> PairingScreen(s.code)
+                            Screen.Loading -> Box(Modifier.fillMaxSize()) // The startup video covers it; no text to flash.
+                            is Screen.Pairing -> PairingScreen(s.code, s.unpaired)
                             is Screen.Syncing -> SyncingScreen(s)
                             is Screen.Failed -> Centered {
                                 val retry = remember { FocusRequester() }
@@ -169,13 +169,18 @@ private fun SyncingScreen(s: Screen.Syncing) = Centered {
 }
 
 @Composable
-private fun PairingScreen(code: String) {
+private fun PairingScreen(code: String, unpaired: Boolean) {
     val qr = remember(code) { qrImage("${BuildConfig.PORTAL_URL.trimEnd('/')}/#pair=$code") }
     var dots by remember { mutableStateOf(0) }
     LaunchedEffect(Unit) { while (true) { kotlinx.coroutines.delay(800); dots = (dots + 1) % 4 } }
     val words: @Composable () -> Unit = {
         Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Text("Set up this TV", fontSize = 34.sp, fontWeight = FontWeight.Bold)
+            if (unpaired) {
+                Text("This device was unpaired", fontSize = 34.sp, fontWeight = FontWeight.Bold)
+                Text("Pair again", fontSize = 24.sp, fontWeight = FontWeight.SemiBold, color = Tv.Accent)
+            } else {
+                Text("Set up this TV", fontSize = 34.sp, fontWeight = FontWeight.Bold)
+            }
             Text("Give this code to whoever manages your TV,\nor scan the QR code.", fontSize = 20.sp)
             Text(code.chunked(3).joinToString(" "), fontSize = 72.sp, fontWeight = FontWeight.Bold, letterSpacing = 6.sp)
             Text("Waiting" + ".".repeat(dots), fontSize = 18.sp, color = Color.Gray)

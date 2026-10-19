@@ -1,0 +1,4 @@
+<resources>
+    <!-- Tv.Bg in ui/Theme.kt: the window shows it before the first frame, so launch has no grey flash. -->
+    <color name="app_background">#FF060A14</color>
+</resources>

@@ -118,6 +118,17 @@ object Classifier {
         return null
     }
 
+    /**
+     * A stream that played proves [host] works, whatever its bare root page answers: some servers
+     * always answer "/" with a 5xx (one gives Cloudflare's 520), so that server error was only a
+     * guess and is dropped. The root's status stays in the host facts; a slow stream is still
+     * reported by [stream].
+     */
+    fun streamPlayed(findings: List<Finding>, host: String, s: StreamFacts): List<Finding> {
+        if (s.httpStatus !in 200..299 || s.bytes <= 0) return findings
+        return findings.filterNot { it.verdict == Verdict.SERVER_ERROR && it.host == host }
+    }
+
     fun overall(findings: List<Finding>, internetOk: Boolean): Verdict {
         if (!internetOk) return Verdict.NO_INTERNET
         return findings.maxByOrNull { it.verdict.severity * 100 - it.verdict.ordinal }?.verdict ?: Verdict.OK

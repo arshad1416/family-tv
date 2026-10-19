@@ -13,6 +13,7 @@ import app.familytv.data.AppDb
 import app.familytv.data.CategoryEntity
 import app.familytv.data.Kind
 import app.familytv.data.MovieEntity
+import app.familytv.data.Names
 import app.familytv.iptv.MovieTitles
 import app.familytv.iptv.SeriesTitles
 import app.familytv.iptv.groupKey
@@ -39,7 +40,7 @@ fun categoryKeys(cats: List<CategoryEntity>): Set<Pair<String, String>> = cats.m
  */
 class MovieGroup(val key: String, val copies: List<MovieEntity>) {
     val first get() = copies.first()
-    val title: String get() = SeriesTitles.parse(first.name).title
+    val title: String get() = Names.clean(SeriesTitles.parse(first.name).title)
     val poster: String? get() = copies.firstNotNullOfOrNull { it.poster }
     val year: Int? get() = copies.firstNotNullOfOrNull { it.releaseYear }
 
@@ -81,7 +82,10 @@ suspend fun playMovie(ctx: Context, profile: Profile, group: MovieGroup, visible
     playMovieNow(ctx, profile, pickCopy(ctx, ctx.app.db.allCopies(group, visible), progress))
 }
 
-/** A movie poster: OK plays it, hold OK (or Menu) opens its menu, and it carries the Trailer button. */
+/**
+ * A movie poster: OK opens its details page (or plays it, outside a [SeriesNav.Host]), hold OK
+ * (or Menu) opens its menu, and it carries the Trailer button.
+ */
 @Composable
 internal fun MovieCard(
     g: MovieGroup,
@@ -91,9 +95,11 @@ internal fun MovieCard(
     visible: Set<Pair<String, String>>,
     favKeys: Set<String>,
     progress: Map<String, ProgressEntity>,
+    onOpen: () -> Unit = {},
     onFocus: () -> Unit = {},
 ) {
     val ctx = LocalContext.current
+    val nav = LocalSeriesNav.current
     val menus = LocalItemMenus.current
     val scope = rememberCoroutineScope()
     val shown = remember(g) { pickCopy(ctx, g.copies, emptyMap()) }
@@ -106,7 +112,10 @@ internal fun MovieCard(
         onTrailer = movieTrailerAction(profile, shown),
         onMenu = { scope.launch { menus.open = movieMenu(ctx, profile, g, ctx.app.db.allCopies(g, visible), favKeys, progress, scope) } },
         onFocus = onFocus,
-    ) { scope.launch { playMovie(ctx, profile, g, visible, progress) } }
+    ) {
+        onOpen()
+        if (nav != null) nav.movie = g to visible else scope.launch { playMovie(ctx, profile, g, visible, progress) }
+    }
 }
 
 /**
@@ -159,7 +168,7 @@ private fun markMovie(ctx: Context, copies: List<MovieEntity>, pick: MovieEntity
  * Favourites a film as one: adding favourites the copy in the family's language ([preferred], or
  * the one [MovieLanguages] picks); removing removes every favourited copy of it.
  */
-private fun toggleMovieFavourite(ctx: Context, g: MovieGroup, visible: Set<Pair<String, String>>, favKeys: Set<String>, preferred: MovieEntity? = null) {
+internal fun toggleMovieFavourite(ctx: Context, g: MovieGroup, visible: Set<Pair<String, String>>, favKeys: Set<String>, preferred: MovieEntity? = null) {
     val app = ctx.app
     app.scope.launch {
         val copies = app.db.allCopies(g, visible)

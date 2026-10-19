@@ -40,6 +40,7 @@ import app.familytv.data.CatalogDao
 import app.familytv.data.CategoryEntity
 import app.familytv.data.ChannelEntity
 import app.familytv.data.Kind
+import app.familytv.data.displayName
 import app.familytv.portal.Profile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -100,7 +101,7 @@ fun CategoriesScreen(vm: MainViewModel, profile: Profile) {
             }
         }
         Column {
-            val title = listOfNotNull(section, ADULT_CONTENT.takeIf { adult || asking }, cat?.name, sport?.label).joinToString("  ›  ")
+            val title = listOfNotNull(section, ADULT_CONTENT.takeIf { adult || asking }, cat?.displayName, sport?.label).joinToString("  ›  ")
             if (title.isNotEmpty()) Text(title, fontSize = 22.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(bottom = 12.dp))
             when {
                 section == null -> Tiles(
@@ -121,7 +122,7 @@ fun CategoriesScreen(vm: MainViewModel, profile: Profile) {
                 asking -> PinPrompt(profile) { ctx.app.adultUnlocked.value = true; asking = false; adult = true }
                 else -> {
                     val list = if (adult) adults else normal
-                    val tiles = list.map { c -> Tile(c.name) { catKey = c.chipKey } } +
+                    val tiles = list.map { c -> Tile(c.displayName) { catKey = c.chipKey } } +
                         listOfNotNull(Tile(ADULT_CONTENT, Icons.Filled.Lock) {
                             if (adultOpen(profile, unlocked)) adult = true else asking = true
                         }.takeIf { !adult && adults.isNotEmpty() })

@@ -63,6 +63,7 @@ import app.familytv.core.Http
 import app.familytv.data.ChannelEntity
 import app.familytv.data.Kind
 import app.familytv.data.NowNext
+import app.familytv.data.displayName
 import app.familytv.iptv.QualityPref
 import app.familytv.iptv.ServerSwitch
 import app.familytv.iptv.StreamQuality
@@ -528,7 +529,7 @@ class PlayerActivity : ComponentActivity() {
         triedHls = false
         retries = 0
         tunedAt = System.currentTimeMillis()
-        title = "${ch.num}  ${ch.name}"
+        title = "${ch.num}  ${ch.displayName}"
         playing = index
         overlay.visibility = TextView.GONE
         overlay.tag = null
@@ -539,7 +540,7 @@ class PlayerActivity : ComponentActivity() {
             delay(delayMs)
             val play = preferredVersion(ch, p)
             tuned = play
-            if (play !== ch) title = "${ch.num}  ${play.name}"
+            if (play !== ch) title = "${ch.num}  ${play.displayName}"
             val url = Streams(app.db, p).live(play) ?: return@launch show("$title\nThis channel has no stream address.", 4000, isError = true)
             start(url, title)
             Usage.log(Usage.Action.PLAY_START, Usage.Word.LIVE)

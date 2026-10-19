@@ -54,7 +54,7 @@ class UsageTest {
     @Test fun namesMatchTheSharedSpec() {
         with(Usage) {
             assertEquals(
-                "home live guide movies series series_page categories sports search settings player player_menu pairing update",
+                "home live guide movies series series_page movie_page categories sports search settings player player_menu pairing update",
                 Screen.entries.joinToString(" ") { it.wire },
             )
             assertEquals(

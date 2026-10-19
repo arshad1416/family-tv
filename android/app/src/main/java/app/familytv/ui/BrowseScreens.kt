@@ -43,8 +43,12 @@ import app.familytv.data.ChannelEntity
 import app.familytv.data.Kind
 import app.familytv.data.MovieEntity
 import app.familytv.data.SeriesEntity
+import app.familytv.data.displayName
 import app.familytv.portal.Profile
+import app.familytv.trakt.ProgressRules
 import app.familytv.user.Favourites
+import app.familytv.user.ProgressEntity
+import app.familytv.user.ProgressKey
 import kotlinx.coroutines.flow.flowOf
 
 /**
@@ -69,7 +73,7 @@ fun CategoryChips(cats: List<CategoryEntity>, selected: CategoryEntity?, start: 
             val minH = if (LocalFormFactor.current.touch) 48.dp else 0.dp
             FocusBox(onClick = { onSelect(c) }, selected = c == selected, color = Tv.Panel, shape = RoundedCornerShape(20.dp), modifier = Modifier.heightIn(min = minH), contentAlignment = Alignment.CenterStart) { focused ->
                 Text(
-                    c.name, Modifier.padding(horizontal = 18.dp, vertical = 9.dp), fontSize = 15.sp, maxLines = 1,
+                    c.displayName, Modifier.padding(horizontal = 18.dp, vertical = 9.dp), fontSize = 15.sp, maxLines = 1,
                     color = if (c == selected && !focused) Tv.Accent else Tv.Text,
                 )
             }
@@ -88,11 +92,15 @@ fun MoviesScreen(vm: MainViewModel, profile: Profile) {
     val favKeys = rememberFavouriteKeys(favs)
     val favMovies = rememberFavouriteMovies(favs, visible)
     val progress = rememberProgress()
-    val shelves = rememberMovieShelves(visible, favMovies)
+    val shelves = rememberMovieShelves(visible, favMovies, progress)
     val visibleKeys = remember(visible) { categoryKeys(visible) }
-    // The card to come back to (after switching pages, or the rail), and the one the spotlight shows.
+    // The card to come back to (after switching pages, the rail or a film's page), and the one the spotlight shows.
     var lastCard by rememberSaveable { mutableStateOf<String?>(null) }
     var focused by remember { mutableStateOf<MovieGroup?>(null) }
+    val nav = rememberSeriesNav()
+    // Hoisted, so the grid or shelves come back where they were when a film's page closes.
+    val grid = rememberLazyGridState()
+    val list = rememberLazyListState()
     val inCategory by remember(cat) {
         cat?.takeUnless { it.isVirtual }?.let { ctx.app.db.catalog().movies(it.sourceId, it.categoryId) } ?: flowOf(emptyList())
     }.collectAsState(initial = emptyList())
@@ -102,16 +110,18 @@ fun MoviesScreen(vm: MainViewModel, profile: Profile) {
     val card: @Composable (MovieGroup, Modifier, String, Dp?) -> Unit = { g, modifier, key, width ->
         MovieCard(g, modifier, width, profile, visibleKeys, favKeys, progress) { lastCard = key; focused = g }
     }
-    Column {
-        if (tv) MovieSpotlight(focused, focused?.progressIn(progress), visibleKeys) else PageTitle("Movies")
-        CategoryChips(cats, cat, FOCUS_ROOM, select)
-        Spacer(Modifier.height(8.dp))
-        when {
-            cat?.isHighlights == true -> Shelves(shelves, MovieGroup::key, lastCard, "Recently added and top rated movies show up here once the line has loaded.") { g, mod, k ->
-                card(g, mod, k, 140.dp)
+    nav.Host(vm, profile) {
+        Column {
+            if (tv) MovieSpotlight(focused, focused?.progressIn(progress), visibleKeys) else PageTitle("Movies")
+            CategoryChips(cats, cat, FOCUS_ROOM, select)
+            Spacer(Modifier.height(8.dp))
+            when {
+                cat?.isHighlights == true -> Shelves(shelves, MovieGroup::key, lastCard, "Films you're watching, recently added and top rated movies show up here once the line has loaded.", list) { g, mod, k ->
+                    card(g, mod, k, 140.dp)
+                }
+                showingFavourites && favMovies.isEmpty() -> FavouritesHint(vodHint(LocalFormFactor.current, "a movie"))
+                else -> PosterGrid(movies, MovieGroup::key, lastCard, grid) { g, mod, k -> card(g, mod, k, null) }
             }
-            showingFavourites && favMovies.isEmpty() -> FavouritesHint(vodHint(LocalFormFactor.current, "a movie"))
-            else -> PosterGrid(movies, MovieGroup::key, lastCard) { g, mod, k -> card(g, mod, k, null) }
         }
     }
 }
@@ -128,7 +138,7 @@ internal fun ChannelPosters(channels: List<ChannelEntity>, key: String) {
     PosterGrid(channels, { "${it.sourceId}/${it.streamId}" }, lastCard) { c, mod, k ->
         val fav = Favourites.key(Kind.LIVE, c.sourceId, c.streamId) in favKeys
         PosterCard(
-            c.name, c.logo, mod, width = null, logo = true,
+            c.displayName, c.logo, mod, width = null, logo = true,
             favourite = fav, onFavourite = { toggleFavourite(ctx, Kind.LIVE, c.sourceId, c.streamId, c.name) },
             onFocus = { lastCard = k },
         ) { playLive(ctx, c.sourceId, c.categoryId, 0, c.streamId) }
@@ -157,7 +167,7 @@ internal fun CategoryPosters(profile: Profile, cat: CategoryEntity, nav: SeriesN
             val movies = remember(rows) { groupMovies(rows) }
             val movieCats = categories(profile, Kind.MOVIE)
             val visibleKeys = remember(movieCats, cat) { categoryKeys(movieCats) + (cat.sourceId to cat.categoryId) }
-            PosterGrid(movies, MovieGroup::key, lastCard) { g, mod, k -> MovieCard(g, mod, null, profile, visibleKeys, favKeys, progress) { lastCard = k } }
+            PosterGrid(movies, MovieGroup::key, nav.back ?: lastCard) { g, mod, k -> MovieCard(g, mod, null, profile, visibleKeys, favKeys, progress) { lastCard = k } }
         }
         else -> {
             val showFavs = ShowFavourites(rememberFavouriteShowRows(favs))
@@ -177,19 +187,28 @@ internal fun CategoryPosters(profile: Profile, cat: CategoryEntity, nav: SeriesN
     }
 }
 
-/** Movies' Highlights: recently added, favourites and top rated, from the categories this profile shows. */
+/**
+ * Movies' Highlights: continue watching (films started and not finished, latest first), recently
+ * added, favourites and top rated, from the categories this profile shows.
+ */
 @Composable
-private fun rememberMovieShelves(visible: List<CategoryEntity>, favMovies: List<MovieEntity>): List<Pair<String, List<MovieGroup>>> {
+private fun rememberMovieShelves(visible: List<CategoryEntity>, favMovies: List<MovieEntity>, progress: Map<String, ProgressEntity>): List<Pair<String, List<MovieGroup>>> {
     val dao = LocalContext.current.app.db.catalog()
+    var watching by remember { mutableStateOf(emptyList<MovieGroup>()) }
     var recent by remember { mutableStateOf(emptyList<MovieGroup>()) }
     var top by remember { mutableStateOf(emptyList<MovieGroup>()) }
+    LaunchedEffect(visible, progress) {
+        val ok = categoryKeys(visible)
+        val started = ProgressRules.continueWatching(progress.values, ProgressKey.MOVIE).take(SHELF_SIZE)
+        watching = groupMovies(started.mapNotNull { dao.movie(it.sourceId, it.itemId) }.filter { (it.sourceId to it.categoryId) in ok })
+    }
     LaunchedEffect(visible) {
         val ok = categoryKeys(visible)
         recent = groupMovies(dao.recentMovies(300).filter { (it.sourceId to it.categoryId) in ok }).take(SHELF_SIZE)
         top = groupMovies(dao.topMovies(TOP_RATING, 300).filter { (it.sourceId to it.categoryId) in ok }).take(SHELF_SIZE)
     }
-    return remember(recent, favMovies, top) {
-        listOf("Recently added" to recent, "Favourites" to groupMovies(favMovies), "Top rated" to top).filter { it.second.isNotEmpty() }
+    return remember(watching, recent, favMovies, top) {
+        listOf(CONTINUE_WATCHING to watching, "Recently added" to recent, "Favourites" to groupMovies(favMovies), "Top rated" to top).filter { it.second.isNotEmpty() }
     }
 }
 
@@ -209,7 +228,11 @@ fun SeriesScreen(vm: MainViewModel, profile: Profile) {
     val showFavs = ShowFavourites(rememberFavouriteShowRows(favs))
     val newKeys = rememberNewEpisodeKeys()
     val newShows = rememberNewEpisodeShows(newKeys, visible)
-    val shelves = rememberSeriesShelves(visible, newShows, favSeries)
+    val progress = rememberProgress()
+    val watchingEpisodes = remember(progress) { ProgressRules.continueWatching(progress.values, ProgressKey.EPISODE) }
+    // A Continue watching poster's line: how far into the episode being watched.
+    val watchingBars = remember(watchingEpisodes) { watchingEpisodes.associate { (it.sourceId to it.itemId) to ProgressRules.bar(it) } }
+    val shelves = rememberSeriesShelves(visible, newShows, favSeries, watchingEpisodes)
     var lastCard by rememberSaveable { mutableStateOf<String?>(null) }
     var focused by remember { mutableStateOf<SeriesGroup?>(null) }
     val inCategory by remember(cat) {
@@ -224,6 +247,7 @@ fun SeriesScreen(vm: MainViewModel, profile: Profile) {
         PosterCard(
             g.title, g.poster, modifier, width = width,
             favourite = on, onFavourite = { toggleShowFavourite(ctx, g, on) },
+            progress = if (key.startsWith("$CONTINUE_WATCHING/")) g.copies.firstNotNullOfOrNull { watchingBars[it.sourceId to it.seriesId] } ?: 0f else 0f,
             newBadge = g.hasNew(newKeys), newCount = g.newCount(newKeys),
             onFocus = { lastCard = key; focused = g },
         ) { nav.open = g }
@@ -234,7 +258,7 @@ fun SeriesScreen(vm: MainViewModel, profile: Profile) {
             CategoryChips(cats, cat, FOCUS_ROOM, select)
             Spacer(Modifier.height(8.dp))
             when {
-                cat?.isHighlights == true -> Shelves(shelves, SeriesGroup::key, lastCard, "Top rated shows and ones with new episodes show up here once the line has loaded.", list) { g, mod, k ->
+                cat?.isHighlights == true -> Shelves(shelves, SeriesGroup::key, lastCard, "Shows you're watching, top rated shows and ones with new episodes show up here once the line has loaded.", list) { g, mod, k ->
                     card(g, mod, k, 140.dp)
                 }
                 showingFavourites && series.isEmpty() -> FavouritesHint(vodHint(LocalFormFactor.current, "a series"))
@@ -244,19 +268,35 @@ fun SeriesScreen(vm: MainViewModel, profile: Profile) {
     }
 }
 
-/** Series' Highlights: shows with new episodes, favourites and top rated. */
+/**
+ * Series' Highlights: continue watching (shows with an episode started and not finished, latest
+ * first; the show's page opens at that episode), shows with new episodes, favourites and top rated.
+ * There's no Recently added: the catalog keeps no date for a show.
+ */
 @Composable
-private fun rememberSeriesShelves(visible: List<CategoryEntity>, newShows: List<SeriesGroup>, favSeries: List<SeriesEntity>): List<Pair<String, List<SeriesGroup>>> {
+private fun rememberSeriesShelves(
+    visible: List<CategoryEntity>,
+    newShows: List<SeriesGroup>,
+    favSeries: List<SeriesEntity>,
+    watchingEpisodes: List<ProgressEntity>,
+): List<Pair<String, List<SeriesGroup>>> {
     val dao = LocalContext.current.app.db.catalog()
+    var watching by remember { mutableStateOf(emptyList<SeriesGroup>()) }
     var top by remember { mutableStateOf(emptyList<SeriesGroup>()) }
+    LaunchedEffect(visible, watchingEpisodes) {
+        val ok = categoryKeys(visible)
+        watching = groupSeries(watchingEpisodes.take(SHELF_SIZE).mapNotNull { dao.seriesItem(it.sourceId, it.itemId) }.filter { (it.sourceId to it.categoryId) in ok })
+    }
     LaunchedEffect(visible) {
-        val ok = visible.mapTo(HashSet()) { it.sourceId to it.categoryId }
+        val ok = categoryKeys(visible)
         top = groupSeries(dao.topSeries(TOP_RATING, 400).filter { (it.sourceId to it.categoryId) in ok }).take(SHELF_SIZE)
     }
-    return remember(newShows, favSeries, top) {
-        listOf("New episodes" to newShows, "Favourites" to groupSeries(favSeries), "Top rated" to top).filter { it.second.isNotEmpty() }
+    return remember(watching, newShows, favSeries, top) {
+        listOf(CONTINUE_WATCHING to watching, "New episodes" to newShows, "Favourites" to groupSeries(favSeries), "Top rated" to top).filter { it.second.isNotEmpty() }
     }
 }
+
+private const val CONTINUE_WATCHING = "Continue watching"
 
 private const val SHELF_SIZE = 30
 

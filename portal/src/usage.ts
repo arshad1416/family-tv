@@ -4,7 +4,7 @@
 export const USAGE_APPS = ["kotlin", "rust"] as const;
 
 export const USAGE_SCREENS = [
-  "home", "live", "guide", "movies", "series", "series_page", "categories", "sports", "search", "settings",
+  "home", "live", "guide", "movies", "series", "series_page", "movie_page", "categories", "sports", "search", "settings",
   "player", "player_menu", "pairing", "update",
 ] as const;
 

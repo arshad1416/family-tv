@@ -53,6 +53,7 @@ import app.familytv.app
 import app.familytv.data.ChannelEntity
 import app.familytv.data.NowNext
 import app.familytv.data.ProgrammeEntity
+import app.familytv.data.displayName
 
 private val GUIDE_W = 440.dp
 
@@ -137,7 +138,7 @@ private fun InfoBanner(ch: ChannelEntity, progs: List<NowNext>?, modifier: Modif
             Logo(ch.logo, 76)
             Spacer(Modifier.width(22.dp))
             Column(Modifier.weight(1f)) {
-                Text(ch.name, fontSize = 16.sp, color = Tv.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(ch.displayName, fontSize = 16.sp, color = Tv.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(cur?.title ?: "No guide information", fontSize = 26.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 detail?.let(::programmeFacts)?.let { Text(it, fontSize = 15.sp, color = Tv.Accent, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp)) }
                 detail?.description?.takeIf { it.isNotBlank() }?.let { Text(it, fontSize = 14.sp, color = Tv.Muted, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp)) }
@@ -183,7 +184,7 @@ private fun MiniGuide(channels: List<ChannelEntity>, playing: Int, programmes: M
                         Logo(c.logo, 40)
                         Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
-                            Text(c.name, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(c.displayName, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Text(cur?.title ?: "", fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, color = if (focused) Tv.Text else Tv.Muted)
                             if (cur != null) ProgressLine(progress(cur.start, cur.stop, now), Modifier.padding(top = 4.dp), height = 2.dp, fill = if (focused) Tv.Text else Tv.Accent)
                         }

@@ -145,7 +145,7 @@ fun SearchScreen(vm: MainViewModel, profile: Profile) {
                 if (films.isNotEmpty()) item("mv") {
                     Shelf("Movies") {
                         itemsIndexed(films, key = { _, g -> g.key }) { _, g ->
-                            MovieCard(g, profile = profile, visible = movies, favKeys = favKeys, progress = progress)
+                            MovieCard(g, entryPoint(nav.back == g.key), profile = profile, visible = movies, favKeys = favKeys, progress = progress)
                         }
                     }
                 }
