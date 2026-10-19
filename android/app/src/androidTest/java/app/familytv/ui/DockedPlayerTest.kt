@@ -125,8 +125,9 @@ class DockedPlayerTest {
         val player = main { activity.dock.current!! }
         assertTrue(waitPlaying(player))
 
-        tapVideo()
-        compose.waitUntil(5_000) { runCatching { compose.onNodeWithContentDescription("Full screen").assertExists() }.isSuccess }
+        // The film's controls show by themselves when it starts; tap only if they've already hidden.
+        if (!fullScreenButtonShown()) tapVideo()
+        waitFor("the full-screen button", 5_000) { fullScreenButtonShown() }
         compose.onNodeWithContentDescription("Full screen").performClick()
         waitMode("full")
         assertSame(player, main { activity.dock.current })
@@ -152,13 +153,13 @@ class DockedPlayerTest {
         waitMode("full")
         assertSame(player, main { activity.dock.current })
 
-        // Back closes the guide steps first, then returns to side by side (never closes from full screen).
-        var presses = 0
-        while (mode() == "full" && presses < 6) {
+        // Back steps through the guide first, then returns to side by side (never closes from full screen).
+        for (step in listOf("guide_over", "guide_picture", "guide_categories")) {
             back()
-            presses++
-            compose.waitForIdle()
+            waitFor("Back to reach $step (is ${main { player.backState }}, ${mode()})") { main { player.backState } == step }
+            assertEquals("full", mode())
         }
+        back()
         waitMode("side")
         assertSame("same player back side by side", player, main { activity.dock.current })
         assertTrue(waitPlaying(player))
@@ -170,6 +171,8 @@ class DockedPlayerTest {
 
     // ---------- helpers ----------
 
+    private fun fullScreenButtonShown() = runCatching { compose.onNodeWithContentDescription("Full screen").assertExists() }.isSuccess
+
     private fun assumeForm(f: FormFactor) = assumeTrue("needs a ${f.name.lowercase()}", target.formFactor() == f)
 
     private fun startLive() = main { playLive(activity, SOURCE, CATEGORY, 0) }
@@ -178,7 +181,7 @@ class DockedPlayerTest {
 
     private fun position() = main { activity.dock.current?.playbackPosition ?: -1 }
 
-    private fun waitMode(want: String) = waitFor("player to be $want (is ${mode()})") { mode() == want }
+    private fun waitMode(want: String) = waitFor("player to be $want") { mode() == want }
 
     private fun waitPlaying(p: PlayerController): Boolean {
         waitFor("playback") { main { p.isPlaying } }
@@ -209,7 +212,8 @@ class DockedPlayerTest {
         val (x, y) = main {
             val v = activity.dock.current!!.root
             val at = IntArray(2).also(v::getLocationOnScreen)
-            (at[0] + v.width / 2f) to (at[1] + v.height / 2f)
+            // Top middle: clear of the close and full-screen buttons and of the film's play button.
+            (at[0] + v.width / 2f) to (at[1] + v.height * 0.15f)
         }
         val down = SystemClock.uptimeMillis()
         instrumentation.sendPointerSync(MotionEvent.obtain(down, down, MotionEvent.ACTION_DOWN, x, y, 0))
@@ -221,7 +225,8 @@ class DockedPlayerTest {
         try {
             compose.waitUntil(timeoutMs) { ok() }
         } catch (e: ComposeTimeoutException) {
-            throw AssertionError("Timed out waiting for $what")
+            val state = main { "${activity.dock.mode}, back=${activity.dock.current?.backState}, playing=${activity.dock.current?.isPlaying}" }
+            throw AssertionError("Timed out waiting for $what (player: $state)")
         }
     }
 
