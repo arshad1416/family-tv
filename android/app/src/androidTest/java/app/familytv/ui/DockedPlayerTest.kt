@@ -40,6 +40,9 @@ import java.io.File
  * tablet and the other way round, so run it once on each. Plays a bundled clip as both a live
  * channel and a film; the debug portal address is the emulator's own host, so no real portal or
  * IPTV line is touched.
+ *
+ * A software-rendered tablet emulator starved of memory can pop a "System UI isn't responding" box that takes
+ * the keys and taps; boot it with `-memory 4096 -cores 4` and run `adb shell settings put global hide_error_dialogs 1`.
  */
 @RunWith(AndroidJUnit4::class)
 class DockedPlayerTest {
