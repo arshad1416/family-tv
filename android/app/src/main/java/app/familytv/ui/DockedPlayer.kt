@@ -10,13 +10,11 @@ import android.view.OrientationEventListener
 import android.view.Surface
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
@@ -30,7 +28,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -51,9 +48,10 @@ import app.familytv.usage.Usage
 
 /**
  * Phones and tablets: the player inside the home screen, YouTube style. Upright, the video sits
- * across the top and the app stays usable below it; turned sideways (or with the full-screen
- * button) it fills the screen with the system bars hidden and works like the TV player. It is
- * one view either way, only resized, so playback carries on without a restart.
+ * across the top and the app stays usable below it. Turning a phone sideways fills the screen
+ * with the system bars hidden, where it works like the TV player; a sideways tablet shows the
+ * video on the left with the app beside it, and goes full screen with the button or a double
+ * tap. It is one view throughout, only resized, so playback carries on without a restart.
  */
 class DockedPlayer(private val activity: ComponentActivity) : PlayerHost {
     private var controller by mutableStateOf<PlayerController?>(null)
@@ -72,7 +70,7 @@ class DockedPlayer(private val activity: ComponentActivity) : PlayerHost {
         // Lines allow one connection: the old stream stops before the new one starts.
         controller?.let(::release)
         holdDocked = false
-        full = landscape()
+        full = landscape() && !tablet()
         controller = PlayerController(activity, intent, this).also { if (started) it.onStart() }
         modeSince = SystemClock.elapsedRealtime()
         Usage.opened(screen())
@@ -96,7 +94,8 @@ class DockedPlayer(private val activity: ComponentActivity) : PlayerHost {
         switchMode(true)
         if (!landscape()) {
             activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-            watchFor(landscape = true)
+            // A tablet stays sideways until it leaves full screen, then follows how it's held.
+            if (!tablet()) watchFor(landscape = true)
         }
     }
 
@@ -105,7 +104,7 @@ class DockedPlayer(private val activity: ComponentActivity) : PlayerHost {
         if (controller == null) return
         if (!full) return close()
         switchMode(false)
-        if (landscape()) {
+        if (landscape() && !tablet()) {
             holdDocked = true
             activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
             watchFor(landscape = false)
@@ -115,10 +114,17 @@ class DockedPlayer(private val activity: ComponentActivity) : PlayerHost {
         }
     }
 
-    /** Turning the device switches between docked and full screen, unless a button just chose one. */
+    /**
+     * Turning a phone switches between docked and full screen, unless a button just chose one. A
+     * tablet only leaves full screen when turned upright; sideways it is side by side.
+     */
     fun onConfigurationChanged() {
         if (controller == null) return
         val land = landscape()
+        if (tablet()) {
+            if (!land && full && activity.requestedOrientation == ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED) switchMode(false)
+            return
+        }
         if (!land) holdDocked = false
         val forced = activity.requestedOrientation != ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         if (land && !full && !holdDocked) switchMode(true)
@@ -152,20 +158,26 @@ class DockedPlayer(private val activity: ComponentActivity) : PlayerHost {
         controller?.onStop()
     }
 
-    /** The home screen, with the video docked above it or covering it. */
+    /** The home screen, with the video docked above it, beside it (sideways tablet) or covering it. */
     @Composable
     fun Host(content: @Composable () -> Unit) {
         val c = controller
         BoxWithConstraints(Modifier.fillMaxSize()) {
-            val videoHeight = min(maxWidth * 9f / 16f, maxHeight * 0.45f)
-            Box(Modifier.fillMaxSize().safeDrawingPadding().padding(top = if (c != null && !full) videoHeight else 0.dp)) { content() }
+            val side = LocalFormFactor.current == FormFactor.Tablet && maxWidth > maxHeight
+            val videoWidth = if (side) maxWidth * 2f / 3f else maxWidth
+            val videoHeight = if (side) videoWidth * 9f / 16f else min(maxWidth * 9f / 16f, maxHeight * 0.45f)
+            val docked = c != null && !full
+            Box(
+                Modifier.fillMaxSize().safeDrawingPadding()
+                    .padding(start = if (docked && side) videoWidth else 0.dp, top = if (docked && !side) videoHeight else 0.dp),
+            ) { content() }
             if (c != null) {
                 // Full screen: nothing underneath takes a touch the video doesn't.
                 if (full) Box(Modifier.fillMaxSize().background(Color.Black).pointerInput(Unit) { detectTapGestures { } })
                 key(c) {
                     AndroidView(
                         factory = { c.root },
-                        modifier = if (full) Modifier.fillMaxSize() else Modifier.statusBarsPadding().fillMaxWidth().height(videoHeight),
+                        modifier = if (full) Modifier.fillMaxSize() else Modifier.statusBarsPadding().width(videoWidth).height(videoHeight),
                     )
                 }
             }
@@ -188,6 +200,8 @@ class DockedPlayer(private val activity: ComponentActivity) : PlayerHost {
     }
 
     private fun screen() = if (full) Usage.Screen.PLAYER_FULLSCREEN else Usage.Screen.PLAYER_DOCKED
+
+    private fun tablet() = activity.formFactor() == FormFactor.Tablet
 
     private fun landscape() = activity.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
 
@@ -236,8 +250,8 @@ class DockedPlayer(private val activity: ComponentActivity) : PlayerHost {
 
 /**
  * Over the docked video. Live TV has no PlayerView controls, so a tap shows ours (close, play or
- * pause, full screen); movies and episodes keep PlayerView's play and seek controls, with close
- * and full screen added while they show.
+ * pause, full screen) and a double tap goes full screen; movies and episodes keep PlayerView's
+ * play and seek controls, with close and full screen added while they show.
  */
 @Composable
 fun DockedControls(
@@ -250,7 +264,7 @@ fun DockedControls(
     onFullScreen: () -> Unit,
 ) {
     Box(Modifier.fillMaxSize()) {
-        if (live) Box(Modifier.fillMaxSize().clickable(remember { MutableInteractionSource() }, indication = null, onClick = onTap))
+        if (live) Box(Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures(onDoubleTap = { onFullScreen() }, onTap = { onTap() }) })
         if (visible) {
             SmallRound(Icons.Filled.Close, "Close player", Modifier.align(Alignment.TopStart).padding(8.dp), onClose)
             SmallRound(FullScreenIcon, "Full screen", Modifier.align(Alignment.TopEnd).padding(8.dp), onFullScreen)
