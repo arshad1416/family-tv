@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Text
 import app.familytv.BuildConfig
+import app.familytv.addons.Addons
 import app.familytv.app
 import app.familytv.data.Kind
 import app.familytv.iptv.QualityPref
@@ -81,6 +82,7 @@ fun SettingsScreen(vm: MainViewModel, config: DeviceConfig) {
                 }
                 // Only shown when the portal has Trakt set up.
                 if (config.trakt?.clientId != null) TraktPanel()
+                AddonsPanel(config)
                 StreamQualityPanel()
                 PackageSorterPanel(config.profile)
                 OpenOnStartPanel(config.profile)
@@ -121,6 +123,24 @@ private fun qualityWord(kind: String) = when (kind) {
     Kind.LIVE -> Usage.Word.STREAM_QUALITY_LIVE
     Kind.MOVIE -> Usage.Word.STREAM_QUALITY_MOVIES
     else -> Usage.Word.STREAM_QUALITY_SERIES
+}
+
+/** Paid add-ons for this TV's profile and where each stands; they're bought on the portal. Hidden when there are none. */
+@Composable
+private fun AddonsPanel(config: DeviceConfig) {
+    val ctx = LocalContext.current
+    val addons = remember(config) { Addons.list(config, ctx.app.portal.contactAt, System.currentTimeMillis()) }
+    if (addons.isEmpty()) return
+    LaunchedEffect(Unit) { Usage.log(Usage.Screen.ADDONS, Usage.Action.OPEN) }
+    Panel {
+        Text("Add-ons", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        for (a in addons) {
+            Column {
+                Text(a.name, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                Text(a.line, fontSize = 14.sp, color = if (a.state == Addons.State.ACTIVE && a.known) Tv.Good else Tv.Muted)
+            }
+        }
+    }
 }
 
 /**

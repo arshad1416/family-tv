@@ -33,7 +33,10 @@ class PortalClient(context: Context, private val baseUrl: String = BuildConfig.P
     /** Last config we got, so the TV keeps playing when the portal is unreachable. */
     var cachedConfig: DeviceConfig?
         get() = prefs.getString("config", null)?.let { runCatching { gson.fromJson(it, DeviceConfig::class.java) }.getOrNull() }
-        set(v) = prefs.edit().putString("config", v?.let { gson.toJson(it.copy(commands = null)) }).apply()
+        set(v) = prefs.edit().putString("config", v?.let { gson.toJson(it.copy(commands = null)) }).putLong("contactAt", if (v != null) System.currentTimeMillis() else 0).apply()
+
+    /** When the portal last answered this TV (a config or a heartbeat), in ms; add-ons pause once it's too long ago. */
+    val contactAt: Long get() = prefs.getLong("contactAt", 0)
 
     // The screen and the background worker start together; without this lock each registered
     // its own device and the TV kept a different one from the code it showed.
@@ -90,7 +93,9 @@ class PortalClient(context: Context, private val baseUrl: String = BuildConfig.P
     }
 
     suspend fun heartbeat(status: Map<String, Any?>): HeartbeatResponse =
-        post("/api/device/heartbeat", mapOf("appVersion" to BuildConfig.VERSION_NAME, "status" to status), HeartbeatResponse::class.java)
+        post("/api/device/heartbeat", mapOf("appVersion" to BuildConfig.VERSION_NAME, "status" to status), HeartbeatResponse::class.java).also {
+            if (it.paired) prefs.edit().putLong("contactAt", System.currentTimeMillis()).apply()
+        }
 
     suspend fun ack(commandId: String, result: Any?) {
         post("/api/device/commands/$commandId/ack", mapOf("result" to result), Map::class.java)
