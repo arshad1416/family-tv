@@ -7,6 +7,7 @@ import android.net.Uri
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -51,6 +52,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
@@ -61,6 +63,11 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
@@ -294,47 +301,78 @@ internal fun GlassHeading(text: String, modifier: Modifier = Modifier) {
     Text(text, fontSize = 17.gsp, fontWeight = FontWeight.SemiBold, color = Glass.Soft, modifier = modifier)
 }
 
-/** A column heading inside a panel ("GENRE"). */
+/** A column heading inside a panel ("CATEGORY"). */
 @Composable
 internal fun GlassLabel(text: String, modifier: Modifier = Modifier) {
     Text(text.uppercase(), fontSize = 13.gsp, fontWeight = FontWeight.SemiBold, color = Glass.Faint, letterSpacing = 1.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = modifier.padding(start = 10.gx, top = 4.gx, bottom = 6.gx))
 }
 
 /**
- * The search box: a glass pill that searches only the page it's on. OK opens the keyboard;
- * Search or Down goes to the results.
+ * The search box: a glass pill that searches only the page it's on. The D-pad stops on the pill
+ * like on any button; OK starts typing and opens the keyboard. While typing, Search goes to the
+ * results, an arrow leaves for that side, and Back (once the keyboard is closed) returns to the pill.
  */
 @Composable
 internal fun GlassSearchBox(query: String, onQuery: (String) -> Unit, hint: String, modifier: Modifier = Modifier) {
     val focusManager = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     var focused by remember { mutableStateOf(false) }
+    // Only OK puts focus in the text field: a focused field takes the arrows and opens the keyboard by itself.
+    var typing by remember { mutableStateOf(false) }
+    val pill = remember { FocusRequester() }
+    val field = remember { FocusRequester() }
+    LaunchedEffect(typing) { if (typing) { runCatching { field.requestFocus() }; keyboard?.show() } }
+    val stopTyping = { keyboard?.hide(); runCatching { pill.requestFocus() }; typing = false }
     val shape = RoundedCornerShape(50)
-    BasicTextField(
-        value = query,
-        onValueChange = onQuery,
-        singleLine = true,
-        textStyle = TextStyle(color = Glass.Text, fontSize = 15.gsp),
-        cursorBrush = SolidColor(Glass.Text),
-        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-        keyboardActions = KeyboardActions(onSearch = { keyboard?.hide(); focusManager.moveFocus(FocusDirection.Down) }),
-        modifier = modifier.width(260.gx).height(42.gx).onFocusChanged { focused = it.isFocused },
-        decorationBox = { inner ->
-            Row(
-                Modifier.fillMaxSize().clip(shape).background(if (focused) Glass.Focus else Glass.Raised)
-                    .border(if (focused) 2.dp else 1.dp, if (focused) Glass.Ring else Glass.LineSoft, shape)
-                    .padding(horizontal = 16.gx),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(Icons.Filled.Search, contentDescription = null, tint = Glass.Dim, modifier = Modifier.size(18.gx))
-                Spacer(Modifier.width(10.gx))
-                Box(Modifier.weight(1f)) {
-                    if (query.isEmpty()) Text(hint, fontSize = 15.gsp, color = Glass.Dim, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    inner()
+    Box(
+        modifier.width(260.gx).height(42.gx)
+            .focusRequester(pill)
+            .onFocusChanged { focused = it.hasFocus }
+            .clickable(interactionSource = null, indication = null) { typing = true },
+    ) {
+        BasicTextField(
+            value = query,
+            onValueChange = onQuery,
+            singleLine = true,
+            textStyle = TextStyle(color = Glass.Text, fontSize = 15.gsp),
+            cursorBrush = SolidColor(Glass.Text),
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            keyboardActions = KeyboardActions(onSearch = { stopTyping(); focusManager.moveFocus(FocusDirection.Down) }),
+            modifier = Modifier.fillMaxSize()
+                .focusRequester(field)
+                .focusProperties { canFocus = typing }
+                .onFocusChanged { if (!it.isFocused) typing = false }
+                .onPreviewKeyEvent { e ->
+                    val dir = when (e.key) {
+                        Key.DirectionUp -> FocusDirection.Up
+                        Key.DirectionDown -> FocusDirection.Down
+                        Key.DirectionLeft -> FocusDirection.Left
+                        Key.DirectionRight -> FocusDirection.Right
+                        else -> null
+                    }
+                    when {
+                        e.key == Key.Back -> { if (e.type == KeyEventType.KeyUp) stopTyping(); true }
+                        dir != null -> { if (e.type == KeyEventType.KeyDown) { stopTyping(); focusManager.moveFocus(dir) }; true }
+                        else -> false
+                    }
+                },
+            decorationBox = { inner ->
+                Row(
+                    Modifier.fillMaxSize().clip(shape).background(if (focused) Glass.Focus else Glass.Raised)
+                        .border(if (focused) 2.dp else 1.dp, if (focused) Glass.Ring else Glass.LineSoft, shape)
+                        .padding(horizontal = 16.gx),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Filled.Search, contentDescription = null, tint = Glass.Dim, modifier = Modifier.size(18.gx))
+                    Spacer(Modifier.width(10.gx))
+                    Box(Modifier.weight(1f)) {
+                        if (query.isEmpty()) Text(hint, fontSize = 15.gsp, color = Glass.Dim, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        inner()
+                    }
                 }
-            }
-        },
-    )
+            },
+        )
+    }
 }
 
 /** The YouTube and JustWatch buttons on Movies and TV Shows. */
@@ -399,7 +437,7 @@ internal fun <T> FollowFocus(state: MutableState<T?>, onRest: (T) -> Unit) {
     LaunchedEffect(state.value) { state.value?.let { delay(300); rest(it) } }
 }
 
-/** A tall glass column ("Genre", "Country") of selectable rows. */
+/** A tall glass column ("Category", "Country") of selectable rows. */
 @Composable
 internal fun GlassColumnPanel(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
     Column(modifier.glass(RoundedCornerShape(24.gx), Glass.Panel, Glass.PanelLine).padding(12.gx), verticalArrangement = Arrangement.spacedBy(6.gx)) { content() }

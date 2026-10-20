@@ -171,12 +171,20 @@ private fun OpenOnStartPanel(profile: Profile?) {
 }
 
 /**
- * Shown when the profile has a parental PIN: entering it here opens Categories' Adult Content
- * (and adult live categories in Live TV) without asking until the app restarts.
+ * With a parental PIN, entering it here opens Categories' Adult Content (and adult live categories
+ * in Live TV) without asking until the app restarts. Without one, adult content is hidden and this
+ * says how to allow it; the PIN is set in the portal, not on the TV.
  */
 @Composable
 private fun ParentalPinPanel(profile: Profile?) {
-    if (profile == null || profile.parentalPin.isNullOrEmpty()) return
+    if (profile == null) return
+    if (!adultAllowed(profile)) {
+        Panel {
+            Text("Parental lock", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Text("Adult channels are hidden. Set a parental PIN for this profile in the portal to allow them.", fontSize = 14.sp, color = Tv.Muted)
+        }
+        return
+    }
     val ctx = LocalContext.current
     val unlocked by ctx.app.adultUnlocked.collectAsState()
     val touch = LocalFormFactor.current.touch

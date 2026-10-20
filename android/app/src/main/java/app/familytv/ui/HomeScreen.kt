@@ -133,12 +133,18 @@ internal val LocalPageEntry = staticCompositionLocalOf { PageEntry() }
 
 /** Marks the composable this modifier goes on as the page's entry point (when [on]). */
 @Composable
-fun entryPoint(on: Boolean = true): Modifier {
+fun entryPoint(on: Boolean = true): Modifier = landing(LocalPageEntry.current, on)
+
+/** Puts [spot]'s requester on the composable this modifier goes on (when [on]), counting it while it's on screen. */
+@Composable
+fun landing(spot: PageEntry, on: Boolean = true): Modifier {
     if (!on) return Modifier
-    val e = LocalPageEntry.current
-    DisposableEffect(e) { e.attached++; onDispose { e.attached-- } }
-    return Modifier.focusRequester(e.requester)
+    DisposableEffect(spot) { spot.attached++; onDispose { spot.attached-- } }
+    return Modifier.focusRequester(spot.requester)
 }
+
+/** A focus redirect to this spot, or the usual neighbour while it's scrolled away (a requester with nothing on screen throws). */
+val PageEntry.orNearest: FocusRequester get() = if (attached > 0) requester else FocusRequester.Default
 
 /** Sends focus to the page's entry point, e.g. after closing an episode list. */
 fun PageEntry.focus() { if (attached > 0) runCatching { requester.requestFocus() } }
@@ -578,7 +584,7 @@ fun PosterCard(
 
 /**
  * Categories for [kind], minus hidden and adult ones (those live under Categories' Adult Content).
- * With [liveTv], adult live categories show too once unlocked, or when the profile has no PIN.
+ * With [liveTv], adult live categories show too once the PIN is entered.
  */
 @Composable
 fun categories(profile: Profile, kind: String, liveTv: Boolean = false): List<CategoryEntity> {
@@ -589,8 +595,11 @@ fun categories(profile: Profile, kind: String, liveTv: Boolean = false): List<Ca
     return remember(all, profile, mine, unlocked) { visibleCategories(all, profile, mine[kind].orEmpty(), liveTv && adultOpen(profile, unlocked)) }
 }
 
-/** True when adult content may show without asking: the PIN was entered this run, or the profile has none. */
-fun adultOpen(profile: Profile?, unlocked: Boolean): Boolean = unlocked || profile != null && profile.parentalPin.isNullOrEmpty()
+/** True when the profile has a parental PIN. Without one, adult content is hidden everywhere. */
+fun adultAllowed(profile: Profile?): Boolean = !profile?.parentalPin.isNullOrEmpty()
+
+/** True when adult content may show without asking: the profile has a PIN and it was entered this run. */
+fun adultOpen(profile: Profile?, unlocked: Boolean): Boolean = unlocked && adultAllowed(profile)
 
 /**
  * [all] (one kind) minus the profile's hidden categories and adult ones; adult live categories stay
@@ -600,9 +609,9 @@ fun adultOpen(profile: Profile?, unlocked: Boolean): Boolean = unlocked || profi
 fun visibleCategories(all: List<CategoryEntity>, profile: Profile?, mine: List<String> = emptyList(), adultLive: Boolean = false): List<CategoryEntity> =
     arranged(all, profile, mine) { c -> !isAdult(c) || adultLive && c.kind == Kind.LIVE }
 
-/** Only the adult categories of [all], arranged like [visibleCategories]. */
+/** Only the adult categories of [all], arranged like [visibleCategories]; none when the profile has no PIN. */
 fun adultCategories(all: List<CategoryEntity>, profile: Profile?, mine: List<String> = emptyList()): List<CategoryEntity> =
-    arranged(all, profile, mine, ::isAdult)
+    if (adultAllowed(profile)) arranged(all, profile, mine, ::isAdult) else emptyList()
 
 internal fun isAdult(c: CategoryEntity) = ADULT.containsMatchIn(c.name)
 

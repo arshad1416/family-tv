@@ -3,6 +3,7 @@ package app.familytv.ui
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -32,6 +33,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
@@ -69,10 +72,10 @@ private const val ALL = "All"
 private const val TV_GUIDE = "TV guide"
 
 /**
- * Live TV on the TV: a genre column, that genre's countries (with channel counts), and a preview
- * of the focused channel over the channel list. Genre and country come from the category names
- * ([LiveGenre], [liveCountry]); adult categories show as today, once unlocked. TV guide, at the
- * foot of the genres, opens the classic grid guide. The top bar's search searches channels.
+ * Live TV on the TV: a Category column, its countries (with channel counts), the channel list, and
+ * at the right the focused channel's live preview over its guide ([GuideBox]). Both columns come from the provider's category names
+ * ([LiveGenre], [liveCountry]); adult categories show only once the PIN is entered. TV guide, at the
+ * foot of the Category column, opens the classic grid guide. The top bar's search searches channels.
  */
 @Composable
 internal fun LiveTab(vm: MainViewModel, profile: Profile) {
@@ -134,10 +137,14 @@ private fun LiveBrowser(profile: Profile, onGuide: () -> Unit) {
     val hoverCountry = remember { mutableStateOf<String?>(null) }
     FollowFocus(hoverGenre) { if (it != g && it != TV_GUIDE) { genre = it; country = null } }
     FollowFocus(hoverCountry) { if (it != c) country = it }
+    // Right from a country goes to the channel list: by position it often went to the top bar's
+    // search box instead, which is level with the columns' headings. Left comes back to the chosen country.
+    val toChannels = remember { PageEntry() }
+    val toCountry = remember { PageEntry() }
 
-    Row(Modifier.fillMaxSize().padding(bottom = 32.gx), horizontalArrangement = Arrangement.spacedBy(18.gx)) {
+    Row(Modifier.fillMaxSize().padding(bottom = 32.gx).focusGroup(), horizontalArrangement = Arrangement.spacedBy(18.gx)) {
         GlassColumnPanel(Modifier.width(200.gx).fillMaxHeight()) {
-            GlassLabel("Genre")
+            GlassLabel("Category")
             LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.gx)) {
                 items(genres, key = { it }) { x ->
                     GlassRowItem(x, x == g, { genre = x; country = null }, entryPoint(x == g), onFocus = { hoverGenre.value = x })
@@ -149,11 +156,16 @@ private fun LiveBrowser(profile: Profile, onGuide: () -> Unit) {
             GlassLabel("$g · Country")
             LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.gx)) {
                 items(countries, key = { it }) { x ->
-                    GlassRowItem(x, x == c, { country = x }, count = byCountry[x]?.size, onFocus = { hoverCountry.value = x })
+                    GlassRowItem(
+                        x, x == c, { country = x },
+                        Modifier.focusProperties { right = if (channels.isEmpty()) FocusRequester.Cancel else toChannels.orNearest }
+                            .then(landing(toCountry, x == c)),
+                        count = byCountry[x]?.size, onFocus = { hoverCountry.value = x },
+                    )
                 }
             }
         }
-        ChannelBrowser(channels, favKeys, Modifier.weight(1f), side = false, header = null, loading = loaded == null && g != FAVOURITES)
+        ChannelBrowser(channels, favKeys, Modifier.weight(1f), side = false, header = null, loading = loaded == null && g != FAVOURITES, arrival = toChannels, leftTo = toCountry)
     }
 }
 
@@ -166,8 +178,8 @@ private suspend fun channelsOf(dao: CatalogDao, cats: List<CategoryEntity>): Lis
 }
 
 /**
- * The preview of the focused channel and the channel list: the preview above the list on Live TV,
- * beside it ([side]) on Sports and in search results. OK plays a channel (Up and Down then zap
+ * The channel list and the focused channel: on Live TV its preview over its guide, right of the
+ * list; on Sports and in search results ([side]) just the preview, left of it. OK plays a channel (Up and Down then zap
  * through its own category); hold OK (or Menu) favourites it.
  */
 @Composable
@@ -179,6 +191,8 @@ private fun ChannelBrowser(
     header: String?,
     loading: Boolean = false,
     entry: Boolean = false,
+    arrival: PageEntry? = null,
+    leftTo: PageEntry? = null,
     onPick: (Int) -> Unit = {},
 ) {
     val ctx = LocalContext.current
@@ -190,7 +204,8 @@ private fun ChannelBrowser(
     PreviewFollows(video, shown.takeIf { inList && focused != null })
     // A fixed start, so focus moving down the list doesn't re-read the guide.
     val from = remember(channels) { System.currentTimeMillis() }
-    val progs = rememberProgrammes(channels, from = from)
+    // Six hours, so the guide box has the next few programmes.
+    val progs = rememberProgrammes(channels, from = from, hours = if (side) 3 else 6)
     val preview: @Composable (Modifier) -> Unit = { m -> ChannelPreview(shown, shown?.epgId?.let { progs[it] }.orEmpty(), live = side, video, modifier = m) }
     val list: @Composable (Modifier) -> Unit = { m ->
         Column(m.glass(RoundedCornerShape(24.gx), Glass.Panel, Glass.PanelLine).onFocusChanged { inList = it.hasFocus }.padding(10.gx)) {
@@ -201,9 +216,11 @@ private fun ChannelBrowser(
                 else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(6.gx), contentPadding = PaddingValues(vertical = 2.dp)) {
                     itemsIndexed(channels, key = { _, ch -> "${ch.sourceId}/${ch.streamId}" }) { i, ch ->
                         ChannelRow(
-                            ch, ch.epgId?.let { progs[it] }?.firstOrNull(), numbers = !side,
+                            ch, ch.epgId?.let { progs[it] }?.firstOrNull { it.start <= System.currentTimeMillis() }, numbers = !side,
                             favourite = Favourites.key(Kind.LIVE, ch.sourceId, ch.streamId) in favKeys,
-                            modifier = entryPoint(entry && i == 0),
+                            modifier = entryPoint(entry && i == 0)
+                                .then(if (arrival != null) landing(arrival, ch == shown) else Modifier)
+                                .then(if (leftTo != null) Modifier.focusProperties { left = leftTo.orNearest } else Modifier),
                             onFocus = { focused = ch },
                             onFavourite = { toggleFavourite(ctx, Kind.LIVE, ch.sourceId, ch.streamId, ch.name) },
                         ) {
@@ -223,9 +240,57 @@ private fun ChannelBrowser(
             list(Modifier.weight(1f).fillMaxHeight())
         }
     } else {
-        Column(modifier.fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(14.gx)) {
-            preview(Modifier.fillMaxWidth().height(250.gx))
-            list(Modifier.fillMaxWidth().weight(1f))
+        Row(modifier.fillMaxHeight(), horizontalArrangement = Arrangement.spacedBy(18.gx)) {
+            list(Modifier.weight(1f).fillMaxHeight())
+            Column(Modifier.width(400.gx).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(14.gx)) {
+                preview(Modifier.fillMaxWidth().height(225.gx))
+                if (shown != null) GuideBox(shown, shown.epgId?.let { progs[it] }.orEmpty(), Modifier.fillMaxWidth().weight(1f))
+            }
+        }
+    }
+}
+
+/**
+ * The guide for [c], from the same programmes as the TV guide (extra guides and pins included):
+ * what's on now with its times, progress and description, then the next four with their start
+ * times. It follows focus at once; only the description is read per channel.
+ */
+@Composable
+private fun GuideBox(c: ChannelEntity, progs: List<NowNext>, modifier: Modifier) {
+    val ctx = LocalContext.current
+    val minute = rememberMinute()
+    val upcoming = progs.filter { it.stop > minute }
+    val now = upcoming.firstOrNull()?.takeIf { it.start <= minute }
+    val next = upcoming.drop(if (now != null) 1 else 0).take(4)
+    var about by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(now) {
+        about = null
+        val p = now ?: return@LaunchedEffect
+        about = ctx.app.db.catalog().programme(p.epgId, p.start)?.description?.takeIf { it.isNotBlank() }
+    }
+    Column(
+        modifier.glass(RoundedCornerShape(24.gx), Glass.Panel, Glass.PanelLine).padding(horizontal = 18.gx, vertical = 14.gx),
+        verticalArrangement = Arrangement.spacedBy(8.gx),
+    ) {
+        GlassLabel("Guide · ${c.displayName}")
+        if (now == null && next.isEmpty()) {
+            Text("No guide for this channel", fontSize = 15.gsp, color = Glass.Dim)
+            return@Column
+        }
+        if (now != null) {
+            Text(now.title, fontSize = 17.gsp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text("${time(now.start)} – ${time(now.stop)}", fontSize = 13.gsp, color = Glass.Dim)
+            ProgressLine(progress(now.start, now.stop, minute), track = Glass.Line, fill = Glass.Text)
+            about?.let { Text(it, fontSize = 13.gsp, color = Glass.Soft, maxLines = 3, overflow = TextOverflow.Ellipsis) }
+        }
+        if (next.isNotEmpty()) {
+            Spacer(Modifier.height(2.gx))
+            next.forEach { p ->
+                Row(horizontalArrangement = Arrangement.spacedBy(12.gx)) {
+                    Text(time(p.start), fontSize = 14.gsp, color = Glass.Dim, maxLines = 1, modifier = Modifier.width(76.gx))
+                    Text(p.title, fontSize = 14.gsp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
         }
     }
 }
@@ -277,7 +342,7 @@ private fun ChannelPreview(c: ChannelEntity?, progs: List<NowNext>, live: Boolea
     }
 }
 
-/** One channel in a glass list: number, logo, name and what's on now. */
+/** One channel in a glass list: number (Live TV), logo, name and what's on now. */
 @Composable
 private fun ChannelRow(
     c: ChannelEntity,
@@ -295,8 +360,16 @@ private fun ChannelRow(
             Box(Modifier.size(54.gx, 32.gx).clip(RoundedCornerShape(8.gx)).background(Glass.Raised), contentAlignment = Alignment.Center) {
                 if (c.logo != null) AsyncImage(c.logo, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize().padding(3.gx))
             }
-            Text(c.displayName, fontSize = 16.gsp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.width(if (numbers) 230.gx else 200.gx))
-            Text(now?.let { "Now: ${it.title}" }.orEmpty(), fontSize = 14.gsp, color = Glass.Dim, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            if (numbers) {
+                // Live TV's list is narrower (the guide is beside it): what's on goes under the name.
+                Column(Modifier.weight(1f)) {
+                    Text(c.displayName, fontSize = 16.gsp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    now?.let { Text("Now: ${it.title}", fontSize = 13.gsp, color = Glass.Dim, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                }
+            } else {
+                Text(c.displayName, fontSize = 16.gsp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.width(200.gx))
+                Text(now?.let { "Now: ${it.title}" }.orEmpty(), fontSize = 14.gsp, color = Glass.Dim, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            }
             if (favourite) MarkBadge(favourite = true, size = 18.dp)
         }
     }

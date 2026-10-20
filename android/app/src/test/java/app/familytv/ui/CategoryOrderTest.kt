@@ -30,11 +30,25 @@ class CategoryOrderTest {
         val series = cats(Kind.SERIES, "Drama", "NETFLIX ADULT-SWIM", "HBO MAX (ADULT SWIM)", "Adult 18+")
         for (p in listOf(Profile(), Profile(parentalPin = "1234"), null)) {
             assertEquals(listOf("Action"), visibleCategories(movies, p).map { it.name })
-            assertEquals(listOf("FOR ADULTS", "XXX"), adultCategories(movies, p).map { it.name })
             assertEquals(listOf("Drama", "NETFLIX ADULT-SWIM", "HBO MAX (ADULT SWIM)"), visibleCategories(series, p).map { it.name })
-            assertEquals(listOf("Adult 18+"), adultCategories(series, p).map { it.name })
-            assertEquals(listOf("XXX Adult", "Adults 18+"), adultCategories(all, p).map { it.name })
         }
+        val pin = Profile(parentalPin = "1234")
+        assertEquals(listOf("FOR ADULTS", "XXX"), adultCategories(movies, pin).map { it.name })
+        assertEquals(listOf("Adult 18+"), adultCategories(series, pin).map { it.name })
+        assertEquals(listOf("XXX Adult", "Adults 18+"), adultCategories(all, pin).map { it.name })
+    }
+
+    @Test
+    fun withoutAPinThereIsNoAdultContentAtAll() {
+        for (p in listOf(Profile(), Profile(parentalPin = ""), null)) {
+            assertFalse(adultAllowed(p))
+            assertEquals(emptyList<String>(), adultCategories(all, p).map { it.name })
+            assertEquals(emptyList<String>(), adultCategories(cats(Kind.MOVIE, "Action", "XXX"), p).map { it.name })
+            // Even if an earlier profile on this TV entered its PIN.
+            assertFalse(adultOpen(p, unlocked = true))
+            assertEquals(listOf("News", "Sports", "Kids", "Movies"), visibleCategories(all, p, adultLive = adultOpen(p, true)).map { it.name })
+        }
+        assertTrue(adultAllowed(Profile(parentalPin = "1234")))
     }
 
     @Test
@@ -42,7 +56,6 @@ class CategoryOrderTest {
         val pin = Profile(parentalPin = "1234")
         assertFalse(adultOpen(pin, unlocked = false))
         assertTrue(adultOpen(pin, unlocked = true))
-        assertTrue(adultOpen(Profile(), unlocked = false))
         assertFalse(adultOpen(null, unlocked = false))
         assertEquals(listOf("News", "Sports", "Kids", "Movies", "XXX Adult", "Adults 18+"), visibleCategories(all, pin, adultLive = true).map { it.name })
         // Never adult movie or series categories outside Adult Content, even when open.
@@ -52,7 +65,7 @@ class CategoryOrderTest {
 
     @Test
     fun adultContentFollowsTheProfilesHiddenListAndOrder() {
-        val p = Profile(categoryOrder = mapOf(Kind.LIVE to listOf("Adults 18+")), hiddenCategories = listOf("XXX Adult"))
+        val p = Profile(categoryOrder = mapOf(Kind.LIVE to listOf("Adults 18+")), hiddenCategories = listOf("XXX Adult"), parentalPin = "1234")
         assertEquals(listOf("Adults 18+"), adultCategories(all, p).map { it.name })
     }
 

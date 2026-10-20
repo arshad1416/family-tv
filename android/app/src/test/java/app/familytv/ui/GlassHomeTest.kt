@@ -1,15 +1,22 @@
 package app.familytv.ui
 
 import android.content.Context
+import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertIsNotFocused
+import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isFocused
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.test.requestFocus
 import androidx.test.core.app.ApplicationProvider
 import androidx.work.Configuration
 import androidx.work.WorkManager
@@ -19,6 +26,7 @@ import app.familytv.data.CategoryEntity
 import app.familytv.data.ChannelEntity
 import app.familytv.data.Kind
 import app.familytv.data.MovieEntity
+import app.familytv.data.ProgrammeEntity
 import app.familytv.portal.DeviceConfig
 import app.familytv.portal.Profile
 import app.familytv.user.Appearance
@@ -62,8 +70,18 @@ class GlassHomeTest {
                 cat(Kind.MOVIE, "11", "NETFLIX MOVIES", 2),
             ),
         )
-        fun channel(id: String, name: String, cat: String, num: Int) = ChannelEntity("s", id, name, num, null, cat, null, null, 0, 0)
-        dao.upsertChannels(listOf(channel("100", "BBC News", "1", 101), channel("200", "NHL Network", "2", 201)))
+        fun channel(id: String, name: String, cat: String, num: Int, epg: String? = null) = ChannelEntity("s", id, name, num, null, cat, epg, null, 0, 0)
+        dao.upsertChannels(listOf(channel("100", "BBC News", "1", 101, epg = "bbc.uk"), channel("200", "NHL Network", "2", 201)))
+        val now = System.currentTimeMillis()
+        val hour = 3_600_000L
+        fun show(title: String, start: Long, about: String? = null) = ProgrammeEntity(epgId = "bbc.uk", start = start, stop = start + hour, title = title, description = about)
+        dao.insertProgrammes(
+            listOf(
+                show("Newsday", now - hour / 2, about = "The latest headlines from around the world."),
+                show("World Business Report", now + hour / 2),
+                show("Click", now + hour * 3 / 2),
+            ),
+        )
         fun movie(id: String, name: String, cat: String, added: Long) = MovieEntity("s", id, name, null, cat, "8.1", "mp4", null, added, 0, titleKey = name.lowercase())
         dao.upsertMovies(listOf(movie("1000", "Star Wars", "10", 2), movie("1001", "The Irishman", "11", 1)))
         // A fresh saved forecast, so the panel never asks Open-Meteo during tests.
@@ -72,7 +90,8 @@ class GlassHomeTest {
 
     private fun home() = rule.setContent { HomeScreen(MainViewModel(app), DeviceConfig(paired = true, profile = Profile())) }
 
-    private fun waitFor(text: String) = rule.waitUntilAtLeastOneExists(hasText(text), 10_000)
+    // Generous: the first test in a busy run also pays for Robolectric, Compose and Room warming up.
+    private fun waitFor(text: String) = rule.waitUntilAtLeastOneExists(hasText(text), 20_000)
 
     @Test
     fun opensOnMoviesWithItsShelves() {
@@ -85,15 +104,27 @@ class GlassHomeTest {
     }
 
     @Test
-    fun liveTvListsGenresCountriesAndChannels() {
+    fun liveTvListsCategoriesCountriesAndChannels() {
         home()
         waitFor("Live TV")
         rule.onNodeWithText("Live TV").performClick()
         waitFor("Search channels")
+        waitFor("CATEGORY")
         waitFor("News")
         waitFor("UK")
         waitFor("BBC News")
         waitFor("TV guide")
+    }
+
+    @Test
+    fun liveTvGuideBoxShowsNowAndNext() {
+        home()
+        waitFor("Live TV")
+        rule.onNodeWithText("Live TV").performClick()
+        waitFor("GUIDE · BBC NEWS")
+        waitFor("The latest headlines from around the world.")
+        waitFor("World Business Report")
+        waitFor("Click")
     }
 
     @Test
@@ -109,8 +140,52 @@ class GlassHomeTest {
     fun moviesSearchFindsMovies() {
         home()
         waitFor("Search movies")
+        // OK (a click) starts typing; until then the field can't take focus.
+        rule.onNodeWithText("Search movies").performClick()
         rule.onNode(hasSetTextAction()).performTextInput("star")
         waitFor("Star Wars")
+    }
+
+    @Test
+    fun arrowsPassOverTheSearchBox() {
+        home()
+        waitFor("Search movies")
+        val box = rule.onNode(hasText("Search movies") and hasClickAction())
+        box.requestFocus()
+        box.performKeyInput { pressKey(Key.DirectionLeft) }
+        rule.waitForIdle()
+        box.assertIsNotFocused()
+        rule.onNode(hasSetTextAction()).assertIsNotFocused()
+    }
+
+    @Test
+    fun rightStepsFromCountryToTheChannels() = runBlocking {
+        // Canada comes first, so UK's row sits below the top of the channel list.
+        app.db.catalog().upsertCategories(listOf(CategoryEntity("s", Kind.LIVE, "3", "CA| NEWS EN", 3, 0)))
+        app.db.catalog().upsertChannels(listOf(ChannelEntity("s", "300", "CBC News", 301, null, "3", null, null, 0, 0)))
+        home()
+        waitFor("Live TV")
+        rule.onNodeWithText("Live TV").performClick()
+        waitFor("CBC News")
+        // Into the page on News, its entry point; then only the arrows, as on a remote.
+        rule.onNode(hasText("News") and hasClickAction()).requestFocus()
+        rule.waitUntilAtLeastOneExists(isFocused() and hasText("News"), 10_000)
+        press(Key.DirectionRight)
+        rule.waitUntilAtLeastOneExists(isFocused() and hasText("Canada"), 10_000)
+        press(Key.DirectionDown)
+        rule.waitForIdle()
+        rule.waitUntilAtLeastOneExists(isFocused() and hasText("UK"), 10_000)
+        waitFor("BBC News")
+        press(Key.DirectionRight)
+        rule.waitUntilAtLeastOneExists(isFocused() and hasText("BBC News"), 10_000)
+        press(Key.DirectionLeft)
+        rule.waitForIdle()
+        rule.waitUntilAtLeastOneExists(isFocused() and hasText("UK"), 10_000)
+    }
+
+    private fun press(key: Key) {
+        rule.waitForIdle()
+        rule.onNode(isFocused()).performKeyInput { pressKey(key) }
     }
 
     @Test
@@ -122,6 +197,18 @@ class GlassHomeTest {
         assertEquals(Appearance.DARK, app.glassPrefs.appearance.value)
         rule.onNodeWithContentDescription("Appearance: Dark").performClick()
         rule.waitUntilAtLeastOneExists(hasContentDescription("Appearance: Light"), 10_000)
+    }
+
+    @Test
+    fun arrowsLeaveTheAppearanceSwitchAlone() {
+        home()
+        waitFor("Search movies")
+        val switch = rule.onNodeWithContentDescription("Appearance: Auto")
+        switch.requestFocus()
+        switch.performKeyInput { pressKey(Key.DirectionLeft) }
+        rule.waitForIdle()
+        assertEquals(Appearance.AUTO, app.glassPrefs.appearance.value)
+        rule.onNodeWithContentDescription("Appearance: Auto").assertIsNotFocused()
     }
 
     @Test

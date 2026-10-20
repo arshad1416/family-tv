@@ -53,10 +53,10 @@ private const val ADULT_CONTENT = "Adult Content"
 private const val SPORTS = "sports"
 
 /**
- * Pick Live TV, Movies or Series, then one of its categories. Each section ends with Adult Content,
- * holding the adult categories; it asks for the profile's parental PIN until it's entered once
- * (here or in Settings, until the app restarts) and doesn't when the profile has none. Live TV
- * also shows adult live categories once unlocked. Sports lists the live channels of the sports
+ * Pick Live TV, Movies or Series, then one of its categories. When the profile has a parental PIN,
+ * each section ends with Adult Content, holding the adult categories; it asks for the PIN until it's
+ * entered once (here or in Settings, until the app restarts). Without a PIN there is no Adult
+ * Content. Live TV also shows adult live categories once unlocked. Sports lists the live channels of the sports
  * categories by sport ([groupBySport]). Back steps up one level.
  */
 @Composable

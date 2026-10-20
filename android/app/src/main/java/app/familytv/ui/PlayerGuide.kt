@@ -85,7 +85,7 @@ class GuideCategories(
 /**
  * [PlayerGuide] with its categories: it opens on the list that's playing ([playingList], whose
  * channels the player already has) and can show any other visible live category or Favourites.
- * Adult categories show as on Live TV: once unlocked, or when the profile has no PIN. OK on a
+ * Adult categories show as on Live TV: only once the profile's PIN is entered. OK on a
  * channel calls [onPick] with that channel's list and its index in it.
  */
 @Composable
