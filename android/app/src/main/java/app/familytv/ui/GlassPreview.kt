@@ -23,6 +23,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.AspectRatioFrameLayout
@@ -64,6 +65,8 @@ internal class LivePreview(private val context: Context) {
     private fun ensure(): ExoPlayer = player ?: run {
         val http = OkHttpDataSource.Factory(Http.client).setUserAgent(Http.USER_AGENT)
         ExoPlayer.Builder(context)
+            // A preview needs seconds of video, not the default 50 s and 130 MB.
+            .setLoadControl(DefaultLoadControl.Builder().setBufferDurationsMs(2_500, 10_000, 1_000, 2_000).setTargetBufferBytes(8 * 1024 * 1024).build())
             .setMediaSourceFactory(DefaultMediaSourceFactory(DefaultDataSource.Factory(context, http)))
             .build()
             .also { p ->

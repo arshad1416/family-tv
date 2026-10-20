@@ -4,6 +4,9 @@ import android.app.Activity
 import android.app.Application
 import android.os.Bundle
 import androidx.work.ExistingPeriodicWorkPolicy
+import coil.ImageLoader
+import coil.ImageLoaderFactory
+import coil.memory.MemoryCache
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import app.familytv.core.CrashLog
@@ -37,7 +40,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import java.util.concurrent.TimeUnit
 
-class FamilyTvApp : Application() {
+class FamilyTvApp : Application(), ImageLoaderFactory {
     val db by lazy { AppDb.create(this) }
     val portal by lazy { PortalClient(this) }
     val catalog by lazy { Catalog(db) }
@@ -97,6 +100,14 @@ class FamilyTvApp : Application() {
             PeriodicWorkRequestBuilder<SyncWorker>(30, TimeUnit.MINUTES).build(),
         )
     }
+
+    /**
+     * Posters and logos: Coil's default memory cache takes a quarter of the app's memory, which
+     * on a 2-3 GB TV box like the onn pushes the system into swap while video plays.
+     */
+    override fun newImageLoader(): ImageLoader = ImageLoader.Builder(this)
+        .memoryCache { MemoryCache.Builder(this).maxSizePercent(0.1).build() }
+        .build()
 }
 
 val android.content.Context.app: FamilyTvApp get() = applicationContext as FamilyTvApp

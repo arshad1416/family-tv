@@ -248,8 +248,10 @@ class PlayerController(
         val form = activity.formFactor()
         touch = form.touch
 
-        // Bigger buffer than the default for live IPTV: survives short Wi-Fi dips on sticks.
-        val loadControl = DefaultLoadControl.Builder().setBufferDurationsMs(15_000, 50_000, 2_000, 4_000).build()
+        // Bigger buffer than the default for live IPTV: survives short Wi-Fi dips on sticks. Capped
+        // at 48 MB, so a 4K stream holds about 20 s instead of the default 130 MB on 2-3 GB boxes.
+        val loadControl = DefaultLoadControl.Builder().setBufferDurationsMs(15_000, 50_000, 2_000, 4_000)
+            .setTargetBufferBytes(48 * 1024 * 1024).build()
         val http = OkHttpDataSource.Factory(Http.client).setUserAgent(Http.USER_AGENT).setTransferListener(stats)
         // DefaultDataSource adds file:// for downloaded subtitles; network still goes through OkHttp.
         val dataSource = DefaultDataSource.Factory(activity, http)
