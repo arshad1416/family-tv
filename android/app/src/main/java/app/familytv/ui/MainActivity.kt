@@ -27,6 +27,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -105,6 +106,8 @@ class MainActivity : ComponentActivity() {
                     // Android 15 draws edge to edge; the host keeps clear of a phone's status and navigation bars.
                     dock.Host {
                         val screen by vm.screen.collectAsState()
+                        val browsing = screen is Screen.Ready && splash == null && dock.mode != "full"
+                        SideEffect { Perf.browsing = browsing }
                         when (val s = screen) {
                             Screen.Loading -> Box(Modifier.fillMaxSize()) // The startup video covers it; no text to flash.
                             is Screen.Pairing -> PairingScreen(s.code, s.unpaired)

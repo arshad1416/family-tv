@@ -5,7 +5,6 @@ import android.os.Bundle
 import android.view.KeyEvent
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
-import app.familytv.perf.Perf
 
 /**
  * The full-screen player on TV (and on a phone or tablet when the home screen can't host it).
@@ -20,7 +19,6 @@ class PlayerActivity : ComponentActivity(), PlayerHost {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        Perf.watchFrames(this)
         controller = PlayerController(this, intent, this)
         setContentView(controller.root)
         controller.backCallbacks.forEach { onBackPressedDispatcher.addCallback(this, it) }

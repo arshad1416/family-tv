@@ -3,6 +3,7 @@ package app.familytv.perf
 import android.app.Activity
 import android.app.ActivityManager
 import android.content.Context
+import android.content.SharedPreferences
 import android.os.Build
 import android.os.Debug
 import android.os.Handler
@@ -16,24 +17,31 @@ import kotlin.math.roundToLong
 
 /**
  * Speed and memory numbers sent as the heartbeat's `status.perf`, to compare this app with the Rust
- * one on the same TVs (parity checklist, "Spec: Speed and memory report"). Numbers only, measured
- * in place: no extra network calls, and nothing about what's watched.
+ * one on the same TVs (parity checklist, "Spec: Speed and memory report"; the definitions match the
+ * Rust app's). Whole numbers, MB truncated; unknown fields are left out. Measured in place: no extra
+ * network calls, and nothing about what's watched.
  */
 object Perf {
     private const val MB = 1024L * 1024
     /** A launch counts as cold only when its screen opened this soon after the process started (not a background check-in's process). */
-    private const val COLD_GAP_MS = 5_000L
+    private const val COLD_GAP_MS = 10_000L
+    /** A browsing frame slower than this is a slow frame (fixed, whatever the display's refresh rate). */
+    private const val SLOW_FRAME_NS = 16_000_000L
 
+    private var prefs: SharedPreferences? = null
     private var appCreatedAt = 0L
     private var deviceRamMb: Long? = null
     @Volatile private var activityAt = 0L
     @Volatile private var notCold = false
-    /** Process start to the first usable screen (home ready, under the startup video), on the last cold start. */
+    @Volatile private var measured = false
+    /** Process start to the first frame of the home screen with its rows filled, on the last cold start. */
     @Volatile var coldStartMs: Long? = null
         private set
-    /** The last full refresh of the channel, movie and series lists, from the first download to saved (and searchable). */
+    /** The last full list refresh that succeeded, from its start to saved (and searchable). */
     @Volatile var listLoadMs: Long? = null
-    @Volatile private var pssPeakKb = 0
+    @Volatile private var pssPeakKb = 0L
+    /** The app's own pages are showing (not the startup video, loading, pairing or full-screen video). */
+    @Volatile var browsing = false
     internal val frames = FrameWindow()
     private val frameHandler by lazy { Handler(HandlerThread("perf").apply { start() }.looper) }
 
@@ -41,6 +49,9 @@ object Perf {
         appCreatedAt = SystemClock.uptimeMillis()
         deviceRamMb = context.getSystemService(ActivityManager::class.java)?.let { am ->
             ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }.totalMem / MB
+        }
+        prefs = context.getSharedPreferences("perf", Context.MODE_PRIVATE).also { p ->
+            coldStartMs = p.getLong("coldStartMs", -1).takeIf { it >= 0 }
         }
     }
 
@@ -52,71 +63,71 @@ object Perf {
     /** Pairing, the first list download or a failure came first: this start isn't a fair cold start. */
     fun skipColdStart() { notCold = true }
 
-    /** The home screen is ready to use (the startup video may still be over it). */
+    /** The home screen's first frame with rows on it. Kept, so later heartbeats (and processes) carry it. */
     fun firstScreen() {
-        if (coldStartMs != null || notCold || activityAt == 0L) return
+        if (measured || notCold || activityAt == 0L) return
+        measured = true
         val start = if (Build.VERSION.SDK_INT >= 24) Process.getStartUptimeMillis() else appCreatedAt
-        if (activityAt - start < COLD_GAP_MS) coldStartMs = SystemClock.uptimeMillis() - start
+        if (activityAt - start >= COLD_GAP_MS) return
+        val ms = SystemClock.uptimeMillis() - start
+        coldStartMs = ms
+        prefs?.edit()?.putLong("coldStartMs", ms)?.apply()
     }
 
-    /** Counts this window's slow frames (Android 7+; older TVs report jankPct null). */
+    /** A full list refresh succeeded after [ms]; memory is sampled then too. */
+    fun listLoaded(ms: Long) {
+        listLoadMs = ms
+        samplePssKb()
+    }
+
+    /** Counts the window's slow frames while [browsing] (Android 7+; older TVs leave jankPct out). */
     fun watchFrames(activity: Activity) {
         if (Build.VERSION.SDK_INT < 24) return
-        val deadlineNs = (1_000_000_000 / refreshRate(activity)).toLong()
         runCatching {
             activity.window.addOnFrameMetricsAvailableListener(Window.OnFrameMetricsAvailableListener { _, m, _ ->
+                if (!browsing) return@OnFrameMetricsAvailableListener
                 if (Build.VERSION.SDK_INT >= 26 && m.getMetric(FrameMetrics.FIRST_DRAW_FRAME) == 1L) return@OnFrameMetricsAvailableListener
-                val deadline = if (Build.VERSION.SDK_INT >= 31) m.getMetric(FrameMetrics.DEADLINE) else deadlineNs
-                frames.add(System.currentTimeMillis(), m.getMetric(FrameMetrics.TOTAL_DURATION) > deadline)
+                frames.add(System.currentTimeMillis(), m.getMetric(FrameMetrics.TOTAL_DURATION) > SLOW_FRAME_NS)
             }, frameHandler)
         }
     }
 
-    @Suppress("DEPRECATION")
-    private fun refreshRate(activity: Activity): Float =
-        (if (Build.VERSION.SDK_INT >= 30) activity.display?.refreshRate else activity.windowManager.defaultDisplay.refreshRate)
-            ?.takeIf { it >= 1f } ?: 60f
+    private fun samplePssKb(): Long = Debug.getPss().also { pssPeakKb = max(pssPeakKb, it) }
 
-    fun snapshot(): Map<String, Any?> {
-        val pssKb = Debug.MemoryInfo().also { Debug.getMemoryInfo(it) }.totalPss
-        pssPeakKb = max(pssPeakKb, pssKb)
+    fun snapshot(): Map<String, Any> {
+        val pssKb = samplePssKb()
         val rt = Runtime.getRuntime()
-        return mapOf(
+        return listOf(
             "coldStartMs" to coldStartMs,
             "pssMb" to pssKb / 1024,
             "heapMb" to (rt.totalMemory() - rt.freeMemory()) / MB,
             "pssPeakMb" to pssPeakKb / 1024,
             "listLoadMs" to listLoadMs,
-            "jankPct" to frames.pct(System.currentTimeMillis()),
+            "jankPct" to frames.pct(),
             "deviceRamMb" to deviceRamMb,
             "model" to Build.MODEL,
             "sdk" to Build.VERSION.SDK_INT,
-        )
+        ).mapNotNull { (k, v) -> v?.let { k to it } }.toMap()
     }
 }
 
-/** Slow-frame share over the last [minutes] minutes, kept in one-minute buckets. */
+/** Slow-frame share over the last [minutes] minutes that had browsing frames, one bucket per minute. */
 internal class FrameWindow(private val minutes: Int = 10) {
-    private val total = IntArray(minutes)
-    private val slow = IntArray(minutes)
-    private val stamp = LongArray(minutes) { -1 }
+    private class Minute(val at: Long, var total: Int = 0, var slow: Int = 0)
+    private val buckets = ArrayDeque<Minute>()
 
     @Synchronized fun add(nowMs: Long, isSlow: Boolean) {
         val m = nowMs / 60_000
-        val i = (m % minutes).toInt()
-        if (stamp[i] != m) { stamp[i] = m; total[i] = 0; slow[i] = 0 }
-        total[i]++
-        if (isSlow) slow[i]++
+        if (buckets.lastOrNull()?.at != m) {
+            buckets.addLast(Minute(m))
+            if (buckets.size > minutes) buckets.removeFirst()
+        }
+        buckets.last().apply { total++; if (isSlow) slow++ }
     }
 
-    /** Percent, one decimal; null until there are [MIN_FRAMES] frames to judge. */
-    @Synchronized fun pct(nowMs: Long): Double? {
-        val m = nowMs / 60_000
-        var t = 0
-        var s = 0
-        for (i in 0 until minutes) if (stamp[i] > m - minutes && stamp[i] <= m) { t += total[i]; s += slow[i] }
-        return if (t < MIN_FRAMES) null else (s * 1000.0 / t).roundToLong() / 10.0
+    /** Percent, one decimal; null before any browsing frame. */
+    @Synchronized fun pct(): Double? {
+        val t = buckets.sumOf { it.total }
+        return if (t == 0) null else (buckets.sumOf { it.slow } * 1000.0 / t).roundToLong() / 10.0
     }
-
-    companion object { const val MIN_FRAMES = 60 }
 }

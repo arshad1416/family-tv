@@ -86,7 +86,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
         _screen.value = Screen.Ready(config)
-        Perf.firstScreen()
         // Pull favourites, watched marks and resume points from Trakt on every start and reload.
         app.trakt.refreshState()
         app.trakt.sync.soon(0)
