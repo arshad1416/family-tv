@@ -1,6 +1,5 @@
 package app.familytv.ui
 
-import android.view.KeyEvent
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
@@ -25,9 +24,6 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.drawscope.clipRect
-import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.onPreviewKeyEvent
-import androidx.compose.ui.input.key.type
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import app.familytv.user.Appearance
@@ -62,8 +58,8 @@ internal fun rememberLightness(appearance: Appearance, forecast: Forecast?): Flo
 }
 
 /**
- * The sun/moon switch before Settings: Select steps Light, Auto, Dark and round again; Left and
- * Right move it one step while it's focused (and pass on at either end). The knob slides in 0.3 s.
+ * The sun/moon switch before Settings: Select steps Light, Auto, Dark and round again. The arrows
+ * only move focus on, as from any button (stepping with Left trapped focus here). The knob slides in 0.3 s.
  */
 @Composable
 internal fun AppearanceSwitch(value: Appearance, onChange: (Appearance) -> Unit, modifier: Modifier = Modifier) {
@@ -73,17 +69,7 @@ internal fun AppearanceSwitch(value: Appearance, onChange: (Appearance) -> Unit,
         onClick = { onChange(steps[(value.ordinal + 1) % steps.size]) },
         modifier = modifier
             .size(96.gx, 44.gx)
-            .semantics { contentDescription = "Appearance: ${value.label}" }
-            .onPreviewKeyEvent { e ->
-                val step = when (e.nativeKeyEvent.keyCode) {
-                    KeyEvent.KEYCODE_DPAD_LEFT -> -1
-                    KeyEvent.KEYCODE_DPAD_RIGHT -> 1
-                    else -> return@onPreviewKeyEvent false
-                }
-                val next = steps.getOrNull(value.ordinal + step) ?: return@onPreviewKeyEvent false
-                if (e.type == KeyEventType.KeyDown) onChange(next)
-                true
-            },
+            .semantics { contentDescription = "Appearance: ${value.label}" },
         color = Color.Transparent,
         outline = true,
         shape = RoundedCornerShape(50),

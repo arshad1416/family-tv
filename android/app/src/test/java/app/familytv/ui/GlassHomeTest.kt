@@ -1,7 +1,9 @@
 package app.familytv.ui
 
 import android.content.Context
+import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertIsNotFocused
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
@@ -9,7 +11,10 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.test.requestFocus
 import androidx.test.core.app.ApplicationProvider
 import androidx.work.Configuration
 import androidx.work.WorkManager
@@ -123,6 +128,18 @@ class GlassHomeTest {
         assertEquals(Appearance.DARK, app.glassPrefs.appearance.value)
         rule.onNodeWithContentDescription("Appearance: Dark").performClick()
         rule.waitUntilAtLeastOneExists(hasContentDescription("Appearance: Light"), 10_000)
+    }
+
+    @Test
+    fun arrowsLeaveTheAppearanceSwitchAlone() {
+        home()
+        waitFor("Search movies")
+        val switch = rule.onNodeWithContentDescription("Appearance: Auto")
+        switch.requestFocus()
+        switch.performKeyInput { pressKey(Key.DirectionLeft) }
+        rule.waitForIdle()
+        assertEquals(Appearance.AUTO, app.glassPrefs.appearance.value)
+        rule.onNodeWithContentDescription("Appearance: Auto").assertIsNotFocused()
     }
 
     @Test
