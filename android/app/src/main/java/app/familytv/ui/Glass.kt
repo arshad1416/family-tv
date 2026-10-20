@@ -111,6 +111,8 @@ object Glass {
     /** The selected tab: a white pill with dark text (dark with white text in the light look). */
     val Selected: Color @Composable @ReadOnlyComposable get() = p.selected
     val OnSelected: Color @Composable @ReadOnlyComposable get() = p.onSelected
+    /** The chosen tab or row while focus is elsewhere: a faint fill and rim, so it never looks focused. */
+    val SelectedSoft: Color @Composable @ReadOnlyComposable get() = p.selectedSoft
     /** The focus ring. */
     val Ring: Color @Composable @ReadOnlyComposable get() = p.ring
     val Text: Color @Composable @ReadOnlyComposable get() = p.text
@@ -256,18 +258,28 @@ internal fun GlassPill(
     icon: (@Composable () -> Unit)? = null,
     onFocus: () -> Unit = {},
 ) {
+    // Focus is the white pill; the chosen one, while focus is elsewhere, only a faint fill and rim.
+    var focused by remember { mutableStateOf(false) }
+    val shape = RoundedCornerShape(50)
     FocusBox(
-        onClick = onClick, onFocus = onFocus, color = if (selected) Glass.Selected else fill, shape = RoundedCornerShape(50),
-        scale = 1.06f, contentAlignment = Alignment.Center,
-        modifier = modifier.then(if (border && !selected) Modifier.border(1.dp, Glass.LineSoft, RoundedCornerShape(50)) else Modifier),
-    ) { focused ->
+        onClick = onClick, onFocus = onFocus, shape = shape, scale = 1.06f, contentAlignment = Alignment.Center,
+        color = when { focused -> Glass.Selected; selected -> Glass.SelectedSoft; else -> fill },
+        modifier = modifier.onFocusChanged { focused = it.isFocused }.then(
+            when {
+                focused -> Modifier
+                selected -> Modifier.border(1.dp, Glass.Line, shape)
+                border -> Modifier.border(1.dp, Glass.LineSoft, shape)
+                else -> Modifier
+            },
+        ),
+    ) { _ ->
         Row(Modifier.padding(horizontal = padH, vertical = padV), verticalAlignment = Alignment.CenterVertically) {
             icon?.let { it(); Spacer(Modifier.width(10.gx)) }
             // Labels never wrap: one line, centred in the pill.
             Text(
                 text, fontSize = fontSize, maxLines = 1, softWrap = false, textAlign = TextAlign.Center,
-                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-                color = when { selected -> Glass.OnSelected; focused -> Glass.Text; else -> Glass.Dim },
+                fontWeight = if (selected || focused) FontWeight.SemiBold else FontWeight.Medium,
+                color = when { focused -> Glass.OnSelected; selected -> Glass.Text; else -> Glass.Dim },
             )
         }
     }
@@ -443,7 +455,7 @@ internal fun GlassColumnPanel(modifier: Modifier = Modifier, content: @Composabl
     Column(modifier.glass(RoundedCornerShape(24.gx), Glass.Panel, Glass.PanelLine).padding(12.gx), verticalArrangement = Arrangement.spacedBy(6.gx)) { content() }
 }
 
-/** One selectable row in a [GlassColumnPanel]: white with dark text when selected. */
+/** One selectable row in a [GlassColumnPanel]: white with dark text when focused, a faint fill and rim when chosen. */
 @Composable
 internal fun GlassRowItem(
     text: String,
@@ -453,14 +465,21 @@ internal fun GlassRowItem(
     count: Int? = null,
     onFocus: () -> Unit = {},
 ) {
-    FocusBox(onClick = onClick, onFocus = onFocus, color = if (selected) Glass.Selected else Color.Transparent, shape = RoundedCornerShape(14.gx), modifier = modifier.fillMaxWidth()) { _ ->
+    var focused by remember { mutableStateOf(false) }
+    val shape = RoundedCornerShape(14.gx)
+    FocusBox(
+        onClick = onClick, onFocus = onFocus, shape = shape,
+        color = when { focused -> Glass.Selected; selected -> Glass.SelectedSoft; else -> Color.Transparent },
+        modifier = modifier.fillMaxWidth().onFocusChanged { focused = it.isFocused }
+            .then(if (selected && !focused) Modifier.border(1.dp, Glass.Line, shape) else Modifier),
+    ) { _ ->
         Row(Modifier.padding(horizontal = 14.gx, vertical = 11.gx), verticalAlignment = Alignment.CenterVertically) {
             Text(
                 text, fontSize = 16.gsp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
-                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                color = if (selected) Glass.OnSelected else Glass.Soft,
+                fontWeight = if (selected || focused) FontWeight.SemiBold else FontWeight.Normal,
+                color = when { focused -> Glass.OnSelected; selected -> Glass.Text; else -> Glass.Soft },
             )
-            count?.let { Text("$it", fontSize = 16.gsp, maxLines = 1, color = (if (selected) Glass.OnSelected else Glass.Text).copy(alpha = 0.6f)) }
+            count?.let { Text("$it", fontSize = 16.gsp, maxLines = 1, color = (if (focused) Glass.OnSelected else Glass.Text).copy(alpha = 0.6f)) }
         }
     }
 }

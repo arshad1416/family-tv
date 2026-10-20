@@ -189,6 +189,30 @@ class GlassHomeTest {
     }
 
     @Test
+    fun tabsOpenOnOkNotOnFocus() {
+        home()
+        waitFor("Recently added")
+        rule.onNode(hasText("TV Shows") and hasClickAction()).requestFocus()
+        rule.mainClock.advanceTimeBy(1_000)
+        rule.waitForIdle()
+        // Still Movies: its own search box is still there.
+        rule.onNodeWithText("Search movies").assertExists()
+        rule.onNode(hasText("TV Shows") and hasClickAction()).performClick()
+        waitFor("Search TV shows")
+    }
+
+    @Test
+    fun topBarButtonsDontOverlapOnMovies() {
+        home()
+        waitFor("Search movies")
+        val switch = rule.onNodeWithContentDescription("Appearance: Auto").fetchSemanticsNode().boundsInRoot
+        val gear = rule.onNodeWithContentDescription("Settings").fetchSemanticsNode().boundsInRoot
+        assertTrue("switch $switch overlaps Settings $gear", switch.right <= gear.left)
+        // 96 x 44 when it has its room.
+        assertTrue("switch is squeezed: $switch", switch.width > switch.height * 2)
+    }
+
+    @Test
     fun appearanceSwitchStepsAndIsSaved() {
         home()
         waitFor("Search movies")

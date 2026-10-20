@@ -569,14 +569,9 @@ fun PosterCard(
             if (progress > 0f) ProgressLine(progress, Modifier.align(Alignment.BottomCenter).padding(8.dp), height = 4.dp)
             if (touch && onTrailer != null) TrailerButton(onTrailer, Modifier.align(Alignment.BottomStart), compact = true)
         }
-        if (!touch && onTrailer != null) {
-            Row(Modifier.padding(top = 4.dp).height(30.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 13.sp, color = MutedText, modifier = Modifier.weight(1f))
-                TrailerButton(onTrailer, compact = true)
-            }
-        } else {
-            Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 13.sp, color = MutedText, modifier = Modifier.padding(top = 6.dp))
-        }
+        Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 13.sp, color = MutedText, modifier = Modifier.padding(top = 6.dp))
+        // Under the name, not beside it: beside it, a short name like "4K Movies" was cut to "4K…".
+        if (!touch && onTrailer != null) TrailerButton(onTrailer, Modifier.padding(top = 4.dp), compact = true)
     }
 }
 

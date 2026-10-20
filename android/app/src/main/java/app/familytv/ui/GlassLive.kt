@@ -142,10 +142,11 @@ private fun LiveBrowser(profile: Profile, onGuide: () -> Unit) {
     val toChannels = remember { PageEntry() }
     val toCountry = remember { PageEntry() }
 
-    Row(Modifier.fillMaxSize().padding(bottom = 32.gx).focusGroup(), horizontalArrangement = Arrangement.spacedBy(18.gx)) {
+    Row(Modifier.fillMaxSize().focusGroup(), horizontalArrangement = Arrangement.spacedBy(18.gx)) {
         GlassColumnPanel(Modifier.width(200.gx).fillMaxHeight()) {
             GlassLabel("Category")
-            LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.gx)) {
+            // Leaving the column before the 300 ms rest cancels the pending pick, so the list never changes under focus.
+            LazyColumn(Modifier.weight(1f).onFocusChanged { if (!it.hasFocus) hoverGenre.value = null }, verticalArrangement = Arrangement.spacedBy(6.gx)) {
                 items(genres, key = { it }) { x ->
                     GlassRowItem(x, x == g, { genre = x; country = null }, entryPoint(x == g), onFocus = { hoverGenre.value = x })
                 }
@@ -154,7 +155,7 @@ private fun LiveBrowser(profile: Profile, onGuide: () -> Unit) {
         }
         GlassColumnPanel(Modifier.width(200.gx).fillMaxHeight()) {
             GlassLabel("$g · Country")
-            LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.gx)) {
+            LazyColumn(Modifier.weight(1f).onFocusChanged { if (!it.hasFocus) hoverCountry.value = null }, verticalArrangement = Arrangement.spacedBy(6.gx)) {
                 items(countries, key = { it }) { x ->
                     GlassRowItem(
                         x, x == c, { country = x },
@@ -202,8 +203,9 @@ private fun ChannelBrowser(
     // Only a channel focus is resting on plays, never the first one shown while focus is in the columns.
     val video = rememberLivePreview()
     PreviewFollows(video, shown.takeIf { inList && focused != null })
-    // A fixed start, so focus moving down the list doesn't re-read the guide.
-    val from = remember(channels) { System.currentTimeMillis() }
+    // A start that moves every half hour, not with focus, so moving down the list doesn't re-read the guide.
+    val minute = rememberMinute()
+    val from = remember(channels, minute / HALF_HOUR) { System.currentTimeMillis() }
     // Six hours, so the guide box has the next few programmes.
     val progs = rememberProgrammes(channels, from = from, hours = if (side) 3 else 6)
     val preview: @Composable (Modifier) -> Unit = { m -> ChannelPreview(shown, shown?.epgId?.let { progs[it] }.orEmpty(), live = side, video, modifier = m) }
@@ -216,7 +218,7 @@ private fun ChannelBrowser(
                 else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(6.gx), contentPadding = PaddingValues(vertical = 2.dp)) {
                     itemsIndexed(channels, key = { _, ch -> "${ch.sourceId}/${ch.streamId}" }) { i, ch ->
                         ChannelRow(
-                            ch, ch.epgId?.let { progs[it] }?.firstOrNull { it.start <= System.currentTimeMillis() }, numbers = !side,
+                            ch, ch.epgId?.let { progs[it] }?.onAt(minute), numbers = !side,
                             favourite = Favourites.key(Kind.LIVE, ch.sourceId, ch.streamId) in favKeys,
                             modifier = entryPoint(entry && i == 0)
                                 .then(if (arrival != null) landing(arrival, ch == shown) else Modifier)
@@ -302,7 +304,8 @@ private fun GuideBox(c: ChannelEntity, progs: List<NowNext>, modifier: Modifier)
 @Composable
 private fun ChannelPreview(c: ChannelEntity?, progs: List<NowNext>, live: Boolean, video: LivePreview, modifier: Modifier) {
     val ctx = LocalContext.current
-    val now = progs.firstOrNull { it.start <= System.currentTimeMillis() } ?: progs.firstOrNull()
+    val minute = rememberMinute()
+    val now = progs.firstOrNull { it.stop > minute }
     val next = progs.getOrNull(progs.indexOf(now) + 1)
     // The picture is read only once focus rests on a channel, as the guide does.
     var picture by remember { mutableStateOf<String?>(null) }
@@ -356,19 +359,14 @@ private fun ChannelRow(
 ) {
     FocusBox(onClick = onClick, onLongClick = onFavourite, onFocus = onFocus, color = Color.Transparent, shape = RoundedCornerShape(14.gx), modifier = modifier.fillMaxWidth()) {
         Row(Modifier.padding(horizontal = 12.gx, vertical = 8.gx), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.gx)) {
-            if (numbers) Text("${c.num}", fontSize = 15.gsp, color = Glass.Dim, maxLines = 1, modifier = Modifier.width(40.gx))
+            if (numbers) Text("${c.num}", fontSize = 15.gsp, color = Glass.Dim, maxLines = 1, softWrap = false, modifier = Modifier.width(54.gx))
             Box(Modifier.size(54.gx, 32.gx).clip(RoundedCornerShape(8.gx)).background(Glass.Raised), contentAlignment = Alignment.Center) {
                 if (c.logo != null) AsyncImage(c.logo, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize().padding(3.gx))
             }
-            if (numbers) {
-                // Live TV's list is narrower (the guide is beside it): what's on goes under the name.
-                Column(Modifier.weight(1f)) {
-                    Text(c.displayName, fontSize = 16.gsp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    now?.let { Text("Now: ${it.title}", fontSize = 13.gsp, color = Glass.Dim, maxLines = 1, overflow = TextOverflow.Ellipsis) }
-                }
-            } else {
-                Text(c.displayName, fontSize = 16.gsp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.width(200.gx))
-                Text(now?.let { "Now: ${it.title}" }.orEmpty(), fontSize = 14.gsp, color = Glass.Dim, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            // What's on goes under the name, so the name gets the row's whole width (a fixed name column cut Sports names in half).
+            Column(Modifier.weight(1f)) {
+                Text(c.displayName, fontSize = 16.gsp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                now?.let { Text("Now: ${it.title}", fontSize = 13.gsp, color = Glass.Dim, maxLines = 1, overflow = TextOverflow.Ellipsis) }
             }
             if (favourite) MarkBadge(favourite = true, size = 18.dp)
         }
@@ -391,7 +389,7 @@ private fun ChannelSearch(profile: Profile, q: String, sports: Boolean) {
     }
     val r = results ?: return
     if (r.isEmpty()) return EmptyState("No matches for \"$q\".")
-    ChannelBrowser(r, favKeys, Modifier.fillMaxSize().padding(bottom = 32.gx), side = true, header = "Results", entry = true) { Usage.log(Usage.Action.SEARCH_PICK, it) }
+    ChannelBrowser(r, favKeys, Modifier.fillMaxSize(), side = true, header = "Results", entry = true) { Usage.log(Usage.Action.SEARCH_PICK, it) }
 }
 
 /** Sports' tiles, in their order, and the sports each one holds (sports without a tile go under More). */
@@ -442,9 +440,9 @@ internal fun SportsTab(profile: Profile) {
     val hover = remember { mutableStateOf<SportTile?>(null) }
     FollowFocus(hover) { picked = it.name }
 
-    Column(Modifier.fillMaxSize().padding(bottom = 32.gx), verticalArrangement = Arrangement.spacedBy(20.gx)) {
+    Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(20.gx)) {
         Box(Modifier.fillMaxWidth().glass(RoundedCornerShape(26.gx))) {
-            LazyRow(Modifier.focusRestorer(), contentPadding = PaddingValues(horizontal = 18.gx, vertical = 16.gx), horizontalArrangement = Arrangement.spacedBy(12.gx)) {
+            LazyRow(Modifier.focusRestorer().onFocusChanged { if (!it.hasFocus) hover.value = null }, contentPadding = PaddingValues(horizontal = 18.gx, vertical = 16.gx), horizontalArrangement = Arrangement.spacedBy(12.gx)) {
                 items(tiles, key = { it.name }) { t ->
                     val on = t == tile
                     FocusBox(
@@ -464,3 +462,8 @@ internal fun SportsTab(profile: Profile) {
         ChannelBrowser(channels, favKeys, Modifier.weight(1f).fillMaxWidth(), side = true, header = "${tile.label} · live channels")
     }
 }
+
+private const val HALF_HOUR = 30 * 60_000L
+
+/** The programme on at [t], if any (one that has ended is not "now"). */
+private fun List<NowNext>.onAt(t: Long): NowNext? = firstOrNull { it.start <= t && it.stop > t }
