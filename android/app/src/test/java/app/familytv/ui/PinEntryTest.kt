@@ -51,25 +51,38 @@ class PinEntryTest {
     @After fun clock() { PinLock.now = SystemClock::elapsedRealtime }
 
     @Test
-    fun upAndDownRollTheSlotAndOkOnTheLastChecksIt() {
+    fun theWheelEntersARowsNumbersWithoutShowingWhichOne() {
         show()
         row.requestFocus()
         rule.waitForIdle()
         // No keypad to click, and no digit in the accessibility text.
         assertEquals(0, rule.onAllNodes(hasClickAction()).fetchSemanticsNodes().size)
-        assertEquals(0, rule.onAllNodesWithText("0").fetchSemanticsNodes().size)
-        // Down from 0 wraps to 9, so 9 then 1 then 3 then 4: the PIN is 9134 here.
-        press(listOf(Key.DirectionUp, Key.DirectionRight))
-        entered(1)
-        // Left steps back and clears it.
-        press(listOf(Key.DirectionLeft))
+        for (d in 0..9) assertEquals(0, rule.onAllNodesWithText("$d").fetchSemanticsNodes().size)
+        // Up from [1 2 3] wraps to [0], where Left and Right do nothing and OK enters 0.
+        press(listOf(Key.DirectionUp, Key.DirectionLeft, Key.DirectionRight))
         entered(0)
-        press(listOf(Key.DirectionDown, Key.DirectionRight, Key.DirectionUp, Key.DirectionCenter))
-        press(listOf(Key.DirectionUp, Key.DirectionUp, Key.DirectionUp, Key.DirectionRight))
+        press(listOf(Key.DirectionCenter))
+        entered(1)
+        press(listOf(Key.Back))
+        entered(0)
+        // The PIN is 9134 here: [7 8 9] Right, then (the row back at [1 2 3]) Left, Right, and [4 5 6] Left.
+        press(listOf(Key.DirectionDown, Key.DirectionDown, Key.DirectionRight))
+        press(listOf(Key.DirectionLeft, Key.DirectionRight))
         entered(3)
         assertEquals(0, opened)
-        press(listOf(Key.DirectionUp, Key.DirectionUp, Key.DirectionUp, Key.DirectionUp, Key.DirectionCenter))
+        press(listOf(Key.DirectionDown, Key.DirectionLeft))
         assertEquals(1, opened)
+    }
+
+    @Test
+    fun okEntersTheMiddleNumberOfTheRowAndAWrongPinShakesAndClears() {
+        show()
+        row.requestFocus()
+        // 2, 5, 8 and 0: OK on each row in turn.
+        press(listOf(Key.DirectionCenter, Key.DirectionDown, Key.DirectionCenter, Key.DirectionDown, Key.DirectionDown, Key.DirectionCenter, Key.DirectionUp, Key.DirectionCenter))
+        rule.onNodeWithText("Wrong PIN").assertExists()
+        entered(0)
+        assertEquals(0, opened)
     }
 
     @Test
