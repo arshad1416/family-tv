@@ -84,6 +84,8 @@ import kotlinx.coroutines.launch
 
 /** The TV's tabs, left to right. Each has its own glow and its own search. */
 enum class GlassTab(val label: String, val glow: Color, val usage: Usage.Screen, val searchHint: String) {
+    /** The main screen the app opens on: the film highlights, rows and providers. */
+    Home("Home", Color(0xFF4F7CFF), Usage.Screen.HOME, "Search movies"),
     Live("Live TV", Color(0xFF2FB8A6), Usage.Screen.LIVE, "Search channels"),
     Movies("Movies", Color(0xFF4F7CFF), Usage.Screen.MOVIES, "Search movies"),
     Series("TV Shows", Color(0xFF9B6BFF), Usage.Screen.SERIES, "Search TV shows"),
@@ -129,9 +131,9 @@ internal fun GlassDarkPage() {
 }
 
 /**
- * The TV home: a top bar of tabs (Live TV, Movies, TV Shows, Sports) with the tab's own search,
- * the clock, Appearance and Settings, over the tab's page, and the weather panel below it. Back inside a page goes up to the tabs; Back on the
- * tabs leaves the app as before. Each tab keeps its place (and its search) while another is open.
+ * The TV home: a top bar of tabs (Home, Live TV, Movies, TV Shows, Sports) with the tab's own search,
+ * the clock, Appearance and Settings, over the tab's page, and the weather panel below it. Back inside a page goes up to the tabs;
+ * Back on another tab's name goes to Home, and Back on Home asks before leaving. Each tab keeps its place (and its search) while another is open.
  */
 @Composable
 internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
@@ -143,7 +145,7 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
     val hasViewers = remember(viewerTick) { app.viewers.all().isNotEmpty() }
     val profile = remember(base, viewerTick) { app.viewers.apply(base) }
     var picking by remember { mutableStateOf(false) }
-    var tab by rememberSaveable { mutableStateOf(GlassTab.Movies) }
+    var tab by rememberSaveable { mutableStateOf(GlassTab.Home) }
     var settings by rememberSaveable { mutableStateOf(false) }
     val queries = GlassTab.entries.associateWith { rememberSaveable(key = "query/${it.name}") { mutableStateOf("") } }
     val tabFocus = remember { GlassTab.entries.associateWith { FocusRequester() } }
@@ -164,9 +166,13 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
     BackHandler(enabled = anyFocused && !barFocused && !barHidden.value) { Usage.log(Usage.Action.BACK); focusBar() }
     BackHandler(enabled = barFocused && settings) { settings = false }
     BackHandler(enabled = barFocused && !settings && queries.getValue(tab).value.isNotEmpty()) { queries.getValue(tab).value = "" }
-    // Back on the tabs asks before leaving (apps never see the Home button, so this is the one place to ask).
+    // Back on another tab goes to Home; Back on Home asks before leaving (apps never see the Home button, so this is the one place to ask).
     var exitAsk by remember { mutableStateOf(false) }
-    BackHandler(enabled = (barFocused || !anyFocused) && !settings && !barHidden.value && queries.getValue(tab).value.isEmpty()) { exitAsk = true }
+    val onTabs = (barFocused || !anyFocused) && !settings && !barHidden.value && queries.getValue(tab).value.isEmpty()
+    // Home's page keeps its place, so focus goes back to where it was there (else its first row).
+    var backHome by remember { mutableIntStateOf(0) }
+    BackHandler(enabled = onTabs && tab != GlassTab.Home) { tab = GlassTab.Home; backHome++ }
+    BackHandler(enabled = onTabs && tab == GlassTab.Home) { exitAsk = true }
     LaunchedEffect(Unit) { delay(50); focusBar() }
     LaunchedEffect(settings) { if (!settings && barFocused) { delay(50); focusBar() } }
 
@@ -176,6 +182,17 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
     // Kids get the bright look.
     val t = if (darkPages.intValue > 0) 0f else if (profile.kidsOnly) 1f else lightness
     val palette = remember(t) { GlassPalette.lerp(GlassPalette.Dark, GlassPalette.Light, t) }
+    LaunchedEffect(backHome) {
+        if (backHome == 0) return@LaunchedEffect
+        // Once Home's rows are back on screen.
+        repeat(40) {
+            delay(50)
+            if (entry.attached > 0) {
+                if (runCatching { pageFocus.requestFocus() }.isFailure) entry.focus()
+                return@LaunchedEffect
+            }
+        }
+    }
     // Closing the panel hands focus back to where it was on the page.
     var panelSeen by remember { mutableStateOf(false) }
     LaunchedEffect(panel) {
@@ -254,6 +271,7 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
                             TrackScreen(tab.usage)
                             GlassGlow(tab.glow)
                             when (tab) {
+                                GlassTab.Home -> VodTab(vm, profile, Kind.MOVIE, GlassTab.Home)
                                 GlassTab.Live -> LiveTab(vm, profile)
                                 GlassTab.Movies -> VodTab(vm, profile, Kind.MOVIE)
                                 GlassTab.Series -> VodTab(vm, profile, Kind.SERIES)
@@ -315,7 +333,7 @@ private fun GlassTopBar(
     viewer: String,
     onViewers: (() -> Unit)?,
 ) {
-    val apps = !settings && (tab == GlassTab.Movies || tab == GlassTab.Series)
+    val apps = !settings && (tab == GlassTab.Home || tab == GlassTab.Movies || tab == GlassTab.Series)
     val home = if (settings) settingsFocus else tabFocus.getValue(tab)
     // Up from the page always lands on the chosen tab (or Settings), never on whatever sits nearest above.
     Column(

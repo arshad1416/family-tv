@@ -82,7 +82,8 @@ private const val TV_GUIDE = "TV guide"
 /**
  * Live TV on the TV: a Category column, its countries (with channel counts), the channel list, and
  * at the right the focused channel's live preview over its guide ([GuideBox]). Both columns come from the provider's category names
- * ([LiveGenre], [liveCountry]); adult categories show only once the PIN is entered. TV guide, at the
+ * ([LiveGenre], [liveCountry]); All, first, has every non-adult channel by country, so none is out of reach
+ * whatever its category is called. Adult categories show only once the PIN is entered. TV guide, at the
  * foot of the Category column, opens the classic grid guide. Above them, "Recently watched" ([RecentStrip]).
  * The top bar's search searches channels.
  */
@@ -118,15 +119,18 @@ private fun LiveBrowser(profile: Profile, onGuide: () -> Unit) {
     val favKeys = rememberFavouriteKeys(favs)
     val favChannels = rememberFavouriteChannels(favs, cats)
     val byGenre = remember(cats) { cats.groupBy { LiveGenre.of(it.name, isAdult(it)) } }
+    // All: every channel on the line by country, whatever its category says; adult ones keep their own genre.
+    val allCats = remember(cats) { cats.filterNot(::isAdult) }
     val genres = buildList {
+        if (allCats.isNotEmpty()) add(ALL)
         if (favChannels.isNotEmpty()) add(FAVOURITES)
         LiveGenre.entries.forEach { if (byGenre[it] != null) add(it.label) }
     }
     if (genres.isEmpty()) return EmptyState("No channels on this line.")
     var genre by rememberSaveable { mutableStateOf<String?>(null) }
     var country by rememberSaveable { mutableStateOf<String?>(null) }
-    val g = genre?.takeIf { it in genres } ?: genres.firstOrNull { it != FAVOURITES } ?: genres.first()
-    val genreCats = LiveGenre.entries.firstOrNull { it.label == g }?.let { byGenre[it] }.orEmpty()
+    val g = genre?.takeIf { it in genres } ?: genres.first()
+    val genreCats = if (g == ALL) allCats else LiveGenre.entries.firstOrNull { it.label == g }?.let { byGenre[it] }.orEmpty()
     var loaded by remember { mutableStateOf<List<ChannelEntity>?>(null) }
     LaunchedEffect(genreCats) {
         loaded = null
@@ -165,7 +169,8 @@ private fun LiveBrowser(profile: Profile, onGuide: () -> Unit) {
                 // Leaving the column before the 300 ms rest cancels the pending pick, so the list never changes under focus.
                 LazyColumn(Modifier.weight(1f).onFocusChanged { if (!it.hasFocus) hoverGenre.value = null }, verticalArrangement = Arrangement.spacedBy(6.gx)) {
                     items(genres, key = { it }) { x ->
-                        GlassRowItem(x, x == g, { genre = x; country = null }, entryPoint(x == g), onFocus = { hoverGenre.value = x })
+                        // Right goes to the chosen country, not whichever sits level with this genre.
+                        GlassRowItem(x, x == g, { genre = x; country = null }, entryPoint(x == g).focusProperties { right = toCountry.orNearest }, onFocus = { hoverGenre.value = x })
                     }
                     item(TV_GUIDE) { GlassRowItem(TV_GUIDE, false, onGuide, onFocus = { hoverGenre.value = TV_GUIDE }) }
                 }

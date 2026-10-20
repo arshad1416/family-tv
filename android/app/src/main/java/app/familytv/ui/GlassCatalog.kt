@@ -4,6 +4,7 @@ import androidx.annotation.DrawableRes
 import app.familytv.R
 import app.familytv.data.CategoryEntity
 import app.familytv.data.Names
+import app.familytv.iptv.SeriesTitles
 
 /*
  * How the TV's glass pages sort the line's categories: movie and series categories by provider and
@@ -125,6 +126,19 @@ private val CODES = mapOf(
     "PH" to "Philippines", "GE" to "Georgia", "AZ" to "Azerbaijan", "UZ" to "Uzbekistan", "AM" to "Armenia",
     "VE" to "Venezuela", "HK" to "Hong Kong", "VI" to "Vietnam", "ID" to "Indonesia", "KR" to "South Korea",
     "TH" to "Thailand", "KZ" to "Kazakhstan", "LT" to "Lithuania", "PK" to "Pakistan", "IN" to "India",
+    "BD" to "Bangladesh", "LK" to "Sri Lanka", "NP" to "Nepal", "EG" to "Egypt", "SA" to "Saudi Arabia",
+    "AE" to "UAE", "KW" to "Kuwait", "QA" to "Qatar", "LB" to "Lebanon", "SY" to "Syria", "IQ" to "Iraq",
+    "JO" to "Jordan", "MX" to "Mexico", "CO" to "Colombia", "CL" to "Chile", "PE" to "Peru", "EC" to "Ecuador",
+    "DO" to "Dominican Republic", "PR" to "Puerto Rico", "JM" to "Jamaica", "NG" to "Nigeria", "KE" to "Kenya",
+    "ZA" to "South Africa", "GH" to "Ghana", "ET" to "Ethiopia", "SO" to "Somalia", "CN" to "China",
+    "SG" to "Singapore", "TW" to "Taiwan", "KH" to "Cambodia", "UA" to "Ukraine", "LV" to "Latvia",
+    "EE" to "Estonia", "SK" to "Slovakia", "BY" to "Belarus", "MD" to "Moldova", "LU" to "Luxembourg",
+)
+
+/** Prefixes before "|" that aren't countries, so an unknown code never becomes a country of its own. */
+private val NOT_COUNTRIES = setOf(
+    "VIP", "PPV", "NEW", "TOP", "HD", "FHD", "UHD", "SD", "HQ", "LQ", "EPL", "NBA", "NFL", "NHL", "MLB", "UFC",
+    "WWE", "MMA", "BT", "SKY", "TNT", "VOD", "XXX", "TV", "DTH", "OTT", "EPG",
 )
 
 /** Country words a name without a code prefix may carry, and what an ambiguous code means with them. */
@@ -149,7 +163,10 @@ fun liveCountry(name: String): String? {
         word != null -> word
         code == "ASIA" -> "India"
         code == "HR" && n.contains("HORSE", ignoreCase = true) -> null
-        else -> code?.let { CODES[it] }
+        code == null -> null
+        else -> CODES[code]
+            // An unknown country code ("XY| NEWS") still gets its own row rather than vanishing into Other.
+            ?: code.takeIf { it.length <= 3 && it.all(Char::isLetter) && it !in NOT_COUNTRIES && !SeriesTitles.isLanguageCode(it) }
     }
 }
 

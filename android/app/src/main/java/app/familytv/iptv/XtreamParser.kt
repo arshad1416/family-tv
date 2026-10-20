@@ -265,7 +265,9 @@ object XtreamParser {
         )
     }
 
-    private fun text(v: String?): String? = v?.trim()?.takeIf { it.isNotEmpty() && it != "null" }
+    /** Text to show, or null. Some providers put an image address where a description goes; that is never shown. */
+    private fun text(v: String?): String? = v?.trim()?.takeIf { it.isNotEmpty() && it != "null" && !BARE_URL.matches(it) }
+    private val BARE_URL = Regex("""(?i)(https?://|www\.)\S*""")
     private fun url(v: String?): String? = v?.trim()?.takeIf { it.startsWith("http://") || it.startsWith("https://") }
 
     /** get_vod_info / get_series_info: the ids live in the top-level "info" object. */

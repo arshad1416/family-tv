@@ -194,8 +194,7 @@ private const val FOR_YOU_CATEGORIES = 3
  * lands on the tile that opened it. The top bar's search searches this kind only.
  */
 @Composable
-internal fun VodTab(vm: MainViewModel, profile: Profile, kind: String) {
-    val tab = if (kind == Kind.MOVIE) GlassTab.Movies else GlassTab.Series
+internal fun VodTab(vm: MainViewModel, profile: Profile, kind: String, tab: GlassTab = if (kind == Kind.MOVIE) GlassTab.Movies else GlassTab.Series) {
     var path by rememberSaveable { mutableStateOf("") }
     var opened by rememberSaveable { mutableStateOf<String?>(null) }
     val query = glassQuery(tab).trim()
