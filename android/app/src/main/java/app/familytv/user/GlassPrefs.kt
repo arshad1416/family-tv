@@ -44,6 +44,15 @@ class GlassPrefs(app: FamilyTvApp) {
         _place.value = p
     }
 
+    // Whether "Show weather for where you are?" has been answered; a TV that already chose a city has.
+    private val _placeAsked = MutableStateFlow(prefs.getBoolean(PLACE_ASKED, prefs.contains(PLACE)))
+    val placeAsked: StateFlow<Boolean> = _placeAsked
+
+    fun setPlaceAsked() {
+        prefs.edit().putBoolean(PLACE_ASKED, true).apply()
+        _placeAsked.value = true
+    }
+
     private val _clocksOn = MutableStateFlow(prefs.getBoolean(CLOCKS_ON, false))
     val clocksOn: StateFlow<Boolean> = _clocksOn
 
@@ -87,6 +96,7 @@ class GlassPrefs(app: FamilyTvApp) {
         )
         private const val APPEARANCE = "appearance"
         private const val PLACE = "weather_place"
+        private const val PLACE_ASKED = "weather_place_asked"
         private const val CLOCKS_ON = "clocks_on"
         private const val CLOCKS = "clocks"
         private const val WEATHER = "weather_body"

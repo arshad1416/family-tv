@@ -1,5 +1,8 @@
 package app.familytv.ui
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -8,6 +11,9 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,6 +24,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -36,6 +43,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
@@ -128,6 +136,9 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
     BackHandler(enabled = anyFocused && !barFocused && !barHidden.value) { Usage.log(Usage.Action.BACK); focusBar() }
     BackHandler(enabled = barFocused && settings) { settings = false }
     BackHandler(enabled = barFocused && !settings && queries.getValue(tab).value.isNotEmpty()) { queries.getValue(tab).value = "" }
+    // Back on the tabs asks before leaving (apps never see the Home button, so this is the one place to ask).
+    var exitAsk by remember { mutableStateOf(false) }
+    BackHandler(enabled = (barFocused || !anyFocused) && !settings && !barHidden.value && queries.getValue(tab).value.isEmpty()) { exitAsk = true }
     LaunchedEffect(Unit) { delay(50); focusBar() }
     LaunchedEffect(settings) { if (!settings && barFocused) { delay(50); focusBar() } }
 
@@ -201,6 +212,10 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
             ) {
                 WeatherPanel(weather, onClose = { panel = false })
             }
+            if (exitAsk) {
+                val activity = LocalContext.current.findActivity()
+                ExitPrompt(onStay = { exitAsk = false; focusBar() }, onLeave = { activity?.finish() })
+            }
         }
     }
 }
@@ -247,4 +262,34 @@ private fun GlassTopBar(
             }
         }
     }
+}
+
+/** "Exit Family TV?" over the dimmed home: Stay (focused) or Exit. Back again stays; focus can't wander off it. */
+@Composable
+private fun ExitPrompt(onStay: () -> Unit, onLeave: () -> Unit) {
+    val stay = remember { FocusRequester() }
+    BackHandler(onBack = onStay)
+    LaunchedEffect(Unit) { delay(50); runCatching { stay.requestFocus() } }
+    val shape = RoundedCornerShape(28.gx)
+    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.55f)), contentAlignment = Alignment.Center) {
+        Column(
+            Modifier.width(520.gx).background(LocalGlassPalette.current.middle, shape).border(1.dp, Glass.Line, shape)
+                .focusProperties { onExit = { cancelFocusChange() } }.focusGroup()
+                .padding(horizontal = 36.gx, vertical = 32.gx),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(26.gx),
+        ) {
+            Text("Exit Family TV?", fontSize = 30.gsp, fontWeight = FontWeight.Bold, maxLines = 1)
+            Row(horizontalArrangement = Arrangement.spacedBy(16.gx)) {
+                GlassPill("Stay", onStay, Modifier.focusRequester(stay), fill = Glass.Raised, border = true, fontSize = 18.gsp, padH = 36.gx, padV = 12.gx)
+                GlassPill("Exit", onLeave, fill = Glass.Raised, border = true, fontSize = 18.gsp, padH = 36.gx, padV = 12.gx)
+            }
+        }
+    }
+}
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
 }
