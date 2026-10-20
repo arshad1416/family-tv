@@ -8,6 +8,7 @@ import android.speech.RecognizerIntent
 import androidx.activity.OnBackPressedDispatcher
 import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.remember
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsMatcher
@@ -120,7 +121,7 @@ class GlassHomeTest {
         waitFor("Search movies")
     }
 
-    /** The top bar's [name] tab; on Home a tile of the same name sits below it. */
+    /** The top bar's [name] tab, not a row or button of the same name below it. */
     private fun tab(name: String): SemanticsNodeInteraction {
         val m = hasText(name) and hasClickAction()
         rule.waitUntilAtLeastOneExists(m, 20_000)
@@ -474,6 +475,58 @@ class GlassHomeTest {
         rule.onNode(hasText("Add") and hasClickAction()).performScrollTo().performClick()
         waitFor("Remove Arshad")
         assertEquals(listOf("Arshad"), app.viewers.all().map { it.name })
+    }
+
+    @Test
+    fun settingsKeepsItsPlaceAfterAChoice() {
+        rule.setContent {
+            val menus = remember { ItemMenus() }
+            CompositionLocalProvider(LocalItemMenus provides menus) {
+                HomeScreen(MainViewModel(app), DeviceConfig(paired = true, profile = Profile()))
+                menus.Host()
+            }
+        }
+        rule.onNode(hasContentDescription("Settings") and hasClickAction()).performClick()
+        waitFor("Stream quality")
+        val live = rule.onNode(hasText("Live TV: ", substring = true) and hasClickAction())
+        live.performScrollTo().requestFocus()
+        live.performClick()
+        waitFor("Stream quality · Live TV")
+        rule.onNode(hasText("Always prefer HD") and hasClickAction()).performClick()
+        waitFor("Live TV: Always prefer HD")
+        rule.waitForIdle()
+        live.assertIsFocused()
+    }
+
+    @Test
+    fun settingsHasSectionsAndArrangeCategoriesStartsFolded() {
+        var back: OnBackPressedDispatcher? = null
+        rule.setContent {
+            back = LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
+            HomeScreen(MainViewModel(app), DeviceConfig(paired = true, profile = Profile()))
+        }
+        rule.onNode(hasContentDescription("Settings") and hasClickAction()).performClick()
+        waitFor("Arrange categories")
+        // Short sections, two to a column.
+        fun left(heading: String) = rule.onNodeWithText(heading).fetchSemanticsNode().positionInRoot.x
+        val columns = listOf("Viewing", "Channels and categories", "Viewers and PIN", "This TV").map(::left)
+        assertEquals(columns[0], columns[1])
+        assertEquals(columns[2], columns[3])
+        assertTrue("$columns", columns[2] > columns[0])
+        // One row per kind with its count, and no categories until one opens.
+        val live = rule.onNode(hasText("Live TV") and hasText("2  ▾"))
+        rule.onNode(hasText("Movies") and hasText("2  ▾")).assertExists()
+        rule.onNodeWithText("CA| SPORTS EN").assertDoesNotExist()
+        // The first focus into the page lands on its entry point; the second reaches the row.
+        repeat(2) { live.performScrollTo().requestFocus(); rule.waitForIdle() }
+        live.performKeyInput { pressKey(Key.DirectionCenter) }
+        waitFor("CA| SPORTS EN")
+        rule.onNode(hasText("Movies") and hasText("2  ▾")).assertExists()
+        // Back folds it again, with focus back on its row.
+        rule.onAllNodes(hasText("▼") and hasClickAction()).onFirst().requestFocus()
+        rule.runOnUiThread { back!!.onBackPressed() }
+        rule.waitUntil(10_000) { rule.onAllNodes(hasText("CA| SPORTS EN")).fetchSemanticsNodes().isEmpty() }
+        rule.waitUntilAtLeastOneExists(isFocused() and hasText("Live TV") and hasText("2  ▾"), 10_000)
     }
 
     @Test

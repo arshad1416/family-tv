@@ -88,6 +88,9 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("androidx.lifecycle:lifecycle-process:2.8.7")
+    // Installs the baseline profile (src/main/baseline-prof.txt) so the code is compiled ahead of
+    // time, not left to the JIT after each sideloaded update.
+    implementation("androidx.profileinstaller:profileinstaller:1.4.0")
 
     val media3 = "1.4.1"
     implementation("androidx.media3:media3-exoplayer:$media3")

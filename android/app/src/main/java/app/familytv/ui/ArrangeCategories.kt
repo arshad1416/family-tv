@@ -4,6 +4,7 @@ import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -20,6 +21,7 @@ import androidx.compose.material.icons.filled.Menu
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -28,6 +30,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -49,8 +53,9 @@ private val KINDS = listOf(Kind.LIVE to "Live TV", Kind.MOVIE to "Movies", Kind.
 private val ROW = 52.dp
 
 /**
- * Settings: this device's own category order per kind. Drag a row by its handle (touch) or use
- * its arrows; the profile's order from the portal applies again after "Use the portal's order".
+ * Settings: this device's own category order per kind. Like the portal, it starts folded to one row
+ * per kind with its count; OK opens one and Back folds it again. Drag a row by its handle (touch) or
+ * use its arrows; the profile's order from the portal applies again after "Use the portal's order".
  */
 @Composable
 fun ArrangeCategoriesPanel(profile: Profile) {
@@ -58,26 +63,43 @@ fun ArrangeCategoriesPanel(profile: Profile) {
     val touch = LocalFormFactor.current.touch
     val store = ctx.app.myCategoryOrder
     val mine by store.order.collectAsState()
-    var kind by rememberSaveable { mutableStateOf(Kind.LIVE) }
-    // The same name can come from two lines; one row moves both.
-    val names = categories(profile, kind).map { it.name }.distinctBy { it.lowercase() }
+    var open by rememberSaveable { mutableStateOf<String?>(null) }
+    val heads = remember { KINDS.associate { (k, _) -> k to FocusRequester() } }
+    // Back folds the open kind and puts focus on its row, since the row that had it goes.
+    BackHandler(enabled = open != null) {
+        val k = open ?: return@BackHandler
+        runCatching { heads.getValue(k).requestFocus() }
+        open = null
+    }
     Panel {
         Text("Arrange categories", fontSize = 20.sp, fontWeight = FontWeight.Bold)
         Text(
-            (if (touch) "Drag a category by its handle, or use the arrows, " else "Use the arrows ") +
+            (if (touch) "Open a list, then drag a category by its handle or use the arrows " else "Open a list, then use the arrows ") +
                 "to put the categories in the order you like. This changes only this device.",
             fontSize = 14.sp, color = Tv.Muted,
         )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            KINDS.forEach { (k, label) ->
-                FocusBox(onClick = { kind = k }, selected = k == kind, color = Tv.Raised, shape = RoundedCornerShape(20.dp)) { focused ->
-                    Text(label, Modifier.padding(horizontal = 16.dp, vertical = 8.dp), fontSize = 15.sp, color = if (k == kind && !focused) Tv.Accent else Tv.Text)
+        KINDS.forEach { (k, label) ->
+            key(k) {
+                // The same name can come from two lines; one row moves both.
+                val names = categories(profile, k).map { it.name }.distinctBy { it.lowercase() }
+                val expanded = open == k
+                FocusBox(
+                    onClick = { open = if (expanded) null else k },
+                    modifier = Modifier.fillMaxWidth().focusRequester(heads.getValue(k)),
+                    color = Tv.Raised, selected = expanded, shape = RoundedCornerShape(20.dp),
+                ) {
+                    Row(Modifier.padding(horizontal = 18.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(label, Modifier.weight(1f), fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                        Text("${names.size}  " + if (expanded) "▴" else "▾", fontSize = 15.sp)
+                    }
+                }
+                if (expanded) {
+                    if (names.isEmpty()) Text("Nothing to arrange until the lists have loaded.", fontSize = 14.sp, color = Tv.Muted)
+                    else ReorderList(names, touch) { store.set(k, it) }
+                    if (mine[k] != null) TvButton("Use the portal's order", { store.reset(k) })
                 }
             }
         }
-        if (names.isEmpty()) Text("Nothing to arrange until the lists have loaded.", fontSize = 14.sp, color = Tv.Muted)
-        else ReorderList(names, touch) { store.set(kind, it) }
-        if (mine[kind] != null) TvButton("Use the portal's order", { store.reset(kind) })
     }
 }
 

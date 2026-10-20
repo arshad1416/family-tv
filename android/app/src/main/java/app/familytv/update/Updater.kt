@@ -14,6 +14,7 @@ import app.familytv.core.Http
 import app.familytv.portal.LatestApp
 import app.familytv.sync.PlaybackStatus
 import app.familytv.usage.Usage
+import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -32,11 +33,15 @@ import okhttp3.Request
 object Updater {
     private val lock = Mutex()
     @Volatile private var promptedFor = 0
+    @Volatile private var cleared = false
 
     fun available(latest: LatestApp?) = latest != null && latest.versionCode > BuildConfig.VERSION_CODE
 
     /** [visible] is true when one of our screens is showing. Returns what happened, for the portal. */
     suspend fun check(context: Context, latest: LatestApp?, visible: Boolean, force: Boolean = false): String? = lock.withLock {
+        // Once per run: an offer this app left unconfirmed belongs to an older run, perhaps for a
+        // build that's now installed or older, and Android could show it again later.
+        if (!cleared) { cleared = true; abandonLeftovers(context) }
         if (!available(latest)) return null
         latest!!
         if (PlaybackStatus.title != null && !force) return "waiting: playing"
@@ -68,7 +73,35 @@ object Updater {
     private fun android.content.pm.PackageManager.canRequestPackageInstallsCompat() =
         Build.VERSION.SDK_INT < 26 || canRequestPackageInstalls()
 
+    /** Abandons this app's install sessions, so only the offer being made now can be confirmed. */
+    internal fun abandonLeftovers(context: Context) {
+        val installer = context.packageManager.packageInstaller
+        installer.mySessions.forEach { runCatching { installer.abandonSession(it.sessionId) } }
+    }
+
+    /** The build in the APK at [apk], or null when it isn't one. */
+    @Suppress("DEPRECATION")
+    internal fun versionCode(context: Context, apk: File): Long? =
+        context.packageManager.getPackageArchiveInfo(apk.path, 0)?.let { if (Build.VERSION.SDK_INT >= 28) it.longVersionCode else it.versionCode.toLong() }
+
     private suspend fun install(context: Context, latest: LatestApp, silent: Boolean) = withContext(Dispatchers.IO) {
+        abandonLeftovers(context)
+        // Downloaded first, so a build that turns out no newer than this one is never offered.
+        val apk = File(context.cacheDir, "update.apk")
+        try {
+            Http.client.newCall(Request.Builder().url(latest.url).build()).execute().use { res ->
+                if (!res.isSuccessful) error("download failed: HTTP ${res.code}")
+                apk.outputStream().use { res.body!!.byteStream().copyTo(it) }
+            }
+            val code = versionCode(context, apk) ?: error("download is not an app")
+            if (code <= BuildConfig.VERSION_CODE) error("download is build $code, not newer than ${BuildConfig.VERSION_CODE}")
+            offer(context, apk, silent)
+        } finally {
+            apk.delete()
+        }
+    }
+
+    private suspend fun offer(context: Context, apk: File, silent: Boolean) {
         // The install replaces this app, so send what's queued first.
         Usage.log(Usage.Screen.UPDATE, Usage.Action.UPDATE_INSTALL, if (silent) 1 else 0)
         runCatching { Usage.send(context.app.portal) }
@@ -85,13 +118,9 @@ object Updater {
         val id = installer.createSession(params)
         installer.openSession(id).use { session ->
             try {
-                Http.client.newCall(Request.Builder().url(latest.url).build()).execute().use { res ->
-                    if (!res.isSuccessful) error("download failed: HTTP ${res.code}")
-                    val body = res.body!!
-                    session.openWrite("family-tv.apk", 0, body.contentLength()).use { out ->
-                        body.byteStream().copyTo(out)
-                        session.fsync(out)
-                    }
+                session.openWrite("family-tv.apk", 0, apk.length()).use { out ->
+                    apk.inputStream().use { it.copyTo(out) }
+                    session.fsync(out)
                 }
                 val flags = PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0)
                 val callback = PendingIntent.getBroadcast(context, id, Intent(context, InstallReceiver::class.java), flags)

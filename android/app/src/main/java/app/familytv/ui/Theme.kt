@@ -22,9 +22,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onPreviewKeyEvent
@@ -101,6 +104,8 @@ fun FocusBox(
     val pressed by source.collectIsPressedAsState()
     val focused = hasFocus || pressed
     val okPress = remember { OkPress() }
+    val memory = LocalFocusMemory.current
+    val me = remember { FocusRequester() }
     val glass = LocalGlass.current
     val bg = when {
         glass -> Glass.fill(color, focused && !outline, selected)
@@ -130,7 +135,8 @@ fun FocusBox(
                     if (lifted == Lift.Tilt) { rotationX = 3f; cameraDistance = 16 * density }
                 } else Modifier,
             )
-            .onFocusChanged { hasFocus = it.isFocused; if (it.isFocused) onFocus() }
+            .onFocusChanged { hasFocus = it.isFocused; if (it.isFocused) { onFocus(); memory?.focused(me) } }
+            .then(if (memory != null) Modifier.focusRequester(me) else Modifier)
             .clip(shape)
             .background(bg)
             .then(if (ring != null) Modifier.border(if (outline) 3.dp else 2.dp, ring, shape) else Modifier)
@@ -148,6 +154,26 @@ fun FocusBox(
         if (glass && bg == Glass.Selected) CompositionLocalProvider(LocalContentColor provides Glass.OnSelected) { content(focused) } else content(focused)
     }
 }
+
+/**
+ * The [FocusBox]es last focused on one screen, newest first, so the screen can put focus back after
+ * a menu or a prompt closes rather than let the next press start again at its top ([SettingsScreen]).
+ */
+class FocusMemory {
+    private val recent = ArrayDeque<FocusRequester>()
+
+    fun focused(box: FocusRequester) {
+        recent.remove(box)
+        recent.addFirst(box)
+        while (recent.size > 8) recent.removeLast()
+    }
+
+    /** Focuses the newest box still on screen (one that has gone throws); false if none is left. */
+    fun restore(): Boolean = recent.any { runCatching { it.requestFocus() }.isSuccess }
+}
+
+/** The screen's [FocusMemory]; boxes outside one (and in dialogs) remember nothing. */
+val LocalFocusMemory = staticCompositionLocalOf<FocusMemory?> { null }
 
 /** How a glass [FocusBox] stands out while focused, beyond its ring and scale. */
 enum class Lift { None, Glow, Tilt }

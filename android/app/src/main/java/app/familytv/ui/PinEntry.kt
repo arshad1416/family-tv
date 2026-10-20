@@ -127,8 +127,8 @@ private const val MAX_PIN = 8
 /**
  * The TV's PIN control, after Google TV's own: a round wheel showing one row of the keypad, Up/Down
  * changing the row, Left/OK/Right entering its left, middle or right number ([0] takes OK only).
- * A press shows nothing but the next dot filling, and the row goes back to [1 2 3] after every
- * digit, so neither the wheel nor its position gives the digit away.
+ * A press shows nothing but the next dot filling, and the wheel stays on its row until Up or Down
+ * moves it, so a run of digits from one row needs no extra presses.
  */
 @Composable
 private fun PinWheel(count: Int, check: (String) -> Boolean, modifier: Modifier) {
@@ -144,7 +144,6 @@ private fun PinWheel(count: Int, check: (String) -> Boolean, modifier: Modifier)
         shake.animateTo(0f, keyframes { durationMillis = 300; -14f at 50; 14f at 110; -9f at 170; 6f at 230 })
     }
     fun confirm(d: Int) {
-        row = 0
         if (PinLock.secondsLeft() > 0) return
         entered += d
         if (entered.length < count) return
@@ -161,7 +160,7 @@ private fun PinWheel(count: Int, check: (String) -> Boolean, modifier: Modifier)
             .onKeyEvent { e ->
                 // Back takes a digit away (down and up both, so the page doesn't also go back); on none it passes.
                 if (e.key == Key.Back) {
-                    if (e.type == KeyEventType.KeyDown && entered.isNotEmpty()) { entered = entered.dropLast(1); row = 0; backTaken = true; return@onKeyEvent true }
+                    if (e.type == KeyEventType.KeyDown && entered.isNotEmpty()) { entered = entered.dropLast(1); backTaken = true; return@onKeyEvent true }
                     if (e.type == KeyEventType.KeyUp && backTaken) { backTaken = false; return@onKeyEvent true }
                     return@onKeyEvent false
                 }
