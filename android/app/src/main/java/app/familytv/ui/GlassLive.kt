@@ -71,7 +71,7 @@ private const val TV_GUIDE = "TV guide"
 /**
  * Live TV on the TV: a Category column, its countries (with channel counts), and a preview of the
  * focused channel over the channel list. Both columns come from the provider's category names
- * ([LiveGenre], [liveCountry]); adult categories show as today, once unlocked. TV guide, at the
+ * ([LiveGenre], [liveCountry]); adult categories show only once the PIN is entered. TV guide, at the
  * foot of the Category column, opens the classic grid guide. The top bar's search searches channels.
  */
 @Composable
