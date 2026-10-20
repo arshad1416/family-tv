@@ -388,6 +388,10 @@ class GlassHomeTest {
     fun topBarButtonsDontOverlapOnMovies() {
         home()
         waitFor("Search movies")
+        // The title row can settle after the tabs on a slow runner.
+        rule.waitUntilAtLeastOneExists(hasContentDescription("Appearance: Auto"), 20_000)
+        rule.waitUntilAtLeastOneExists(hasContentDescription("Settings"), 20_000)
+        rule.waitForIdle()
         val switch = rule.onNodeWithContentDescription("Appearance: Auto").fetchSemanticsNode().boundsInRoot
         val gear = rule.onNodeWithContentDescription("Settings").fetchSemanticsNode().boundsInRoot
         assertTrue("switch $switch overlaps Settings $gear", switch.right <= gear.left)

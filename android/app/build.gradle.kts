@@ -66,6 +66,8 @@ android {
         unitTests.all { test ->
             test.systemProperty("robolectric.offline", "true")
             test.systemProperty("robolectric.dependency.dir", robolectricJars.singleFile.parent)
+            // CI keeps no reports, so a failure's message and stack go to the log.
+            test.testLogging { exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL }
         }
     }
 }
