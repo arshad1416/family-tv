@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -57,6 +58,9 @@ object Tv {
     val Shape = RoundedCornerShape(10.dp)
 }
 
+/** Secondary text: [Tv.Muted], or the glass look's own dim text on the TV's glass pages (dark in the light look). */
+val MutedText: Color @Composable @ReadOnlyComposable get() = if (LocalGlass.current) Glass.Dim else Tv.Muted
+
 @Composable
 fun FamilyTvTheme(content: @Composable () -> Unit) {
     MaterialTheme(
@@ -72,7 +76,7 @@ fun FamilyTvTheme(content: @Composable () -> Unit) {
 
 /**
  * The one focusable building block: D-pad focus paints it blue (or outlines it, for artwork),
- * OK clicks it. Lighter than tv-material's Surface, which matters in the guide grid.
+ * or on the TV's glass pages ([LocalGlass]) rings it in white; OK clicks it. Lighter than tv-material's Surface, which matters in the guide grid.
  * [onLongClick] runs on holding OK or pressing Menu on a remote, and on a long press on touch.
  */
 @OptIn(ExperimentalFoundationApi::class)
@@ -96,10 +100,18 @@ fun FocusBox(
     val pressed by source.collectIsPressedAsState()
     val focused = hasFocus || pressed
     val okPress = remember { OkPress() }
+    val glass = LocalGlass.current
     val bg = when {
+        glass -> Glass.fill(color, focused && !outline, selected)
         focused && !outline -> Tv.Accent
         selected -> Tv.Raised
         else -> color
+    }
+    val ring = when {
+        !focused -> null
+        glass -> Glass.Ring
+        outline -> Tv.Accent
+        else -> null
     }
     Box(
         modifier
@@ -107,7 +119,7 @@ fun FocusBox(
             .onFocusChanged { hasFocus = it.isFocused; if (it.isFocused) onFocus() }
             .clip(shape)
             .background(bg)
-            .then(if (focused && outline) Modifier.border(3.dp, Tv.Accent, shape) else Modifier)
+            .then(if (ring != null) Modifier.border(if (outline) 3.dp else 2.dp, ring, shape) else Modifier)
             .then(
                 if (onLongClick == null) {
                     Modifier.clickable(source, indication = null, onClick = onClick)
@@ -117,7 +129,10 @@ fun FocusBox(
                 },
             ),
         contentAlignment = contentAlignment,
-    ) { content(focused) }
+    ) {
+        // A white glass pill takes dark text.
+        if (glass && bg == Glass.Selected) CompositionLocalProvider(LocalContentColor provides Glass.OnSelected) { content(focused) } else content(focused)
+    }
 }
 
 /** Where an OK press on a [FocusBox] with a long-press action is: [down] seen here, [held] long enough. */
@@ -165,7 +180,8 @@ fun TvButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, e
 /** A page's own title. On phones and tablets the touch header already shows it, so only TV draws it. */
 @Composable
 fun PageTitle(text: String, bottom: Dp = 14.dp) {
-    if (!LocalFormFactor.current.touch) Text(text, fontSize = 28.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = bottom))
+    // The TV's glass top bar already shows it too.
+    if (!LocalFormFactor.current.touch && !LocalGlass.current) Text(text, fontSize = 28.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = bottom))
 }
 
 /** Thin programme progress bar. */

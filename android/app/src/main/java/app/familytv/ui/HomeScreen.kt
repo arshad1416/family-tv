@@ -4,9 +4,7 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.background
-import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -35,8 +33,8 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -47,7 +45,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
@@ -58,10 +55,8 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusRestorer
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -93,7 +88,6 @@ import app.familytv.usage.TrackScreen
 import app.familytv.usage.Usage
 import app.familytv.user.Favourites
 import coil.compose.AsyncImage
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import java.text.DateFormat
@@ -101,7 +95,6 @@ import java.util.Date
 
 /** Adult category names. "Adult Swim" is a cartoon channel, not adult content. */
 private val ADULT = Regex("(?i)\\b(xxx|adults?|18\\+|for adults)\\b(?![\\s_()-]*swim)")
-private val RAIL = 76.dp
 
 /** One focus style for artwork: a 1.1x zoom plus the outline (Android TV's guideline). */
 const val FOCUS_SCALE = 1.1f
@@ -130,7 +123,7 @@ enum class Page(val label: String, val icon: ImageVector) {
     }
 }
 
-/** Where focus lands the first time it moves from the rail into a page. */
+/** Where focus lands the first time it moves from the tabs into a page. */
 class PageEntry {
     val requester = FocusRequester()
     var attached = 0
@@ -151,7 +144,7 @@ fun entryPoint(on: Boolean = true): Modifier {
 fun PageEntry.focus() { if (attached > 0) runCatching { requester.requestFocus() } }
 
 /**
- * Coming back from the rail returns to the item you left, or the page's entry point.
+ * Coming back from the tabs returns to the item you left, or the page's entry point.
  * Needs Compose 1.8+: on 1.7 this restorer also stopped D-pad Up from a grid's top row
  * reaching the category chips (TvFocusTest covers both).
  */
@@ -184,89 +177,11 @@ private fun PageContent(page: Page, vm: MainViewModel, config: DeviceConfig, pro
     }
 }
 
-@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun HomeScreen(vm: MainViewModel, config: DeviceConfig) {
-    // Phones and tablets get the touch layout; TV keeps the D-pad rail below.
+    // Phones and tablets get the touch layout; TV gets the glass tabs (GlassHome).
     val form = LocalFormFactor.current
-    if (form.touch) return TouchHome(vm, config, form)
-    val profile = config.profile ?: Profile()
-    var page by rememberSaveable { mutableStateOf(Page.Home) }
-    val rail = remember { Page.entries.associateWith { FocusRequester() } }
-    var railOpen by remember { mutableStateOf(false) }
-    var contentFocused by remember { mutableStateOf(false) }
-    val entry = remember { PageEntry() }
-
-    // Back inside a page goes to the rail; Back on the rail leaves the app as before.
-    BackHandler(enabled = contentFocused) { Usage.log(Usage.Action.BACK); runCatching { rail.getValue(page).requestFocus() } }
-    LaunchedEffect(Unit) { runCatching { rail.getValue(page).requestFocus() } }
-
-    Box(Modifier.fillMaxSize().background(Tv.Bg)) {
-        Box(
-            Modifier
-                .fillMaxSize()
-                .padding(start = RAIL)
-                .onFocusChanged { contentFocused = it.hasFocus }
-                .restoresFocus(entry),
-        ) {
-            CompositionLocalProvider(LocalPageEntry provides entry) {
-                // Inside the 5% overscan safe zone (48dp across, 27dp down on a 960x540dp screen).
-                Box(Modifier.fillMaxSize().padding(start = 28.dp, end = 48.dp, top = 28.dp)) {
-                    PageBody(page, vm, config, profile) { page = it }
-                }
-            }
-        }
-        if (railOpen) Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(0f to Color(0xF0000000), 0.6f to Color(0x99000000), 1f to Color(0x55000000))))
-        Rail(page, rail, config.nickname, onOpen = { railOpen = it }, onSelect = { page = it })
-    }
-}
-
-@OptIn(ExperimentalComposeUiApi::class)
-@Composable
-private fun Rail(page: Page, requesters: Map<Page, FocusRequester>, nickname: String?, onOpen: (Boolean) -> Unit, onSelect: (Page) -> Unit) {
-    var open by remember { mutableStateOf(false) }
-    var hovered by remember { mutableStateOf<Page?>(null) }
-    val select by rememberUpdatedState(onSelect)
-    val width by animateDpAsState(if (open) 240.dp else RAIL, label = "rail")
-    // Follow focus like the old tabs did, but only once it rests, so passing over Live TV doesn't load the guide.
-    LaunchedEffect(hovered) { hovered?.let { delay(350); select(it) } }
-    Column(
-        Modifier
-            .fillMaxHeight()
-            .width(width)
-            .background(Brush.horizontalGradient(listOf(Tv.Panel, if (open) Tv.Panel else Tv.Bg)))
-            .onFocusChanged { open = it.hasFocus; onOpen(it.hasFocus); if (!it.hasFocus) hovered = null }
-            .focusProperties { enter = { requesters.getValue(page) } }
-            .focusGroup()
-            .padding(horizontal = 12.dp, vertical = 28.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        Box(Modifier.height(40.dp).padding(start = 12.dp), contentAlignment = Alignment.CenterStart) {
-            Text(if (open) "Family TV" else "TV", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Tv.Accent, maxLines = 1)
-        }
-        Spacer(Modifier.height(12.dp))
-        Page.entries.forEach { p ->
-            FocusBox(
-                onClick = { select(p) },
-                selected = p == page,
-                color = Color.Transparent,
-                onFocus = { hovered = p },
-                modifier = Modifier.fillMaxWidth().height(48.dp).focusRequester(requesters.getValue(p)),
-            ) { focused ->
-                Row(Modifier.fillMaxSize().padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(p.icon, contentDescription = p.label, tint = if (p == page && !focused) Tv.Accent else Tv.Text, modifier = Modifier.size(24.dp))
-                    if (open) {
-                        Spacer(Modifier.width(16.dp))
-                        Text(p.label, fontSize = 17.sp, maxLines = 1, fontWeight = if (p == page) FontWeight.Bold else FontWeight.Normal)
-                    }
-                }
-            }
-        }
-        if (open && nickname != null) {
-            Spacer(Modifier.weight(1f))
-            Text(nickname, color = Tv.Muted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 14.dp))
-        }
-    }
+    if (form.touch) TouchHome(vm, config, form) else GlassHome(vm, config)
 }
 
 // ---- Phone and tablet ----
@@ -636,7 +551,7 @@ fun PosterCard(
     val heart = touch && onFavourite != null
     Column(if (width != null) Modifier.width(width) else Modifier.fillMaxWidth()) {
         FocusBox(onClick = onClick, onLongClick = onMenu ?: onFavourite, onFocus = onFocus, outline = true, scale = FOCUS_SCALE, color = Tv.Raised, modifier = modifier.fillMaxWidth().aspectRatio(2f / 3f), contentAlignment = Alignment.Center) {
-            Text(name, Modifier.padding(8.dp), fontSize = 13.sp, maxLines = 4, color = Tv.Muted)
+            Text(name, Modifier.padding(8.dp), fontSize = 13.sp, maxLines = 4, color = MutedText)
             if (poster != null) {
                 if (logo) AsyncImage(poster, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize().padding(20.dp))
                 else AsyncImage(poster, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
@@ -650,11 +565,11 @@ fun PosterCard(
         }
         if (!touch && onTrailer != null) {
             Row(Modifier.padding(top = 4.dp).height(30.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 13.sp, color = Tv.Muted, modifier = Modifier.weight(1f))
+                Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 13.sp, color = MutedText, modifier = Modifier.weight(1f))
                 TrailerButton(onTrailer, compact = true)
             }
         } else {
-            Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 13.sp, color = Tv.Muted, modifier = Modifier.padding(top = 6.dp))
+            Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 13.sp, color = MutedText, modifier = Modifier.padding(top = 6.dp))
         }
     }
 }
@@ -689,7 +604,7 @@ fun visibleCategories(all: List<CategoryEntity>, profile: Profile?, mine: List<S
 fun adultCategories(all: List<CategoryEntity>, profile: Profile?, mine: List<String> = emptyList()): List<CategoryEntity> =
     arranged(all, profile, mine, ::isAdult)
 
-private fun isAdult(c: CategoryEntity) = ADULT.containsMatchIn(c.name)
+internal fun isAdult(c: CategoryEntity) = ADULT.containsMatchIn(c.name)
 
 private fun arranged(all: List<CategoryEntity>, profile: Profile?, mine: List<String>, keep: (CategoryEntity) -> Boolean): List<CategoryEntity> {
     val hidden = profile?.hiddenCategories.orEmpty().map { it.lowercase() }.toSet()
@@ -716,7 +631,7 @@ fun rememberProgrammes(channels: List<ChannelEntity>, from: Long = System.curren
 }
 
 @Composable
-fun EmptyState(text: String) = Centered { Text(text, fontSize = 18.sp, color = Tv.Muted) }
+fun EmptyState(text: String) = Centered { Text(text, fontSize = 18.sp, color = MutedText) }
 
 @Composable
 fun Logo(url: String?, sizeDp: Int) {

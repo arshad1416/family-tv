@@ -137,7 +137,7 @@ fun CategoriesScreen(vm: MainViewModel, profile: Profile) {
 private const val SPORTS_LABEL = "Sports"
 
 /** The live channels of the sports categories among [categories] (already filtered and ordered), by sport. */
-private suspend fun sportsChannels(dao: CatalogDao, categories: List<CategoryEntity>): Map<Sport, List<ChannelEntity>> {
+internal suspend fun sportsChannels(dao: CatalogDao, categories: List<CategoryEntity>): Map<Sport, List<ChannelEntity>> {
     val picked = categories.filter { Sport.isSportsCategory(it.name) }
     val channels = picked.groupBy { it.sourceId }.flatMap { (src, cats) ->
         cats.map { it.categoryId }.distinct().chunked(500).flatMap { dao.channelsIn(src, it) }
@@ -176,7 +176,7 @@ internal fun PinPrompt(profile: Profile, firstKey: Modifier? = null, onOk: () ->
     var pin by remember { mutableStateOf("") }
     var wrong by remember { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Enter the parental PIN", fontSize = 16.sp, color = Tv.Muted)
+        Text("Enter the parental PIN", fontSize = 16.sp, color = MutedText)
         Text(if (pin.isEmpty()) "PIN" else "•".repeat(pin.length), fontSize = 20.sp)
         listOf(listOf("1", "2", "3"), listOf("4", "5", "6"), listOf("7", "8", "9"), listOf("C", "0", "OK")).forEachIndexed { r, row ->
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

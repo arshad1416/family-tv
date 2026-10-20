@@ -84,6 +84,7 @@ import app.familytv.subs.SubtitleRequest
 import app.familytv.subs.SubtitleSearch
 import app.familytv.sync.PlaybackStatus
 import app.familytv.trakt.PlayItem
+import app.familytv.user.ChannelRef
 import app.familytv.user.ProgressKey
 import app.familytv.trakt.PlaybackTracker
 import app.familytv.usage.Usage
@@ -156,6 +157,8 @@ class PlayerController(
     private var profile: Profile? = null
     private var title = ""
     private var tunedAt = 0L
+    /** The channel [playChannel] last asked for, saved as the latest one once its picture starts. */
+    private var tuning: ChannelRef? = null
     private var retries = 0
     /** Movies and episodes: resume point and Trakt scrobbles. */
     private var tracker: PlaybackTracker? = null
@@ -254,6 +257,9 @@ class PlayerController(
                 if (state == Player.STATE_READY) {
                     overlay.takeIf { it.tag == "error" }?.let { it.visibility = TextView.GONE; it.tag = null }
                     playingSource()?.let { ServerSwitch.played(it.id) }
+                    val p = profile
+                    tuning?.let { if (p != null) app.lastChannels.played(p, it) }
+                    tuning = null
                 }
             }
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) { paused = !playWhenReady }
@@ -577,6 +583,7 @@ class PlayerController(
         retries = 0
         tunedAt = System.currentTimeMillis()
         title = "${ch.num}  ${ch.displayName}"
+        tuning = ChannelRef(ch.sourceId, ch.categoryId, ch.streamId)
         playing = index
         overlay.visibility = TextView.GONE
         overlay.tag = null
@@ -709,6 +716,11 @@ class PlayerController(
             KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_CHANNEL_UP -> zap(-1)
             KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_CHANNEL_DOWN -> zap(1)
             KeyEvent.KEYCODE_DPAD_RIGHT -> if (event.repeatCount == 0) openPanel(PlayerPanel.Menu)
+            // Like a remote's Last button. Left used to do nothing here; the Info panel keeps it.
+            KeyEvent.KEYCODE_DPAD_LEFT -> {
+                if (touch || host.docked || panel != null) return false
+                if (event.repeatCount == 0) previousChannel()
+            }
             in OK_KEYS -> if (event.repeatCount == 0) {
                 if (overlay.tag == "error") playChannel() else okPending = true
             }
@@ -914,6 +926,34 @@ class PlayerController(
             runCatching { ids.chunked(500).flatMap { app.db.catalog().programmes(it, now, now + 3 * 3_600_000L) }.groupBy { it.epgId } }
                 .onSuccess { programmes = it }
                 .onFailure { programmesAt = 0 }
+        }
+    }
+
+    /**
+     * Left: back to the channel that played before this one, in its own category, which Up and
+     * Down then zap through. With none (or it's gone, hidden or locked), just the info bar.
+     */
+    private fun previousChannel() {
+        val p = profile ?: return
+        val prev = app.lastChannels.previous(p) ?: return showBanner(index)
+        scope.launch {
+            val list: ListKey = prev.sourceId to prev.categoryId
+            val dao = app.db.catalog()
+            val list0 = when {
+                list == playingList -> channels
+                visibleCategories(dao.categoryList(Kind.LIVE), p, adultLive = adultOpen(p, app.adultUnlocked.value))
+                    .any { it.sourceId == prev.sourceId && it.categoryId == prev.categoryId } -> dao.channels(prev.sourceId, prev.categoryId).first()
+                else -> emptyList()
+            }
+            val i = list0.indexOfFirst { it.streamId == prev.streamId }
+            if (i < 0) return@launch showBanner(index)
+            if (list != playingList) {
+                channels = list0
+                playingList = list
+                programmesAt = 0
+            }
+            index = i
+            playChannel()
         }
     }
 
