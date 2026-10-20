@@ -281,7 +281,7 @@ internal fun GuideRow(
                 }
             } else {
                 Row(Modifier.width(d.chanW).fillMaxHeight().background(Tv.Panel, RoundedCornerShape(8.dp)).padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("${c.num}", Modifier.width(42.dp), fontSize = 14.sp, color = Tv.Muted)
+                    Text("${c.num}", Modifier.width(48.dp), fontSize = 14.sp, color = Tv.Muted, maxLines = 1, softWrap = false)
                     Logo(c.logo, 40)
                     Spacer(Modifier.width(10.dp))
                     Text(c.displayName, Modifier.weight(1f), fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -290,8 +290,9 @@ internal fun GuideRow(
             }
             Spacer(Modifier.width(4.dp))
             Box(Modifier.weight(1f).fillMaxHeight().horizontalScroll(scroll)) {
-                Box(Modifier.width(d.gridW).fillMaxHeight().nowLine(d, start, now, Tv.Accent)) {
-                    val cells = list.filter { minOf(it.stop, end) > maxOf(it.start, start) }
+                val cells = list.filter { minOf(it.stop, end) > maxOf(it.start, start) }
+                // No "now" line through a row that only says there's no guide.
+                Box(Modifier.width(d.gridW).fillMaxHeight().then(if (cells.isEmpty()) Modifier else Modifier.nowLine(d, start, now, Tv.Accent))) {
                     if (cells.isEmpty()) {
                         GuideCell(if (compact) c.displayName else "No guide information", if (compact) "No guide information" else null, 0.dp, d.slotW * 4, onAir = false, entryPoint(entry), { onFocus(null) }, onPlay, onFavourite)
                     }

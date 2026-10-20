@@ -49,7 +49,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
@@ -58,6 +58,8 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.SolidColor
@@ -234,13 +236,18 @@ fun Modifier.glass(shape: Shape): Modifier = glass(shape, Glass.Fill, Glass.Line
 internal fun GlassBackground(glow: Color, modifier: Modifier = Modifier, content: @Composable BoxScope.() -> Unit) {
     val p = LocalGlassPalette.current
     val top = lerp(p.top, glow, 0.16f)
-    Box(
-        modifier.fillMaxSize().drawBehind {
-            drawRect(Brush.radialGradient(0f to top, 0.45f to p.middle, 1f to p.bottom, center = Offset(size.width * 0.22f, 0f), radius = size.width * 1.1f))
-            drawRect(Brush.radialGradient(listOf(glow.copy(alpha = p.glow), glow.copy(alpha = p.glow / 3), Color.Transparent), center = Offset(size.width * 0.78f, size.height * 0.04f), radius = size.width * 0.42f))
-        },
-        content = content,
-    )
+    Box(modifier.fillMaxSize()) {
+        // Its own cached layer: focus moving or a preview playing above never repaints the two
+        // full-screen gradients (on the onn box every frame used to); only a glow or look change does.
+        Box(
+            Modifier.fillMaxSize().graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }.drawWithCache {
+                val base = Brush.radialGradient(0f to top, 0.45f to p.middle, 1f to p.bottom, center = Offset(size.width * 0.22f, 0f), radius = size.width * 1.1f)
+                val light = Brush.radialGradient(listOf(glow.copy(alpha = p.glow), glow.copy(alpha = p.glow / 3), Color.Transparent), center = Offset(size.width * 0.78f, size.height * 0.04f), radius = size.width * 0.42f)
+                onDrawBehind { drawRect(base); drawRect(light) }
+            },
+        )
+        content()
+    }
 }
 
 /** A rounded glass button or tab: a white pill with dark text when [selected], a white ring and 1.1x when focused. */

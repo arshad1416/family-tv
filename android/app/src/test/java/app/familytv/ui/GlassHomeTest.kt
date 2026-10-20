@@ -134,6 +134,8 @@ class GlassHomeTest {
         rule.onNodeWithText("Sports").performClick()
         waitFor("Hockey")
         waitFor("NHL Network")
+        // No guide, so nothing says it's live.
+        rule.onNodeWithText("LIVE").assertDoesNotExist()
     }
 
     @Test

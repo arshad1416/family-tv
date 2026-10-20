@@ -160,7 +160,8 @@ internal fun WeatherPanel(weather: GlassWeather, onClose: () -> Unit, modifier: 
             .padding(horizontal = 32.gx)
             .fillMaxWidth()
             .height(if (page == PanelPage.Main) 470.gx else 600.gx)
-            .background(p.middle.copy(alpha = 0.94f), shape)
+            // Solid: see-through, busy pages showed through the weather (TV test, Oct 20).
+            .background(p.middle, shape)
             .border(1.dp, Glass.Line, shape)
             .focusProperties {
                 onExit = {
