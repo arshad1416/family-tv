@@ -60,7 +60,7 @@ import kotlin.math.abs
 
 private val GUIDE_W = 440.dp
 
-private fun List<NowNext>?.nowAndNext(now: Long): Pair<NowNext?, NowNext?> {
+internal fun List<NowNext>?.nowAndNext(now: Long): Pair<NowNext?, NowNext?> {
     val upcoming = this.orEmpty().filter { it.stop > now }
     return upcoming.firstOrNull { it.start <= now } to upcoming.firstOrNull { it.start > now }
 }
@@ -79,6 +79,7 @@ fun LiveOverlay(
     onTune: (Int) -> Unit,
     onFocusChannel: (Int) -> Unit,
     touch: TouchControls? = null,
+    sleep: SleepTimer? = null,
 ) {
     Box(Modifier.fillMaxSize().safeDrawingPadding()) {
         // Touch: a tap on the video shows the controls (or closes the guide), and a swipe up or down
@@ -96,7 +97,8 @@ fun LiveOverlay(
         if (guideOpen) MiniGuide(channels, playing, programmes, onTune, onFocusChannel, focusPlaying = touch == null)
         // The info bar hides while the list is open (backlog item 25): beside it, it was squashed, and the list already shows what's on.
         if (!guideOpen) banner?.let { channels.getOrNull(it) }?.let { ch ->
-            InfoBanner(ch, programmes[ch.epgId], Modifier.align(Alignment.BottomStart), hint = if (touch == null) "→  Captions & info" else null)
+            // The quick row (backlog item 4): Right opens Options, where these three are first.
+            InfoBanner(ch, programmes[ch.epgId], Modifier.align(Alignment.BottomStart), hint = if (touch == null) "→  Audio · Subtitles · Sleep timer" else null, sleep = sleep)
         }
         if (touch != null && touch.visible && !guideOpen) {
             RoundIcon(Icons.AutoMirrored.Filled.ArrowBack, "Close player", Modifier.align(Alignment.TopStart).padding(16.dp), touch.onClose)
@@ -138,7 +140,7 @@ fun RoundIcon(icon: ImageVector, label: String, modifier: Modifier = Modifier, o
 }
 
 @Composable
-private fun InfoBanner(ch: ChannelEntity, progs: List<NowNext>?, modifier: Modifier, hint: String? = null) {
+private fun InfoBanner(ch: ChannelEntity, progs: List<NowNext>?, modifier: Modifier, hint: String? = null, sleep: SleepTimer? = null) {
     val now = System.currentTimeMillis()
     val (cur, next) = progs.nowAndNext(now)
     // The current programme's episode, genre and description, from the guide.
@@ -167,6 +169,7 @@ private fun InfoBanner(ch: ChannelEntity, progs: List<NowNext>?, modifier: Modif
             Column(Modifier.padding(start = 24.dp), horizontalAlignment = Alignment.End) {
                 Text(time(now), fontSize = 22.sp, color = Tv.Muted)
                 hint?.let { Text(it, fontSize = 13.sp, color = Tv.Muted, modifier = Modifier.padding(top = 6.dp)) }
+                sleep?.let { Text("Sleep timer: ${sleepSummary(it).replaceFirstChar { c -> c.lowercase() }}", fontSize = 13.sp, color = Tv.Accent, modifier = Modifier.padding(top = 4.dp)) }
             }
         }
     }

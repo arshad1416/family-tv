@@ -64,7 +64,7 @@ import kotlinx.coroutines.delay
 import java.util.Locale
 
 /** The player's side panels. Menu is the TV entry point (D-pad right / Menu key) to the other three. */
-enum class PlayerPanel { Menu, Captions, Tracks, Info }
+enum class PlayerPanel { Menu, Captions, Tracks, Info, Sleep }
 
 private val PanelBg = Color(0xF2060A14)
 
@@ -85,6 +85,8 @@ fun PlayerPanels(
     stats: () -> StreamStats,
     onOpen: (PlayerPanel) -> Unit,
     onClose: () -> Unit,
+    sleep: SleepTimer? = null,
+    onSleep: (SleepTimer.Choice?) -> Unit = {},
 ) {
     if (panel == null) return
     BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -116,7 +118,8 @@ fun PlayerPanels(
                     }
                     LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp), contentPadding = PaddingValues(bottom = 32.dp)) {
                         when (panel) {
-                            PlayerPanel.Menu -> menuRows(tracks, aspect, stats, first, onOpen)
+                            PlayerPanel.Menu -> menuRows(tracks, aspect, stats, sleep, first, onOpen)
+                            PlayerPanel.Sleep -> sleepRows(sleep, first) { onSleep(it); onClose() }
                             PlayerPanel.Captions -> captionRows(tracks, online, live, first, onClose)
                             PlayerPanel.Tracks -> trackRows(tracks, aspect, onAspect, first)
                             else -> Unit
@@ -133,6 +136,7 @@ private fun panelTitle(p: PlayerPanel) = when (p) {
     PlayerPanel.Captions -> "Captions"
     PlayerPanel.Tracks -> "Picture & sound"
     PlayerPanel.Info -> "Stream info"
+    PlayerPanel.Sleep -> "Sleep timer"
 }
 
 @Composable
@@ -161,13 +165,27 @@ private fun LazyListScope.note(key: String, text: String) = item(key = key) {
     Text(text, fontSize = 13.sp, color = Tv.Muted, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
 }
 
-private fun LazyListScope.menuRows(tracks: PlayerTracks, aspect: Aspect, stats: () -> StreamStats, first: FocusRequester, onOpen: (PlayerPanel) -> Unit) {
+private fun LazyListScope.menuRows(tracks: PlayerTracks, aspect: Aspect, stats: () -> StreamStats, sleep: SleepTimer?, first: FocusRequester, onOpen: (PlayerPanel) -> Unit) {
     item(key = "cc") { PanelRow("Captions", tracks.captionSummary(), focus = first) { onOpen(PlayerPanel.Captions) } }
     item(key = "tracks") {
         val counts = if (tracks.hasChoices) " · ${tracks.audio.size} audio · ${tracks.video.size} video" else ""
         PanelRow("Picture & sound", "Picture: ${aspect.label}$counts") { onOpen(PlayerPanel.Tracks) }
     }
+    item(key = "sleep") { PanelRow("Sleep timer", sleepSummary(sleep)) { onOpen(PlayerPanel.Sleep) } }
     item(key = "info") { PanelRow("Stream info", StreamInfo.summary(stats()) ?: "Codec, resolution, bitrate") { onOpen(PlayerPanel.Info) } }
+}
+
+/** "Off", or "Stops at 10:45 PM". */
+internal fun sleepSummary(sleep: SleepTimer?): String = sleep?.let { "Stops at ${time(it.at)}" } ?: "Off"
+
+/** Off, the four lengths and End of programme; picking one starts it from now and closes the panel. */
+private fun LazyListScope.sleepRows(sleep: SleepTimer?, first: FocusRequester, onPick: (SleepTimer.Choice?) -> Unit) {
+    item(key = "off") { PanelRow("Off", selected = sleep == null, focus = first) { onPick(null) } }
+    SleepTimer.Choice.entries.forEach { c ->
+        item(key = c.name) {
+            PanelRow(c.label, subtitle = if (sleep?.choice == c) sleepSummary(sleep) else null, selected = sleep?.choice == c) { onPick(c) }
+        }
+    }
 }
 
 private fun LazyListScope.captionRows(tracks: PlayerTracks, online: OnlineSubtitles?, live: Boolean, first: FocusRequester, onClose: () -> Unit) {

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The player's seek bar on TVs (backlog item 24): a thicker bar and a large scrubber, readable from the sofa.
+     These override media3's own private dimens (exo_styled_progress_*): if a media3 update renames them, the bar
+     just falls back to its normal size. -->
+<resources xmlns:tools="http://schemas.android.com/tools" tools:ignore="MissingDefaultResource,PrivateResource,UnusedResources">
+    <dimen name="exo_styled_progress_bar_height">6dp</dimen>
+    <dimen name="exo_styled_progress_enabled_thumb_size">18dp</dimen>
+    <dimen name="exo_styled_progress_dragged_thumb_size">26dp</dimen>
+</resources>
