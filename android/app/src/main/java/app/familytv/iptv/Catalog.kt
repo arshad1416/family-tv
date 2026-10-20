@@ -77,13 +77,14 @@ class Catalog(private val db: AppDb) {
                 errors += "${s.name}: ${e.message}"
             }
         }
+        // The lists alone (the extra guides load after); the Rust app measures the same span.
+        if (profile.sources.isNotEmpty() && errors.size < profile.sources.size) Perf.listLoaded(SystemClock.elapsedRealtime() - began)
         t.startSource(profile.sources.size)
         loadExtraGuides(profile, extras, t)
         onProgress(Progress("Finishing", 1f))
         val now = System.currentTimeMillis()
         dao.pruneProgrammes(before = now - 2 * HOUR, after = now + GUIDE_HOURS * HOUR)
         if (errors.isNotEmpty() && errors.size == profile.sources.size) throw IOException(errors.joinToString("; "))
-        if (profile.sources.isNotEmpty()) Perf.listLoaded(SystemClock.elapsedRealtime() - began)
     }
 
     /**

@@ -24,8 +24,16 @@ class PerfTest {
         // An hour of watching later, the old minute still counts: the window is browsing minutes, not the clock.
         repeat(30) { w.add(t0 + 60 * minute, isSlow = true) }
         assertEquals("39 of 120", 32.5, w.pct()!!, 0.0)
-        for (i in 1..9) w.add(t0 + (60 + i) * minute, isSlow = false)
-        assertEquals("the first minute has dropped out: 39 - 9 slow of 129 - 90", 76.9, w.pct()!!, 0.0)
+        for (i in 1..30) w.add(t0 + (70 + i) * minute, isSlow = false)
+        assertNull("the last ten browsing minutes hold too few frames", w.pct())
+    }
+
+    @Test fun tooFewFramesSaysNothing() {
+        val w = FrameWindow()
+        repeat(FrameWindow.MIN_FRAMES - 1) { w.add(t0, isSlow = true) }
+        assertNull(w.pct())
+        w.add(t0, isSlow = false)
+        assertEquals(98.3, w.pct()!!, 0.0)
     }
 
     @Test fun theHeartbeatCarriesNumbersOnly() {

@@ -37,7 +37,7 @@ object Perf {
     /** Process start to the first frame of the home screen with its rows filled, on the last cold start. */
     @Volatile var coldStartMs: Long? = null
         private set
-    /** The last full list refresh that succeeded, from its start to saved (and searchable). */
+    /** The last list refresh where one or more sources loaded: channels, movies and series saved (and searchable), not the extra guides. */
     @Volatile var listLoadMs: Long? = null
     @Volatile private var pssPeakKb = 0L
     /** The app's own pages are showing (not the startup video, loading, pairing or full-screen video). */
@@ -74,7 +74,7 @@ object Perf {
         prefs?.edit()?.putLong("coldStartMs", ms)?.apply()
     }
 
-    /** A full list refresh succeeded after [ms]; memory is sampled then too. */
+    /** The lists loaded in [ms]; memory is sampled then too. */
     fun listLoaded(ms: Long) {
         listLoadMs = ms
         samplePssKb()
@@ -125,9 +125,11 @@ internal class FrameWindow(private val minutes: Int = 10) {
         buckets.last().apply { total++; if (isSlow) slow++ }
     }
 
-    /** Percent, one decimal; null before any browsing frame. */
+    companion object { const val MIN_FRAMES = 60 }
+
+    /** Percent, one decimal; null until there are [MIN_FRAMES] frames to judge. */
     @Synchronized fun pct(): Double? {
         val t = buckets.sumOf { it.total }
-        return if (t == 0) null else (buckets.sumOf { it.slow } * 1000.0 / t).roundToLong() / 10.0
+        return if (t < MIN_FRAMES) null else (buckets.sumOf { it.slow } * 1000.0 / t).roundToLong() / 10.0
     }
 }
