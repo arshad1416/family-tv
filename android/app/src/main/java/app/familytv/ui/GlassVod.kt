@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.LazyGridState
@@ -67,6 +68,7 @@ import app.familytv.data.SearchText
 import app.familytv.data.displayName
 import app.familytv.data.searchMovies
 import app.familytv.data.searchSeries
+import app.familytv.iptv.SeriesTitles
 import app.familytv.perf.Perf
 import app.familytv.portal.Profile
 import app.familytv.sync.PlaybackStatus
@@ -120,20 +122,25 @@ internal fun rememberVodMarks(profile: Profile): VodMarks {
     )
 }
 
-/** A poster: a film opens its page, a show its seasons; hold OK (or Menu) for the menu or favourite. */
+/**
+ * A poster: a film opens its page, a show its seasons; hold OK (or Menu) for the menu or favourite.
+ * In Continue watching ([continuing]) it shows the full title and the time left ([caption] for a show).
+ */
 @Composable
-internal fun VodCard(item: VodItem, marks: VodMarks, modifier: Modifier, width: Dp?, bar: Float = 0f, onOpen: () -> Unit = {}) {
+internal fun VodCard(item: VodItem, marks: VodMarks, modifier: Modifier, width: Dp?, bar: Float = 0f, continuing: Boolean = false, caption: String? = null, onOpen: () -> Unit = {}) {
     val ctx = LocalContext.current
     val nav = LocalSeriesNav.current
     when (item) {
-        is VodItem.Movie -> MovieCard(item.g, modifier, width, marks.profile, marks.movieKeys, marks.favKeys, marks.progress, onOpen = onOpen)
+        is VodItem.Movie -> MovieCard(item.g, modifier, width, marks.profile, marks.movieKeys, marks.favKeys, marks.progress, onOpen = onOpen, continuing = continuing)
         is VodItem.Show -> {
             val g = item.g
             val on = marks.showFavs.has(g)
+            val badge = remember(g) { SeriesTitles.qualityBadge(g.copies.map { it.name }) }
             PosterCard(
                 g.title, g.poster, modifier, width = width,
                 favourite = on, onFavourite = { toggleShowFavourite(ctx, g, on) },
                 progress = bar, newBadge = g.hasNew(marks.newKeys), newCount = g.newCount(marks.newKeys),
+                badge = badge, caption = caption, fullName = continuing,
             ) { onOpen(); nav?.open = g }
         }
     }
@@ -202,24 +209,35 @@ private fun VodHome(
     val favs = rememberFavourites()
     val shelves: Map<String, List<VodItem>>
     var bars = emptyMap<Pair<String, String>, Float>()
+    var lefts = emptyMap<Pair<String, String>, String>()
     if (movies) {
         shelves = rememberMovieShelves(movieCats, rememberFavouriteMovies(favs, movieCats), marks.progress).associate { (t, l) -> t to l.map { VodItem.Movie(it) } }
     } else {
         val newShows = rememberNewEpisodeShows(marks.newKeys, seriesCats)
         val watching = remember(marks.progress) { ProgressRules.continueWatching(marks.progress.values, ProgressKey.EPISODE) }
         bars = remember(watching) { watching.associate { (it.sourceId to it.itemId) to ProgressRules.bar(it) } }
+        // "S2 E5 · 12 min left": the episode it picks up on, and how much of it is left.
+        lefts = remember(watching) {
+            watching.associate { p -> (p.sourceId to p.itemId) to listOfNotNull("S${p.season} E${p.episode}".takeIf { p.season > 0 }, ProgressRules.timeLeft(p)).joinToString("  ·  ") }
+        }
         shelves = rememberSeriesShelves(seriesCats, newShows, rememberFavouriteSeries(favs, seriesCats), watching).associate { (t, l) -> t to l.map { VodItem.Show(it) } }
     }
     fun barOf(item: VodItem, shelf: String) =
         if (shelf == CONTINUE_WATCHING && item is VodItem.Show) item.g.copies.firstNotNullOfOrNull { bars[it.sourceId to it.seriesId] } ?: 0f else 0f
+    fun leftOf(item: VodItem, shelf: String) =
+        if (shelf == CONTINUE_WATCHING && item is VodItem.Show) item.g.copies.firstNotNullOfOrNull { lefts[it.sourceId to it.seriesId] }?.ifEmpty { null } else null
 
     val newest = if (movies) "Recently added" else "New episodes"
     val featured = shelves[CONTINUE_WATCHING]?.firstOrNull()?.let { it to CONTINUE_WATCHING }
         ?: shelves[newest]?.firstOrNull()?.let { it to newest }
         ?: shelves["Top rated"]?.firstOrNull()?.let { it to "Top rated" }
+    // Continue watching is the first row under the highlights; Favourites comes after the browsing rows.
     val rows = listOf(CONTINUE_WATCHING, "Favourites").mapNotNull { t -> shelves[t]?.let { t to it } }
     val providers = remember(movieCats, seriesCats) { Provider.entries.filter { p -> movieCats.any { p.matches(it.name) } || seriesCats.any { p.matches(it.name) } } }
-    val languages = remember(movieCats, seriesCats) { LanguageGroup.entries.filter { g -> movieCats.any { g.matches(it.name) } || seriesCats.any { g.matches(it.name) } } }
+    val groups = remember(movieCats, seriesCats) { LanguageGroup.entries.filter { g -> movieCats.any { g.matches(it.name) } || seriesCats.any { g.matches(it.name) } } }
+    val (regions, languages) = groups.partition { it.region }
+    // The category chip wall starts folded away behind "Show all categories".
+    var allCats by rememberSaveable(kind) { mutableStateOf<Boolean?>(null) }
     val ctx = LocalContext.current
     val all by remember(kind) { ctx.app.db.catalog().categories(kind) }.collectAsState(initial = emptyList())
     val mine by ctx.app.myCategoryOrder.order.collectAsState()
@@ -232,7 +250,7 @@ private fun VodHome(
         if (shelves[newest] != null) add("newest")
         if (shelves["Top rated"] != null) add("top")
         providers.forEach { add("provider/${it.name}") }
-        languages.forEach { add("language/${it.name}") }
+        groups.forEach { add("language/${it.name}") }
         cats.forEach { add("cat/${it.chipKey}") }
         if (hasAdult) add("adult")
     }
@@ -241,6 +259,16 @@ private fun VodHome(
         back != null -> rows.firstNotNullOfOrNull { (t, l) -> l.firstOrNull { it.group == back }?.let { "shelf/$t/${it.key}" } } ?: homeKeys.firstOrNull()
         opened != null && opened in homeKeys -> opened
         else -> homeKeys.firstOrNull()
+    }
+    // Until it's toggled, the chips are open only when coming back from a category page, so focus can land on its chip.
+    val catsOpen = allCats ?: (target?.startsWith("cat/") == true || target == "adult")
+
+    fun LazyListScope.shelf(title: String, items: List<VodItem>) = item("shelf/$title") {
+        GlassShelf(title) {
+            items(items, key = { it.key }) { x ->
+                VodCard(x, marks, entryPoint(target == "shelf/$title/${x.key}"), POSTER_W, barOf(x, title), continuing = title == CONTINUE_WATCHING, caption = leftOf(x, title))
+            }
+        }
     }
 
     LazyColumn(state = list, verticalArrangement = Arrangement.spacedBy(22.gx), contentPadding = PaddingValues(bottom = 40.dp)) {
@@ -260,37 +288,37 @@ private fun VodHome(
                 shelves["Top rated"]?.let { l -> HeroCard("Top rated", null, l.first().poster, HERO_TOP, 1f, entryPoint(target == "top")) { open("top") } }
             }
         }
+        rows.filter { it.first == CONTINUE_WATCHING }.forEach { (title, items) -> shelf(title, items) }
         if (providers.isNotEmpty()) item("providers") {
             Column(verticalArrangement = Arrangement.spacedBy(10.gx)) {
                 GlassHeading("Providers", Modifier.padding(start = FOCUS_ROOM))
                 ProvidersShelf(providers, target) { open("provider/${it.name}") }
             }
         }
-        if (languages.isNotEmpty()) item("languages") {
-            Column(verticalArrangement = Arrangement.spacedBy(10.gx)) {
-                GlassHeading("By language and country", Modifier.padding(start = FOCUS_ROOM))
-                PillRow {
-                    items(languages, key = { it.name }) { g ->
-                        BigPill(g.label, entryPoint(target == "language/${g.name}")) { open("language/${g.name}") }
+        // Languages and regions are separate rows (backlog item 26).
+        listOf("Languages" to languages, "Regions" to regions).forEach { (heading, pills) ->
+            if (pills.isNotEmpty()) item(heading) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.gx)) {
+                    GlassHeading(heading, Modifier.padding(start = FOCUS_ROOM))
+                    PillRow {
+                        items(pills, key = { it.name }) { g ->
+                            BigPill(g.label, entryPoint(target == "language/${g.name}")) { open("language/${g.name}") }
+                        }
                     }
                 }
             }
         }
-        rows.forEach { (title, items) ->
-            item("shelf/$title") {
-                GlassShelf(title) {
-                    items(items, key = { it.key }) { x ->
-                        VodCard(x, marks, entryPoint(target == "shelf/$title/${x.key}"), POSTER_W, barOf(x, title))
-                    }
-                }
-            }
-        }
+        rows.filter { it.first != CONTINUE_WATCHING }.forEach { (title, items) -> shelf(title, items) }
         if (cats.isNotEmpty()) item("categories") {
             Column(Modifier.padding(horizontal = FOCUS_ROOM), verticalArrangement = Arrangement.spacedBy(10.gx)) {
                 GlassHeading("All categories")
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(10.gx), verticalArrangement = Arrangement.spacedBy(10.gx)) {
-                    cats.forEach { c -> BigPill(c.displayName, entryPoint(target == "cat/${c.chipKey}")) { open("cat/${c.chipKey}") } }
-                    if (hasAdult) BigPill(ADULT_CONTENT, entryPoint(target == "adult"), lock = true) { open("adult") }
+                    // The toggle stays put, so focus never drops when the chips open or close.
+                    BigPill(if (catsOpen) "Hide categories" else "Show all categories (${cats.size + if (hasAdult) 1 else 0})") { allCats = !catsOpen }
+                    if (catsOpen) {
+                        cats.forEach { c -> BigPill(c.displayName, entryPoint(target == "cat/${c.chipKey}")) { open("cat/${c.chipKey}") } }
+                        if (hasAdult) BigPill(ADULT_CONTENT, entryPoint(target == "adult"), lock = true) { open("adult") }
+                    }
                 }
             }
         }

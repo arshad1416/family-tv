@@ -1,6 +1,7 @@
 package app.familytv.trakt
 
 import app.familytv.user.ProgressEntity
+import kotlin.math.roundToLong
 
 /** When something counts as watched and where to pick it up again. Pure, unit tested. */
 object ProgressRules {
@@ -32,6 +33,17 @@ object ProgressRules {
 
     /** Part-watched, so Play reads Resume: a progress bar, or a saved spot on a stream with no known length. */
     fun started(p: ProgressEntity?): Boolean = bar(p) > 0f || (p != null && p.durationMs <= 0 && resumeAt(p, 0) != null)
+
+    /** "42 min left" or "1 h 5 min left" for a started, unwatched title of known length; null otherwise. */
+    fun timeLeft(p: ProgressEntity?): String? {
+        if (p == null || p.durationMs <= 0 || bar(p) <= 0f) return null
+        val left = (p.durationMs * (100.0 - p.percent) / 100.0 / 60_000).roundToLong().coerceAtLeast(1)
+        return when {
+            left < 60 -> "$left min left"
+            left % 60 == 0L -> "${left / 60} h left"
+            else -> "${left / 60} h ${left % 60} min left"
+        }
+    }
 
     /** Fraction for the progress line on a poster or episode (0 when there is none to show). */
     fun bar(p: ProgressEntity?): Float = if (p == null || isWatched(p.percent)) 0f else (p.percent / 100f).coerceIn(0f, 1f)

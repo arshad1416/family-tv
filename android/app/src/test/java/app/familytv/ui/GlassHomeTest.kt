@@ -8,6 +8,7 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsNotFocused
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.hasScrollToNodeAction
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isFocused
@@ -16,6 +17,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.requestFocus
@@ -34,6 +36,8 @@ import app.familytv.portal.Profile
 import app.familytv.portal.Source
 import app.familytv.user.Appearance
 import app.familytv.user.ChannelRef
+import app.familytv.user.ProgressEntity
+import app.familytv.user.ProgressKey
 import app.familytv.weather.WeatherTest
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -102,10 +106,33 @@ class GlassHomeTest {
     fun opensOnMoviesWithItsShelves() {
         home()
         waitFor("Search movies")
-        waitFor("By language and country")
+        waitFor("Languages")
         waitFor("English")
         waitFor("Recently added")
         waitFor("Top rated")
+    }
+
+    @Test
+    fun continueWatchingLeadsWithTimeLeftAndCategoriesStartFolded() = runBlocking {
+        app.userDb.user().upsertProgress(
+            ProgressEntity(ProgressKey.movie("s", "1001"), ProgressKey.MOVIE, "s", "1001", positionMs = 3_000_000, durationMs = 6_000_000, percent = 50f, updatedAt = 1),
+        )
+        home()
+        waitFor("Continue watching")
+        waitFor("50 min left")
+        // Directly under the highlights, above Providers.
+        val cw = rule.onNodeWithText("Continue watching").fetchSemanticsNode().boundsInRoot
+        val providers = rule.onAllNodes(hasText("Providers")).fetchSemanticsNodes()
+        providers.forEach { assertTrue("Continue watching $cw above Providers ${it.boundsInRoot}", cw.top < it.boundsInRoot.top) }
+        // The category chips wait behind one pill.
+        val page = rule.onAllNodes(hasScrollToNodeAction()).fetchSemanticsNodes().indices.maxBy {
+            rule.onAllNodes(hasScrollToNodeAction())[it].fetchSemanticsNode().boundsInRoot.height
+        }
+        rule.onAllNodes(hasScrollToNodeAction())[page].performScrollToNode(hasText("Show all categories (2)"))
+        rule.onNodeWithText("EN - ACTION").assertDoesNotExist()
+        rule.onNodeWithText("Show all categories (2)").performClick()
+        waitFor("EN - ACTION")
+        waitFor("Hide categories")
     }
 
     @Test

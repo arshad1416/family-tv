@@ -84,7 +84,8 @@ suspend fun playMovie(ctx: Context, profile: Profile, group: MovieGroup, visible
 
 /**
  * A movie poster: OK opens its details page (or plays it, outside a [SeriesNav.Host]), hold OK
- * (or Menu) opens its menu, and it carries the Trailer button.
+ * (or Menu) opens its menu; on touch it carries the Trailer button, on TV a 4K/HDR badge. In
+ * Continue watching ([continuing]) it shows the full title and the time left.
  */
 @Composable
 internal fun MovieCard(
@@ -95,6 +96,7 @@ internal fun MovieCard(
     visible: Set<Pair<String, String>>,
     favKeys: Set<String>,
     progress: Map<String, ProgressEntity>,
+    continuing: Boolean = false,
     onOpen: () -> Unit = {},
     onFocus: () -> Unit = {},
 ) {
@@ -103,6 +105,7 @@ internal fun MovieCard(
     val menus = LocalItemMenus.current
     val scope = rememberCoroutineScope()
     val shown = remember(g) { pickCopy(ctx, g.copies, emptyMap()) }
+    val badge = remember(g) { SeriesTitles.qualityBadge(g.copies.map { it.name }) }
     val p = g.progressIn(progress)
     PosterCard(
         g.title, g.poster, modifier, width = width,
@@ -112,6 +115,7 @@ internal fun MovieCard(
         onTrailer = movieTrailerAction(profile, shown),
         onMenu = { scope.launch { menus.open = movieMenu(ctx, profile, g, ctx.app.db.allCopies(g, visible), favKeys, progress, scope) } },
         onFocus = onFocus,
+        badge = badge, caption = if (continuing) ProgressRules.timeLeft(p) else null, fullName = continuing,
     ) {
         onOpen()
         if (nav != null) nav.movie = g to visible else scope.launch { playMovie(ctx, profile, g, visible, progress) }

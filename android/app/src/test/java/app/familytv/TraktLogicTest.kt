@@ -149,6 +149,19 @@ class ProgressRulesTest {
         ProgressEntity("k", "movie", "s", "1", positionMs = positionMs, percent = percent, watched = watched)
 
     @Test
+    fun timeLeftIsInMinutesOrHours() {
+        fun row(percent: Float, duration: Long) = ProgressEntity("m/s/1", "movie", "s", "1", durationMs = duration, percent = percent)
+        assertEquals("50 min left", ProgressRules.timeLeft(row(50f, 6_000_000)))
+        assertEquals("1 h 5 min left", ProgressRules.timeLeft(row(50f, 7_800_000)))
+        assertEquals("2 h left", ProgressRules.timeLeft(row(20f, 9_000_000)))
+        assertEquals("1 min left", ProgressRules.timeLeft(row(79.9f, 60_000)))
+        // Unknown length, not started, or watched: nothing to say.
+        assertNull(ProgressRules.timeLeft(row(50f, 0)))
+        assertNull(ProgressRules.timeLeft(row(0f, 6_000_000)))
+        assertNull(ProgressRules.timeLeft(row(90f, 6_000_000)))
+    }
+
+    @Test
     fun percentAndWatchedLine() {
         assertEquals(50f, ProgressRules.percent(30_000, 60_000), 0.001f)
         assertEquals(0f, ProgressRules.percent(30_000, 0), 0.001f)
