@@ -49,6 +49,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
@@ -315,7 +316,14 @@ private fun GlassTopBar(
     onViewers: (() -> Unit)?,
 ) {
     val apps = !settings && (tab == GlassTab.Movies || tab == GlassTab.Series)
-    Column(Modifier.fillMaxWidth().onFocusChanged { onFocused(it.hasFocus) }, verticalArrangement = Arrangement.spacedBy(12.gx)) {
+    val home = if (settings) settingsFocus else tabFocus.getValue(tab)
+    // Up from the page always lands on the chosen tab (or Settings), never on whatever sits nearest above.
+    Column(
+        Modifier.fillMaxWidth().onFocusChanged { onFocused(it.hasFocus) }
+            .focusProperties { onEnter = { if (requestedFocusDirection == FocusDirection.Up) runCatching { home.requestFocus() } } }
+            .focusGroup(),
+        verticalArrangement = Arrangement.spacedBy(12.gx),
+    ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(if (settings) "Settings" else tab.label, fontSize = 40.gsp, fontWeight = FontWeight.Bold, maxLines = 1)
             Spacer(Modifier.weight(1f))
@@ -323,7 +331,8 @@ private fun GlassTopBar(
                 if (apps) AppButtons()
                 Box(Modifier.padding(horizontal = 6.gx)) { GlassClock() }
                 AppearanceSwitch(appearance, onAppearance)
-                SettingsButton(settings, settingsFocus, onSettings)
+                // Nothing is right of Settings, so Right steps down to the tabs instead of sticking.
+                SettingsButton(settings, settingsFocus, onSettings, Modifier.focusProperties { right = home })
             }
         }
         Row(verticalAlignment = Alignment.CenterVertically) {

@@ -37,9 +37,15 @@ class SeriesTitlesTest {
         assertEquals("Dune", title("4K-TOP - Dune"))
         assertEquals(listOf("4K"), SeriesTitles.parse("4K-TOP - Dune").tags)
         assertEquals("Oppenheimer", title("NEW-4K - Oppenheimer"))
-        // Alone they are part of the name.
-        assertEquals("TOP - Gun", title("TOP - Gun"))
+        // Alone in capitals before a separator they are a tag too.
+        assertEquals("The Mandalorian", title("TOP - The Mandalorian"))
+        assertEquals("The Bear", title("NEW | The Bear"))
+        assertEquals("Shogun", title("VIP: Shogun"))
+        // Otherwise they are part of the name.
+        assertEquals("Top - Gun", title("Top - Gun"))
         assertEquals("New - Girl", title("New - Girl"))
+        assertEquals("Top Gun", title("Top Gun"))
+        assertEquals("Kung Fu Panda HOT", title("Kung Fu Panda HOT"))
     }
 
     @Test
