@@ -30,7 +30,7 @@ Every approved provider has its own add-on id.
 | Debug-only reference companion with synthetic public-domain data (`src/debug/.../ReferenceSourceProvider.kt`) | IMPLEMENTED |
 | Contract tests (`ConnectorContractTest`, `SourceConnectorTest`) run in the Android CI job | IMPLEMENTED |
 | Source picker screen and handing the resolved source to the player | PROPOSED |
-| Rust host: its Java shell binds the same AIDL and bridges to Rust over JNI | PROPOSED |
+| Rust host (`app.familytv.rust`): its Java shell binds the same AIDL and bridges to Rust over JNI. The AIDL and its adapter are mirrored, but nothing in the app calls the adapter yet (there is no JNI path), so R8 strips it from release builds | PROPOSED |
 | Contract test in the Rust host's CI | PROPOSED |
 | Portal-signed entitlement token in `hello`, so a provider can check the add-on with the portal itself | PROPOSED |
 | An approved provider | None yet |
@@ -95,6 +95,10 @@ How the calls behave:
   any late answer.
 - **Where answers arrive.** The host's suspend functions resume on the caller's dispatcher, so a
   screen that calls them from the main thread gets its answer there.
+- **The Rust host behaves the same way, in Java's terms.** Its adapter takes a listener and
+  delivers each answer on the main Looper, where Kotlin's suspend functions would resume. The
+  caller supplies the gate, which is the same add-on check plus the profile and PIN checks, and it
+  runs at the same three points. To a provider the two hosts look the same.
 
 ### Bundles
 
@@ -176,8 +180,12 @@ At least one of `tmdb`, `imdb` or `tvdb` is set.
 
 **What the provider must do** (PROPOSED for each companion):
 
-- Check the caller on every call: `Binder.getCallingUid()` must belong to package `app.familytv` and
-  be signed with Family TV's release certificate. Arshad gives that SHA-256 to an approved provider.
+- Check the caller on every call. `Binder.getCallingUid()` must belong to one of Family TV's two
+  host packages, each pinned to its own release certificate:
+  - `app.familytv`, the Kotlin app
+  - `app.familytv.rust`, the Rust app
+
+  Arshad gives both SHA-256s to an approved provider. Any other caller gets `NOT_ENTITLED`.
 - Keep its own credentials to itself. The handoff contains only what the player needs, and a resolved
   uri should expire soon after it is used.
 - Answer every request exactly once and off the binder thread.
