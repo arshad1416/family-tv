@@ -44,4 +44,27 @@ class LastChannelsTest {
         assertEquals(news, again.previous(home))
         assertNull(again.previous(other))
     }
+
+    @Test
+    fun recentKeepsTheLastEightNewestFirst() {
+        val last = LastChannels(prefs)
+        val all = (1..10).map { ChannelRef("a", "1", "$it") }
+        all.forEach { last.played(home, it) }
+        assertEquals(all.takeLast(8).reversed(), last.recent(home))
+        // Playing an older one again moves it to the front without a duplicate.
+        last.played(home, all[5])
+        assertEquals(listOf(all[5], all[9], all[8], all[7], all[6], all[4], all[3], all[2]), last.recent(home))
+        assertEquals(all[9], last.previous(home))
+        assertEquals(emptyList<ChannelRef>(), last.recent(other))
+    }
+
+    @Test
+    fun olderBuildsTwoChannelsCarryOver() {
+        prefs.edit().putString("a/now", "a\u001f2\u001f200").putString("a/before", "a\u001f1\u001f100").commit()
+        val last = LastChannels(prefs)
+        assertEquals(listOf(sports, news), last.recent(home))
+        assertEquals(news, last.previous(home))
+        last.played(home, ChannelRef("a", "3", "300"))
+        assertEquals(listOf(ChannelRef("a", "3", "300"), sports, news), last.recent(home))
+    }
 }

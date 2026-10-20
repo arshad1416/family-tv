@@ -94,9 +94,9 @@ fun LiveOverlay(
                 .clickable(remember { MutableInteractionSource() }, indication = null, onClick = touch.onTap),
         )
         if (guideOpen) MiniGuide(channels, playing, programmes, onTune, onFocusChannel, focusPlaying = touch == null)
-        // A phone has no room for the banner beside the guide; the guide already shows what's on.
-        if (!(guideOpen && touch != null)) banner?.let { channels.getOrNull(it) }?.let { ch ->
-            InfoBanner(ch, programmes[ch.epgId], Modifier.align(Alignment.BottomStart).padding(start = if (guideOpen) GUIDE_W else 0.dp), hint = if (touch == null && !guideOpen) "→  Captions & info" else null)
+        // The info bar hides while the list is open (backlog item 25): beside it, it was squashed, and the list already shows what's on.
+        if (!guideOpen) banner?.let { channels.getOrNull(it) }?.let { ch ->
+            InfoBanner(ch, programmes[ch.epgId], Modifier.align(Alignment.BottomStart), hint = if (touch == null) "→  Captions & info" else null)
         }
         if (touch != null && touch.visible && !guideOpen) {
             RoundIcon(Icons.AutoMirrored.Filled.ArrowBack, "Close player", Modifier.align(Alignment.TopStart).padding(16.dp), touch.onClose)
@@ -199,7 +199,10 @@ private fun MiniGuide(channels: List<ChannelEntity>, playing: Int, programmes: M
                         Logo(c.logo, 40)
                         Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
-                            Text(c.displayName, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(c.displayName, Modifier.weight(1f, fill = false), fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                if (i == playing) PlayingTag(Modifier.padding(start = 8.dp), onAccent = focused)
+                            }
                             Text(cur?.title ?: "", fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, color = if (focused) Tv.Text else Tv.Muted)
                             if (cur != null) ProgressLine(progress(cur.start, cur.stop, now), Modifier.padding(top = 4.dp), height = 2.dp, fill = if (focused) Tv.Text else Tv.Accent)
                         }

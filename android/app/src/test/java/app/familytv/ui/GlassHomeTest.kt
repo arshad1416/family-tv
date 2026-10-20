@@ -31,7 +31,9 @@ import app.familytv.data.MovieEntity
 import app.familytv.data.ProgrammeEntity
 import app.familytv.portal.DeviceConfig
 import app.familytv.portal.Profile
+import app.familytv.portal.Source
 import app.familytv.user.Appearance
+import app.familytv.user.ChannelRef
 import app.familytv.weather.WeatherTest
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -44,6 +46,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.Implementation
 import org.robolectric.annotation.Implements
+import kotlin.math.abs
 
 /** The TV's glass home on a small catalog: the tabs open their pages and each tab's search finds its own kind. */
 @OptIn(ExperimentalTestApi::class)
@@ -116,6 +119,45 @@ class GlassHomeTest {
         waitFor("UK")
         waitFor("BBC News")
         waitFor("TV guide")
+    }
+
+    @Test
+    fun liveTvShowsRecentlyWatchedNewestFirst() {
+        val line = Profile(sources = listOf(Source("s", "xtream", "Line")))
+        app.lastChannels.played(line, ChannelRef("s", "1", "100"))
+        app.lastChannels.played(line, ChannelRef("s", "2", "200"))
+        rule.setContent { HomeScreen(MainViewModel(app), DeviceConfig(paired = true, profile = line)) }
+        waitFor("Live TV")
+        rule.onNodeWithText("Live TV").performClick()
+        waitFor("RECENTLY WATCHED")
+        // NHL Network played last, so its pill comes first, left of BBC News's.
+        // News is the open category, so NHL Network is only in the row.
+        val nhl = rule.onNode(hasText("NHL Network") and hasClickAction()).fetchSemanticsNode().boundsInRoot
+        val bbc = rule.onAllNodes(hasText("BBC News") and hasClickAction()).fetchSemanticsNodes().map { it.boundsInRoot }.single { abs(it.top - nhl.top) < 1f }
+        assertTrue("NHL $nhl before BBC $bbc", nhl.right <= bbc.left)
+    }
+
+    @Test
+    fun liveTvHasNoRecentRowBeforeAnythingPlayed() {
+        home()
+        waitFor("Live TV")
+        rule.onNodeWithText("Live TV").performClick()
+        waitFor("BBC News")
+        rule.onNodeWithText("RECENTLY WATCHED").assertDoesNotExist()
+    }
+
+    @Test
+    fun okOnACountryMovesIntoItsChannels() {
+        home()
+        waitFor("Live TV")
+        rule.onNodeWithText("Live TV").performClick()
+        waitFor("BBC News")
+        rule.onNode(hasText("News") and hasClickAction()).requestFocus()
+        rule.waitUntilAtLeastOneExists(isFocused() and hasText("News"), 10_000)
+        press(Key.DirectionRight)
+        rule.waitUntilAtLeastOneExists(isFocused() and hasText("UK"), 10_000)
+        press(Key.DirectionCenter)
+        rule.waitUntilAtLeastOneExists(isFocused() and hasText("BBC News"), 10_000)
     }
 
     @Test

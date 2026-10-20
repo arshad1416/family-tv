@@ -211,6 +211,7 @@ fun PlayerGuide(
                                         onFocus = { focus.value = GuideFocus(c, it) },
                                         onPlay = { onPick(i) },
                                         onFavourite = { toggleFavourite(ctx, Kind.LIVE, c.sourceId, c.streamId, c.name) },
+                                        playing = i == playing,
                                     )
                                 }
                             }

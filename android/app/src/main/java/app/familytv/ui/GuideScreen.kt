@@ -37,6 +37,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -266,6 +267,7 @@ internal fun GuideRow(
     onFocus: (NowNext?) -> Unit,
     onPlay: () -> Unit,
     onFavourite: () -> Unit,
+    playing: Boolean = false,
 ) {
     val end = start + HOURS * 3_600_000L
     CompositionLocalProvider(LocalBringIntoViewSpec provides MinimalScroll) {
@@ -285,6 +287,7 @@ internal fun GuideRow(
                     Logo(c.logo, 40)
                     Spacer(Modifier.width(10.dp))
                     Text(c.displayName, Modifier.weight(1f), fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    if (playing) PlayingTag(Modifier.padding(horizontal = 6.dp))
                     if (favourite) MarkBadge(favourite = true, size = 18.dp)
                 }
             }
@@ -328,4 +331,13 @@ private fun Modifier.nowLine(d: GuideDims, start: Long, now: State<Long>, color:
     drawContent()
     val x = (now.value - start).toFloat() / SLOT * d.slotW.toPx()
     drawRect(color, topLeft = Offset(x - 1.dp.toPx(), 0f), size = Size(2.dp.toPx(), size.height))
+}
+
+/** "Playing" on the channel that's on in the player's guides (backlog item 25); [onAccent] when its row is focused blue. */
+@Composable
+internal fun PlayingTag(modifier: Modifier = Modifier, onAccent: Boolean = false) {
+    Text(
+        "Playing", modifier.clip(RoundedCornerShape(50)).background(if (onAccent) Tv.Text else Tv.Accent).padding(horizontal = 8.dp, vertical = 2.dp),
+        fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = if (onAccent) Tv.Accent else Tv.Text, maxLines = 1, softWrap = false,
+    )
 }

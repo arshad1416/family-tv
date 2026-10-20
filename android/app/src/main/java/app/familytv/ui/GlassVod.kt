@@ -382,7 +382,7 @@ private fun GlassShelf(title: String, content: androidx.compose.foundation.lazy.
 
 /** Small left and right chevrons at a row's ends while it continues off screen (backlog item 13). */
 @Composable
-private fun BoxScope.MoreChevrons(row: LazyListState) {
+internal fun BoxScope.MoreChevrons(row: LazyListState) {
     @Composable
     fun chevron(icon: ImageVector, align: Alignment) = Box(
         Modifier.align(align).size(28.gx).clip(RoundedCornerShape(50)).background(Glass.Raised),
