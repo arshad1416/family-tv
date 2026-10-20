@@ -27,6 +27,7 @@ import app.familytv.user.LastChannels
 import app.familytv.user.MyCategoryOrder
 import app.familytv.user.SharedProgress
 import app.familytv.user.UserDb
+import app.familytv.user.Viewers
 import app.familytv.user.QualityPrefs
 import app.familytv.user.WatchedMarks
 import kotlinx.coroutines.CoroutineScope
@@ -59,6 +60,7 @@ class FamilyTvApp : Application() {
     /** The last two live channels per profile, for Left's previous channel. */
     val lastChannels by lazy { LastChannels(this) }
     val liveScores by lazy { LiveScores(portal) }
+    val viewers by lazy { Viewers(this) }
     /** The parental PIN was entered (Settings or Adult Content): adult content opens without it until the app restarts. */
     val adultUnlocked = MutableStateFlow(false)
 
