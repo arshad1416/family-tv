@@ -104,8 +104,8 @@ object SeriesTitles {
      */
     private val FILLERS = setOf("TOP", "NEW", "VIP", "BEST", "HOT", "PREMIUM", "PREM", "PLUS", "ONLY", "EXCLUSIVE")
 
-    /** Region shelves some providers put in front of a title ("AS - Fighting Mulan"); dropped like [FILLERS]. */
-    private val REGIONS = setOf("AS", "ASIA", "ASIAN", "EU", "EUR", "AF", "AFR", "AFRICA", "EXYU", "MENA", "LATAM")
+    /** Region shelves some providers put in front of a title ("AS - Fighting Mulan", "CA EN: …"); dropped like [FILLERS]. */
+    private val REGIONS = setOf("AS", "ASIA", "ASIAN", "EU", "EUR", "AF", "AFR", "AFRICA", "EXYU", "MENA", "LATAM", "CA")
 
     fun languageName(code: String): String = if (code == ORIGINAL) "Original" else NAMES[code] ?: code.uppercase(Locale.ROOT)
 
@@ -135,7 +135,7 @@ object SeriesTitles {
     private const val SEP = "[-:|▎•►»–—]"
     private val TOKEN_SPLIT = Regex("[^\\p{L}\\p{N}+]+")
     private val BRACKET_PREFIX = Regex("^[\\[(|]\\s*([^\\[\\]()|]{1,24}?)\\s*[\\])|]\\s*(?:$SEP+\\s*)?")
-    private val PLAIN_PREFIX = Regex("^([\\p{L}\\p{N}+]{2,12}(?:[-/][\\p{L}\\p{N}+]{2,12})?)\\s*$SEP+\\s*")
+    private val PLAIN_PREFIX = Regex("^([\\p{L}\\p{N}+]{2,12}(?:[-/ ][\\p{L}\\p{N}+]{2,12})?)\\s*$SEP+\\s*")
     private val BRACKET_SUFFIX = Regex("\\s*[\\[(]\\s*([^\\[\\]()]{1,24}?)\\s*[\\])]\\s*$")
     private val PLAIN_SUFFIX = Regex("\\s+$SEP+\\s*([\\p{L}\\p{N}+]{2,12})\\s*$")
     private val BARE_SUFFIX = Regex("\\s+([\\p{L}\\p{N}+]{2,12})$")
