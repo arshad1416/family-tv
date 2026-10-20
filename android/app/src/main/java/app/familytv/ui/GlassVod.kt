@@ -65,6 +65,7 @@ import app.familytv.data.CatalogDao
 import app.familytv.data.CategoryEntity
 import app.familytv.data.Kind
 import app.familytv.data.SearchText
+import app.familytv.data.SeriesEntity
 import app.familytv.data.displayName
 import app.familytv.data.searchMovies
 import app.familytv.data.searchSeries
@@ -79,6 +80,7 @@ import app.familytv.user.ProgressKey
 import coil.compose.AsyncImage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import java.text.NumberFormat
 
@@ -149,6 +151,43 @@ internal fun VodCard(item: VodItem, marks: VodMarks, modifier: Modifier, width: 
 private fun parentOf(path: String) = if (path.startsWith("adult/")) "adult" else ""
 
 /**
+ * For you (backlog item 17): titles from the categories the picked viewer plays most on this TV,
+ * newest films or best rated shows first, leaving out what they played. Empty while nobody is
+ * picked or they haven't played anything here yet.
+ */
+@Composable
+private fun rememberForYou(kind: String, visible: List<CategoryEntity>, seen: List<String>?): List<VodItem> {
+    val dao = LocalContext.current.app.db.catalog()
+    var rows by remember { mutableStateOf(emptyList<VodItem>()) }
+    LaunchedEffect(kind, visible, seen) {
+        rows = if (seen.isNullOrEmpty()) emptyList() else withContext(Dispatchers.IO) { forYou(dao, kind, categoryKeys(visible), seen) }
+    }
+    return rows
+}
+
+internal suspend fun forYou(dao: CatalogDao, kind: String, visible: Set<Pair<String, String>>, seen: List<String>): List<VodItem> {
+    // ProgressKey.movie is "m/source/stream"; ProgressKey.episode is "e/source/series/season/episode".
+    val parts = seen.map { it.split('/') }
+    fun top(cats: List<Pair<String, String>>) =
+        cats.filter { it in visible }.groupingBy { it }.eachCount().entries.sortedByDescending { it.value }.take(FOR_YOU_CATEGORIES).map { it.key }
+    if (kind == Kind.MOVIE) {
+        val played = parts.filter { it.size == 3 && it[0] == "m" }.mapTo(LinkedHashSet()) { it[1] to it[2] }
+        val cats = played.mapNotNull { (s, id) -> dao.movie(s, id) }.map { it.sourceId to it.categoryId }
+        val picks = top(cats).flatMap { (s, c) -> dao.moviesIn(s, listOf(c)) }.sortedByDescending { it.added }
+        return groupMovies(picks).filter { g -> g.copies.none { (it.sourceId to it.streamId) in played } }.take(FOR_YOU_SIZE).map { VodItem.Movie(it) }
+    }
+    val played = parts.filter { it.size == 5 && it[0] == "e" }.mapTo(LinkedHashSet()) { it[1] to it[2] }
+    val cats = played.mapNotNull { (s, id) -> dao.seriesItem(s, id) }.map { it.sourceId to it.categoryId }
+    val picks = top(cats).flatMap { (s, c) -> dao.series(s, c).first() }
+        .sortedWith(compareByDescending<SeriesEntity> { it.rating?.toDoubleOrNull() ?: 0.0 }.thenByDescending { it.year ?: 0 })
+    return groupSeries(picks).filter { g -> g.copies.none { (it.sourceId to it.seriesId) in played } }.take(FOR_YOU_SIZE).map { VodItem.Show(it) }
+}
+
+private const val FOR_YOU = "For you"
+private const val FOR_YOU_SIZE = 20
+private const val FOR_YOU_CATEGORIES = 3
+
+/**
  * Movies or TV Shows ([kind]) on the TV: a home of highlights, the Providers shelf, languages and
  * every category, and the pages those open ([path]: "provider/Netflix", "language/English",
  * "recent", "top", "new", "cat/…", "adult", "adult/…"). Back steps out one page at a time and
@@ -207,6 +246,8 @@ private fun VodHome(
     LaunchedEffect(Unit) { withFrameNanos { }; Perf.firstScreen() }
 
     val favs = rememberFavourites()
+    val seen = rememberSeen()
+    val forYou = rememberForYou(kind, cats, seen)
     val shelves: Map<String, List<VodItem>>
     var bars = emptyMap<Pair<String, String>, Float>()
     var lefts = emptyMap<Pair<String, String>, String>()
@@ -214,7 +255,7 @@ private fun VodHome(
         shelves = rememberMovieShelves(movieCats, rememberFavouriteMovies(favs, movieCats), marks.progress).associate { (t, l) -> t to l.map { VodItem.Movie(it) } }
     } else {
         val newShows = rememberNewEpisodeShows(marks.newKeys, seriesCats)
-        val watching = remember(marks.progress) { ProgressRules.continueWatching(marks.progress.values, ProgressKey.EPISODE) }
+        val watching = remember(marks.progress, seen) { ProgressRules.continueWatching(marks.progress.values.playedBy(seen), ProgressKey.EPISODE) }
         bars = remember(watching) { watching.associate { (it.sourceId to it.itemId) to ProgressRules.bar(it) } }
         // "S2 E5 · 12 min left": the episode it picks up on, and how much of it is left.
         lefts = remember(watching) {
@@ -232,7 +273,8 @@ private fun VodHome(
         ?: shelves[newest]?.firstOrNull()?.let { it to newest }
         ?: shelves["Top rated"]?.firstOrNull()?.let { it to "Top rated" }
     // Continue watching is the first row under the highlights; Favourites comes after the browsing rows.
-    val rows = listOf(CONTINUE_WATCHING, "Favourites").mapNotNull { t -> shelves[t]?.let { t to it } }
+    // For you comes right after it, for the picked viewer.
+    val rows = listOf(CONTINUE_WATCHING, FOR_YOU, "Favourites").mapNotNull { t -> (if (t == FOR_YOU) forYou.ifEmpty { null } else shelves[t])?.let { t to it } }
     val providers = remember(movieCats, seriesCats) { Provider.entries.filter { p -> movieCats.any { p.matches(it.name) } || seriesCats.any { p.matches(it.name) } } }
     val groups = remember(movieCats, seriesCats) { LanguageGroup.entries.filter { g -> movieCats.any { g.matches(it.name) } || seriesCats.any { g.matches(it.name) } } }
     val (regions, languages) = groups.partition { it.region }
@@ -288,7 +330,7 @@ private fun VodHome(
                 shelves["Top rated"]?.let { l -> HeroCard("Top rated", null, l.first().poster, HERO_TOP, 1f, entryPoint(target == "top")) { open("top") } }
             }
         }
-        rows.filter { it.first == CONTINUE_WATCHING }.forEach { (title, items) -> shelf(title, items) }
+        rows.filter { it.first == CONTINUE_WATCHING || it.first == FOR_YOU }.forEach { (title, items) -> shelf(title, items) }
         if (providers.isNotEmpty()) item("providers") {
             Column(verticalArrangement = Arrangement.spacedBy(10.gx)) {
                 GlassHeading("Providers", Modifier.padding(start = FOCUS_ROOM))
@@ -308,7 +350,7 @@ private fun VodHome(
                 }
             }
         }
-        rows.filter { it.first != CONTINUE_WATCHING }.forEach { (title, items) -> shelf(title, items) }
+        rows.filter { it.first != CONTINUE_WATCHING && it.first != FOR_YOU }.forEach { (title, items) -> shelf(title, items) }
         if (cats.isNotEmpty()) item("categories") {
             Column(Modifier.padding(horizontal = FOCUS_ROOM), verticalArrangement = Arrangement.spacedBy(10.gx)) {
                 GlassHeading("All categories")

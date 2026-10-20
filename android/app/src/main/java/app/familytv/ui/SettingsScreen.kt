@@ -1,6 +1,20 @@
 package app.familytv.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.ImeAction
+import app.familytv.user.Viewers
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -86,6 +100,7 @@ fun SettingsScreen(vm: MainViewModel, config: DeviceConfig) {
                 StreamQualityPanel()
                 PackageSorterPanel(config.profile)
                 OpenOnStartPanel(config.profile)
+                ViewersPanel(config.profile)
                 ParentalPinPanel(config.profile)
             }
         })
@@ -168,6 +183,81 @@ private fun OpenOnStartPanel(profile: Profile?) {
             }
         }
     }
+}
+
+/**
+ * Who watches on this TV (backlog items 17 and 18): add someone by name, as a kids viewer when the
+ * profile has a parental PIN, or remove them. While a kids viewer watches, changes need the PIN.
+ * TV only, and kept on this TV.
+ */
+@Composable
+private fun ViewersPanel(profile: Profile?) {
+    if (profile == null || LocalFormFactor.current.touch) return
+    val viewers = LocalContext.current.app.viewers
+    val menus = LocalItemMenus.current
+    val tick by viewers.changes.collectAsState()
+    val list = remember(tick) { viewers.all() }
+    val kidsWatching = remember(tick) { viewers.current()?.kids == true }
+    var unlocked by remember { mutableStateOf(false) }
+    var asking by remember { mutableStateOf(false) }
+    var name by remember { mutableStateOf("") }
+    val firstKey = remember { FocusRequester() }
+    LaunchedEffect(asking) { if (asking) { delay(50); runCatching { firstKey.requestFocus() } } }
+    val hasPin = !profile.parentalPin.isNullOrEmpty()
+    Panel {
+        Text("Who's watching", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        Text(
+            "Add the people who watch on this TV, then pick one from the top bar. Each gets their own Continue watching, " +
+                "favourites and For you here. A kids viewer sees kids' categories only, and leaving needs the parental PIN. Kept on this TV only.",
+            fontSize = 14.sp, color = Tv.Muted,
+        )
+        when {
+            kidsWatching && !unlocked && asking -> PinPrompt(profile, Modifier.focusRequester(firstKey)) { unlocked = true; asking = false }
+            kidsWatching && !unlocked -> {
+                Text("A kids viewer is watching. Enter the parental PIN to change who watches here.", fontSize = 14.sp, color = Tv.Muted)
+                TvButton("Enter PIN", { asking = true })
+            }
+            else -> {
+                list.forEach { v ->
+                    TvButton("Remove ${v.name}" + if (v.kids) " (kids)" else "", {
+                        menus.open = ItemMenu("Remove ${v.name}? Their favourites and Continue watching on this TV go too.", listOf("Remove" to { viewers.remove(v) }, "Keep" to {}))
+                    })
+                }
+                if (list.size < Viewers.MAX) {
+                    NameField(name) { name = it.take(Viewers.MAX_NAME) }
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        TvButton("Add", { if (viewers.add(profile, name, kids = false) != null) name = "" }, enabled = name.isNotBlank())
+                        if (hasPin) TvButton("Add as kids", { if (viewers.add(profile, name, kids = true) != null) name = "" }, enabled = name.isNotBlank())
+                    }
+                    if (!hasPin) Text("A kids viewer needs a parental PIN: set one for this profile in the portal.", fontSize = 14.sp, color = Tv.Muted)
+                }
+            }
+        }
+    }
+}
+
+/** A viewer's name: OK types with the TV's keyboard, Done or Down moves on. */
+@Composable
+private fun NameField(value: String, onValue: (String) -> Unit) {
+    val focusManager = LocalFocusManager.current
+    var focused by remember { mutableStateOf(false) }
+    BasicTextField(
+        value = value,
+        onValueChange = onValue,
+        singleLine = true,
+        textStyle = TextStyle(color = Tv.Text, fontSize = 17.sp),
+        cursorBrush = SolidColor(Tv.Accent),
+        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+        keyboardActions = KeyboardActions(onDone = { focusManager.moveFocus(FocusDirection.Down) }),
+        modifier = Modifier.width(320.dp).onFocusChanged { focused = it.isFocused },
+        decorationBox = { inner ->
+            val shape = RoundedCornerShape(24.dp)
+            Box(Modifier.clip(shape).background(Tv.Raised).border(if (focused) 3.dp else 1.dp, if (focused) Tv.Accent else Tv.Line, shape).padding(horizontal = 18.dp, vertical = 10.dp)) {
+                if (value.isEmpty()) Text("Name", fontSize = 17.sp, color = Tv.Muted)
+                inner()
+            }
+        },
+    )
 }
 
 /**

@@ -74,7 +74,7 @@ import app.familytv.app
 import app.familytv.data.Kind
 import app.familytv.portal.DeviceConfig
 import app.familytv.portal.Profile
-import app.familytv.portal.Viewer
+import app.familytv.user.Viewer
 import app.familytv.usage.TrackScreen
 import app.familytv.usage.Usage
 import app.familytv.user.Appearance
@@ -138,7 +138,8 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
     val base = config.profile ?: Profile()
     // Who's watching (backlog items 17 and 18): a kids viewer sees the profile through kids' categories only.
     val viewerTick by app.viewers.changes.collectAsState()
-    val viewer = remember(base, viewerTick) { app.viewers.current(base) }
+    val viewer = remember(viewerTick) { app.viewers.current() }
+    val hasViewers = remember(viewerTick) { app.viewers.all().isNotEmpty() }
     val profile = remember(base, viewerTick) { app.viewers.apply(base) }
     var picking by remember { mutableStateOf(false) }
     var tab by rememberSaveable { mutableStateOf(GlassTab.Movies) }
@@ -237,7 +238,7 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
                         appearance = appearance,
                         onAppearance = prefs::setAppearance,
                         viewer = viewer?.name ?: "Who's watching?",
-                        onViewers = { picking = true }.takeIf { !base.viewers.isNullOrEmpty() },
+                        onViewers = { picking = true }.takeIf { hasViewers },
                     )
                     Spacer(Modifier.height(16.gx))
                 }
@@ -342,7 +343,7 @@ private fun GlassTopBar(
                 Spacer(Modifier.width(18.gx))
                 GlassSearchBox(query.value, { query.value = it }, tab.searchHint)
             }
-            // Who's watching, when the profile has viewers; OK picks another.
+            // Who's watching, when this TV has viewers; OK picks another.
             if (onViewers != null) {
                 Spacer(Modifier.weight(1f))
                 GlassPill(viewer, onViewers, fill = Glass.Raised, border = true, icon = { Icon(Icons.Filled.Person, contentDescription = null, modifier = Modifier.size(18.gx)) })
@@ -419,14 +420,14 @@ private fun ViewerPicker(profile: Profile, current: Viewer?, onDone: () -> Unit)
             if (leaving == null) {
                 Text("Who's watching?", fontSize = 30.gsp, fontWeight = FontWeight.Bold, maxLines = 1)
                 Row(horizontalArrangement = Arrangement.spacedBy(16.gx)) {
-                    profile.viewers.orEmpty().forEachIndexed { i, v ->
+                    ctx.app.viewers.all().forEachIndexed { i, v ->
                         GlassPill(
-                            if (v.kids == true) "${v.name} · Kids" else v.name,
+                            if (v.kids) "${v.name} · Kids" else v.name,
                             {
                                 when {
                                     v.id == current?.id -> onDone()
                                     current?.kids == true -> asking = v
-                                    else -> { ctx.app.viewers.choose(profile, v); onDone() }
+                                    else -> { ctx.app.viewers.choose(v); onDone() }
                                 }
                             },
                             if (i == 0) Modifier.focusRequester(first) else Modifier,
@@ -436,7 +437,7 @@ private fun ViewerPicker(profile: Profile, current: Viewer?, onDone: () -> Unit)
                 }
             } else {
                 Text("Switch to ${leaving.name}?", fontSize = 26.gsp, fontWeight = FontWeight.Bold, maxLines = 1)
-                PinPrompt(profile, Modifier.focusRequester(first)) { ctx.app.viewers.choose(profile, leaving); onDone() }
+                PinPrompt(profile, Modifier.focusRequester(first)) { ctx.app.viewers.choose(leaving); onDone() }
             }
         }
     }

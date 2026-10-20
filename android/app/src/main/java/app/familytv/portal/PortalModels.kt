@@ -32,14 +32,9 @@ data class Profile(
     val openOnStart: Boolean? = null,
     /** Send anonymous feature use (screens and buttons, never what's watched or searched); see [app.familytv.usage.Usage]. */
     val usageStats: Boolean? = null,
-    /** The people who watch on this profile's TVs, picked from the top bar; see [app.familytv.user.Viewers]. */
-    val viewers: List<Viewer>? = null,
     /** Set on this TV only (never from the portal) while a kids viewer watches: kids' categories only, no adult ones. */
     @Transient val kidsOnly: Boolean = false,
 )
-
-/** A person on the profile. A [kids] viewer sees kids' categories only, and leaving them needs the parental PIN. */
-data class Viewer(val id: String = "", val name: String = "", val kids: Boolean? = null)
 
 data class Command(val id: String, val type: String, val payload: Map<String, Any?>?)
 data class LatestApp(val versionCode: Int, val url: String, val versionName: String? = null)

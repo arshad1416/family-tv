@@ -32,7 +32,6 @@ import androidx.tv.material3.Text
 import app.familytv.FamilyTvApp
 import app.familytv.app
 import app.familytv.iptv.SeriesTitles
-import app.familytv.user.Pending
 import app.familytv.user.SeriesLanguages
 import app.familytv.data.CategoryEntity
 import app.familytv.data.ChannelEntity
@@ -76,6 +75,18 @@ fun rememberProgress(): Map<String, ProgressEntity> {
     return remember(rows) { rows.associateBy { it.key } }
 }
 
+/** The [ProgressKey]s the picked viewer played on this TV, newest first, or null when nobody is picked. */
+@Composable
+fun rememberSeen(): List<String>? {
+    val viewers = LocalContext.current.app.viewers
+    val tick by viewers.changes.collectAsState()
+    return remember(tick) { viewers.seen() }
+}
+
+/** These resume points, cut to the titles [seen] lists when a viewer is picked (Continue watching is theirs alone). */
+fun Collection<ProgressEntity>.playedBy(seen: List<String>?): Collection<ProgressEntity> =
+    if (seen == null) this else seen.toHashSet().let { keys -> filter { it.key in keys } }
+
 /** Adds or removes a favourite and says so with a toast (on a TV, the only feedback a long press gets). */
 fun toggleFavourite(ctx: Context, kind: String, sourceId: String, itemId: String, name: String) {
     val app = ctx.app
@@ -87,6 +98,7 @@ fun toggleFavourite(ctx: Context, kind: String, sourceId: String, itemId: String
 }
 
 internal fun favouriteMessage(app: FamilyTvApp, kind: String, on: Boolean) = when {
+    app.favourites.viewer != null -> if (on) "Added to ${app.favourites.viewer?.name}'s Favourites" else "Removed from ${app.favourites.viewer?.name}'s Favourites"
     !on -> "Removed from Favourites"
     kind == Kind.LIVE && app.trakt.signedIn -> "Added to Favourites on this device (Trakt has no live channels)"
     kind != Kind.LIVE && app.trakt.signedIn -> "Added to Favourites and your Trakt watchlist"
@@ -242,7 +254,7 @@ fun toggleShowFavourite(ctx: Context, group: SeriesGroup, isFavourite: Boolean, 
         val copies = app.db.allCopies(group)
         if (isFavourite) {
             val dao = app.db.catalog()
-            val favs = app.userDb.user().allFavouriteRows().filter { it.kind == Kind.SERIES && it.pending != Pending.REMOVE && it.pending != Pending.HIDDEN }
+            val favs = app.favourites.now().filter { it.kind == Kind.SERIES }
             for (f in favs) {
                 val row = dao.seriesItem(f.sourceId, f.itemId)
                 val match = copies.any { c -> c.sourceId == f.sourceId && c.seriesId == f.itemId } ||

@@ -53,14 +53,8 @@ describe("validateProfile", () => {
     expect("usageStats" in validateProfile({ sources: [], usageStats: false })).toBe(false);
     expect(() => validateProfile({ sources: [], usageStats: 1 as never })).toThrow(/usageStats/);
   });
-  it("keeps named viewers with their own ids, and a kids viewer only with a PIN", () => {
-    const viewers = [{ id: "a1", name: " Arshad ", kids: false }, { id: "k1", name: "Izaan", kids: true }];
-    expect(validateProfile({ sources: [], parentalPin: "1234", viewers }).viewers).toEqual([{ id: "a1", name: "Arshad" }, { id: "k1", name: "Izaan", kids: true }]);
-    expect(() => validateProfile({ sources: [], viewers: [{ id: "k1", name: "Izaan", kids: true }] })).toThrow(/parental PIN/);
-    expect(() => validateProfile({ sources: [], viewers: [{ id: "a", name: "A" }, { id: "a", name: "B" }] })).toThrow(/own id/);
-    expect(() => validateProfile({ sources: [], viewers: [{ id: "a", name: "  " }] })).toThrow(/name/);
-    expect(() => validateProfile({ sources: [], viewers: Array.from({ length: 9 }, (_, i) => ({ id: "v" + i, name: "V" + i })) })).toThrow(/at most 8/);
-    expect("viewers" in validateProfile({ sources: [], viewers: [] })).toBe(false);
+  it("drops a viewers list from older saves (viewers are added on each TV)", () => {
+    expect("viewers" in validateProfile({ sources: [], parentalPin: "1234", viewers: [{ id: "a1", name: "Arshad" }] } as never)).toBe(false);
   });
 });
 

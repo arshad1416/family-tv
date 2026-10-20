@@ -3,20 +3,30 @@ package app.familytv.user
 import app.familytv.FamilyTvApp
 import app.familytv.data.Kind
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 
 /**
  * Favourite channels, movies and series. Movies and series follow the Trakt watchlist when an
  * account is connected, and shows in the Trakt history are added too; channels stay on this
- * device (Trakt has no live TV).
+ * device (Trakt has no live TV). While a viewer is picked on this TV, these are that viewer's own
+ * favourites instead, kept on this TV and never sent to Trakt (see [Viewers]).
  */
 class Favourites(private val app: FamilyTvApp) {
     private val dao get() = app.userDb.user()
 
     /** Every favourite, newest first (removals waiting for Trakt are left out). */
-    val all: Flow<List<FavouriteEntity>> get() = dao.favourites()
+    val all: Flow<List<FavouriteEntity>> get() = combine(dao.favourites(), app.viewers.changes) { shared, _ -> app.viewers.favourites() ?: shared }
+
+    /** Every favourite now, as [all] lists them. */
+    suspend fun now(): List<FavouriteEntity> =
+        app.viewers.favourites() ?: dao.allFavouriteRows().filter { it.pending != Pending.REMOVE && it.pending != Pending.HIDDEN }
+
+    /** The viewer whose favourites these are, if one is picked. */
+    val viewer: Viewer? get() = app.viewers.current()
 
     /** Flips the favourite and returns true when it is now a favourite. */
     suspend fun toggle(kind: String, sourceId: String, itemId: String, name: String): Boolean {
+        viewer?.let { return app.viewers.toggleFavourite(it, kind, sourceId, itemId, name) }
         val row = dao.favourite(kind, sourceId, itemId)
         val wasFavourite = row != null && row.pending != Pending.REMOVE && row.pending != Pending.HIDDEN
         when {

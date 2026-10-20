@@ -240,16 +240,6 @@ async function renderProfiles(editId) {
   document.querySelectorAll("[data-edit]").forEach((b) => (b.onclick = () => renderProfiles(b.dataset.edit)));
 }
 
-// The people who watch on this profile's TVs; a kids viewer sees kids' categories only and needs the PIN to leave.
-function viewersCard(d) {
-  const rows = (d.viewers || []).map((v, i) => '<div class="row"><input id="vn' + i + '" placeholder="Name" maxlength="24" value="' + esc(v.name) + '">' +
-    '<label style="margin:0"><input type="checkbox" style="width:auto" id="vk' + i + '"' + (v.kids ? " checked" : "") + "> Kids</label>" +
-    '<button class="b" data-rmv="' + i + '">Remove</button></div>').join("");
-  return '<div class="card"><h3 style="margin-top:0">Viewers</h3>' +
-    '<p class="muted small">The people who watch on the TVs of this profile, picked from the top bar on the TV. A kids viewer sees kids categories only, never adult ones, and leaving it asks for the parental PIN above. Leave empty for no picker.</p>' +
-    rows + '<div class="row"><button class="b" id="addv">Add viewer</button></div></div>';
-}
-
 // Extra guides fill channels the provider's guide leaves thin; pins link channels the TV can't match by name.
 function guidesCard(d) {
   const urls = (d.extraGuides || DEFAULT_GUIDES).join("\\n");
@@ -401,13 +391,10 @@ function editProfile(p) {
       '<option value="the-nook"' + (draft.data.splash === "the-nook" ? " selected" : "") + '>The Nook (Airbnb guests)</option></select>' +
       '<label><input type="checkbox" style="width:auto" id="popen"' + (draft.data.openOnStart ? " checked" : "") + '> Open when the TV turns on (each TV needs the Display over other apps permission once; its Settings page shows how)</label>' +
       '<label><input type="checkbox" style="width:auto" id="pusage"' + (draft.data.usageStats ? " checked" : "") + '> Usage stats (anonymous): the TVs report which screens and buttons get used, never what is watched or searched. Kept 30 days</label></div>' +
-      viewersCard(draft.data) +
       draft.data.sources.map((s, i) => sourceForm(s, i, lineOf(s))).join("") + addLineCard(draft, lines, panel) + guidesCard(draft.data) + debridCard(draft) + (draft.id ? '<div class="card" id="rd-api-key"></div>' : '<div class="card muted small">Save the profile to add a Real-Debrid API key.</div>') + categoriesCard(draft, reported) +
       '<div class="row"><button class="b" id="adds">Add source</button><button class="b p" id="save">Save</button>' +
       (draft.id ? '<button class="b" id="delp">Delete profile</button>' : "") + '<button class="b" id="back">Back</button><span id="perr" class="err"></span></div>';
     if (draft.id) mountRdApiKey(draft, $("#rd-api-key"));
-    $("#addv").onclick = () => { collect(); (draft.data.viewers = draft.data.viewers || []).push({ id: crypto.randomUUID(), name: "" }); paint(); };
-    document.querySelectorAll("[data-rmv]").forEach((b) => (b.onclick = () => { collect(); draft.data.viewers.splice(+b.dataset.rmv, 1); paint(); }));
     $("#adds").onclick = () => { collect(); draft.data.sources.push({ id: crypto.randomUUID(), type: "xtream", name: "Line " + (draft.data.sources.length + 1) }); paint(); };
     document.querySelectorAll("[data-rm]").forEach((b) => (b.onclick = () => { collect(); draft.data.sources.splice(+b.closest("[data-src]").dataset.src, 1); paint(); }));
     $("#back").onclick = () => renderProfiles();
@@ -462,8 +449,6 @@ function editProfile(p) {
     draft.data.splash = $("#psplash").value || undefined;
     draft.data.openOnStart = $("#popen").checked || undefined;
     draft.data.usageStats = $("#pusage").checked || undefined;
-    const viewers = (draft.data.viewers || []).map((v, i) => ({ id: v.id, name: $("#vn" + i).value, kids: $("#vk" + i).checked || undefined }));
-    draft.data.viewers = viewers.length ? viewers : undefined;
     draft.data.extraGuides = $("#xg").value.split(/\\s+/).filter(Boolean);
     const pins = {};
     for (const line of $("#gp").value.split("\\n")) {
