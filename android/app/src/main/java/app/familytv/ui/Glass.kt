@@ -209,6 +209,9 @@ internal fun OnDarkArt(content: @Composable () -> Unit) =
 /** True on the TV's glass pages: [FocusBox] rings focus in white there instead of painting it blue. */
 val LocalGlass = staticCompositionLocalOf { false }
 
+/** A kids viewer's pages: bigger posters, fewer across (backlog item 18). */
+internal val LocalBigTiles = staticCompositionLocalOf { false }
+
 /** The mockup is drawn at 1280 x 720; this many dp per mockup pixel on this screen (0.75 on a 960 dp TV). */
 internal val LocalGlassScale = staticCompositionLocalOf { 0.75f }
 

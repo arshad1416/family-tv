@@ -207,6 +207,7 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
     CompositionLocalProvider(
         LocalGlass provides true,
         LocalGlassScale provides rememberGlassScale(),
+        LocalBigTiles provides profile.kidsOnly,
         LocalGlassShell provides shell,
         LocalPageEntry provides entry,
         LocalGlassPalette provides palette,

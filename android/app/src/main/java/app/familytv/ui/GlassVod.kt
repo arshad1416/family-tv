@@ -331,7 +331,7 @@ private val HERO_NEW = listOf(Color(0xFF5A3D2B), Color(0xFF1F1612))
 private val HERO_TOP = listOf(Color(0xFF2B4A5A), Color(0xFF121C22))
 
 /** A shelf poster's width: a seventh of the page, as in the grids. */
-private val POSTER_W: Dp @Composable get() = 150.gx
+private val POSTER_W: Dp @Composable get() = if (LocalBigTiles.current) 190.gx else 150.gx
 
 private val VodItem.poster: String? get() = when (this) { is VodItem.Movie -> g.poster; is VodItem.Show -> g.poster }
 
