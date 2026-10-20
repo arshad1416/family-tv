@@ -65,9 +65,10 @@ class PinEntryTest {
         entered(1)
         press(listOf(Key.Back))
         entered(0)
-        // The PIN is 9134 here: [7 8 9] Right, then (the row back at [1 2 3]) Left, Right, and [4 5 6] Left.
-        press(listOf(Key.DirectionDown, Key.DirectionDown, Key.DirectionRight))
-        press(listOf(Key.DirectionLeft, Key.DirectionRight))
+        // The PIN is 9134 here. The wheel stays on a row between digits, so from [0]: up to [7 8 9] Right,
+        // up to [1 2 3] Left and Right, and down to [4 5 6] Left.
+        press(listOf(Key.DirectionUp, Key.DirectionRight))
+        press(listOf(Key.DirectionUp, Key.DirectionUp, Key.DirectionLeft, Key.DirectionRight))
         entered(3)
         assertEquals(0, opened)
         press(listOf(Key.DirectionDown, Key.DirectionLeft))
@@ -78,8 +79,8 @@ class PinEntryTest {
     fun okEntersTheMiddleNumberOfTheRowAndAWrongPinShakesAndClears() {
         show()
         row.requestFocus()
-        // 2, 5, 8 and 0: OK on each row in turn.
-        press(listOf(Key.DirectionCenter, Key.DirectionDown, Key.DirectionCenter, Key.DirectionDown, Key.DirectionDown, Key.DirectionCenter, Key.DirectionUp, Key.DirectionCenter))
+        // 2, 5, 8 and 0: OK on each row in turn, the wheel staying put between digits.
+        press(listOf(Key.DirectionCenter, Key.DirectionDown, Key.DirectionCenter, Key.DirectionDown, Key.DirectionCenter, Key.DirectionDown, Key.DirectionCenter))
         rule.onNodeWithText("Wrong PIN").assertExists()
         entered(0)
         assertEquals(0, opened)

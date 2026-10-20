@@ -1,0 +1,5 @@
+# The app's own code, compiled ahead of time once installed (profileinstaller) rather than run under
+# the JIT after every sideloaded update, which made scrolling stutter on slow TV boxes. Compose and
+# the other libraries bring their own profiles. Hand-written and broad, not recorded on a device.
+HSPLapp/familytv/**->**(**)**
+Lapp/familytv/**;

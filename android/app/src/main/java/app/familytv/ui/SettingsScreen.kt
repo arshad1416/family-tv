@@ -2,13 +2,36 @@ package app.familytv.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.key.Key
@@ -16,35 +39,13 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
-import app.familytv.user.Viewers
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Text
@@ -58,66 +59,111 @@ import app.familytv.portal.Profile
 import app.familytv.start.OpenOnStart
 import app.familytv.sync.PlaybackStatus
 import app.familytv.usage.Usage
-import kotlinx.coroutines.delay
+import app.familytv.user.Viewers
 import java.text.DateFormat
 import java.util.Date
+import kotlinx.coroutines.delay
 
 @Composable
 fun SettingsScreen(vm: MainViewModel, config: DeviceConfig) {
-    val ctx = LocalContext.current
-    val report by vm.diagnosis.collectAsState()
-    val running by vm.diagnosing.collectAsState()
-    Column(Modifier.verticalScroll(rememberScrollState())) {
-        PageTitle("Settings", bottom = 18.dp)
-        // TV: two columns sharing the width, so neither is squeezed. Phones and tablets: stacked.
-        val touch = LocalFormFactor.current.touch
-        val panes: @Composable (left: @Composable (Modifier) -> Unit, right: @Composable (Modifier) -> Unit) -> Unit = { left, right ->
-            if (touch) {
-                Column(Modifier.widthIn(max = 640.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) { left(Modifier); right(Modifier) }
+    val profile = config.profile
+    val memory = remember { FocusMemory() }
+    // A menu (stream quality, removing a viewer) drops focus as it closes; put it back on the option
+    // it was opened from rather than letting the next press start again at the top of Settings.
+    val menuOpen = LocalItemMenus.current.open != null
+    LaunchedEffect(menuOpen) { if (!menuOpen) { delay(50); memory.restore() } }
+    CompositionLocalProvider(LocalFocusMemory provides memory) {
+        Column(Modifier.verticalScroll(rememberScrollState())) {
+            PageTitle("Settings", bottom = 18.dp)
+            // Short sections; on a TV in two columns of about the same length, on phones and tablets in one.
+            val left: @Composable () -> Unit = {
+                Section("Viewing") {
+                    StreamQualityPanel()
+                    // Only shown when the portal has Trakt set up.
+                    if (config.trakt?.clientId != null) TraktPanel()
+                }
+                Section("Channels and categories") {
+                    ChannelListsPanel(vm)
+                    PackageSorterPanel(profile)
+                    ArrangeCategoriesPanel(profile ?: Profile())
+                }
+            }
+            val right: @Composable () -> Unit = {
+                Section("Viewers and PIN") {
+                    ViewersPanel(profile)
+                    ParentalPinPanel(profile)
+                }
+                Section("This TV") {
+                    CheckPanel(vm)
+                    AboutPanel(config)
+                    OpenOnStartPanel(profile)
+                    AddonsPanel(config)
+                }
+            }
+            if (LocalFormFactor.current.touch) {
+                Column(Modifier.widthIn(max = 640.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) { left(); right() }
             } else {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(28.dp)) { left(Modifier.weight(1f)); right(Modifier.weight(1f)) }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(28.dp)) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(20.dp)) { left() }
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(20.dp)) { right() }
+                }
             }
+            Spacer(Modifier.height(32.dp))
         }
-        panes({ mod ->
-            Panel(mod) {
-                Text("Not working?", fontSize = 22.sp, fontWeight = FontWeight.Bold)
-                Text("Run a check. It tests this TV's internet, the home network and the TV service, and sends the result to your TV admin.", fontSize = 15.sp, color = Tv.Muted)
-                TvButton(if (running) "Checking…" else "Run a check", { vm.runDiagnosis() }, entryPoint(), enabled = !running)
-                report?.let { r ->
-                    Text(r.verdict.tvMessage, fontSize = 19.sp, fontWeight = FontWeight.Bold, color = if (r.verdict.severity == 0) Tv.Good else Tv.Warn)
-                    Text(r.summary, fontSize = 14.sp, color = Tv.Muted)
-                }
-                Spacer(Modifier.height(8.dp))
-                Text("Channel lists", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
-                Text("Downloads channels, movies, series and the guide again.", fontSize = 14.sp, color = Tv.Muted)
-                TvButton("Reload channels", { vm.reload() })
-            }
-        }, { mod ->
-            Column(mod, verticalArrangement = Arrangement.spacedBy(20.dp)) {
-                Panel {
-                    Text("This TV", fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                    Info("Name", config.nickname ?: "-")
-                    Info("Device ID", ctx.app.portal.deviceId ?: "-")
-                    Info("App version", BuildConfig.VERSION_NAME)
-                    Info("Lists updated", if (PlaybackStatus.lastRefresh > 0) DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(PlaybackStatus.lastRefresh)) else "this session not yet")
-                }
-                // Only shown when the portal has Trakt set up.
-                if (config.trakt?.clientId != null) TraktPanel()
-                AddonsPanel(config)
-                StreamQualityPanel()
-                PackageSorterPanel(config.profile)
-                OpenOnStartPanel(config.profile)
-                ViewersPanel(config.profile)
-                ParentalPinPanel(config.profile)
-            }
-        })
-        Spacer(Modifier.height(20.dp))
-        Column(if (touch) Modifier.widthIn(max = 640.dp) else Modifier) { ArrangeCategoriesPanel(config.profile ?: Profile()) }
-        Spacer(Modifier.height(32.dp))
     }
 }
 
-/** Stream quality: which quality plays first when there's a choice, for Live TV, Movies and Series. Kept on this TV. */
+/** A short heading over a few related panels. */
+@Composable
+private fun Section(title: String, content: @Composable () -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text(title, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = Tv.Muted)
+        content()
+    }
+}
+
+/** Not working? A check of this TV's internet, the home network and the TV service, sent to the TV admin. */
+@Composable
+private fun CheckPanel(vm: MainViewModel) {
+    val report by vm.diagnosis.collectAsState()
+    val running by vm.diagnosing.collectAsState()
+    Panel {
+        Text("Not working?", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        Text("Run a check. It tests this TV's internet, the home network and the TV service, and sends the result to your TV admin.", fontSize = 14.sp, color = Tv.Muted)
+        TvButton(if (running) "Checking…" else "Run a check", { vm.runDiagnosis() }, enabled = !running)
+        report?.let { r ->
+            Text(r.verdict.tvMessage, fontSize = 19.sp, fontWeight = FontWeight.Bold, color = if (r.verdict.severity == 0) Tv.Good else Tv.Warn)
+            Text(r.summary, fontSize = 14.sp, color = Tv.Muted)
+        }
+    }
+}
+
+@Composable
+private fun ChannelListsPanel(vm: MainViewModel) {
+    Panel {
+        Text("Channel lists", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        Text("Downloads channels, movies, series and the guide again.", fontSize = 14.sp, color = Tv.Muted)
+        TvButton("Reload channels", { vm.reload() })
+    }
+}
+
+/** This TV's name, ID and app version, and when its lists last updated. */
+@Composable
+private fun AboutPanel(config: DeviceConfig) {
+    val ctx = LocalContext.current
+    Panel {
+        Text("About this TV", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        Info("Name", config.nickname ?: "-")
+        Info("Device ID", ctx.app.portal.deviceId ?: "-")
+        Info("App version", BuildConfig.VERSION_NAME)
+        Info("Lists updated", if (PlaybackStatus.lastRefresh > 0) DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(PlaybackStatus.lastRefresh)) else "this session not yet")
+    }
+}
+
+/**
+ * Stream quality: which quality plays first when there's a choice, for Live TV, Movies and Series.
+ * Kept on this TV. Its first button is where focus lands on opening Settings.
+ */
 @Composable
 private fun StreamQualityPanel() {
     val ctx = LocalContext.current
@@ -136,7 +182,7 @@ private fun StreamQualityPanel() {
                     "Stream quality · $label",
                     QualityPref.entries.map { q -> (if (q == pref) "✓  ${q.label}" else q.label) to { ctx.app.quality.set(kind, q); Usage.log(Usage.Action.SETTING_CHANGE, qualityWord(kind)) } },
                 )
-            })
+            }, entryPoint(kind == Kind.LIVE))
         }
     }
 }
@@ -210,6 +256,10 @@ private fun ViewersPanel(profile: Profile?) {
     var name by remember { mutableStateOf("") }
     val firstKey = remember { FocusRequester() }
     LaunchedEffect(asking) { if (asking) { delay(50); runCatching { firstKey.requestFocus() } } }
+    // Once the PIN is in, the pad is gone; focus goes to the first of the viewers it opened.
+    val afterPin = remember { FocusRequester() }
+    var unlockedAt by remember { mutableIntStateOf(0) }
+    LaunchedEffect(unlockedAt) { if (unlockedAt > 0) { delay(50); runCatching { afterPin.requestFocus() } } }
     val hasPin = !profile.parentalPin.isNullOrEmpty()
     Panel {
         Text("Who's watching", fontSize = 20.sp, fontWeight = FontWeight.Bold)
@@ -219,19 +269,19 @@ private fun ViewersPanel(profile: Profile?) {
             fontSize = 14.sp, color = Tv.Muted,
         )
         when {
-            kidsWatching && !unlocked && asking -> PinPrompt(profile, Modifier.focusRequester(firstKey)) { unlocked = true; asking = false }
+            kidsWatching && !unlocked && asking -> PinPrompt(profile, Modifier.focusRequester(firstKey)) { unlocked = true; asking = false; unlockedAt++ }
             kidsWatching && !unlocked -> {
                 Text("A kids viewer is watching. Enter the parental PIN to change who watches here.", fontSize = 14.sp, color = Tv.Muted)
                 TvButton("Enter PIN", { asking = true })
             }
             else -> {
-                list.forEach { v ->
+                list.forEachIndexed { i, v ->
                     TvButton("Remove ${v.name}" + if (v.kids) " (kids)" else "", {
                         menus.open = ItemMenu("Remove ${v.name}? Their favourites and Continue watching on this TV go too.", listOf("Remove" to { viewers.remove(v) }, "Keep" to {}))
-                    })
+                    }, if (i == 0) Modifier.focusRequester(afterPin) else Modifier)
                 }
                 if (list.size < Viewers.MAX) {
-                    NameField(name) { name = it.take(Viewers.MAX_NAME) }
+                    NameField(name, if (list.isEmpty()) Modifier.focusRequester(afterPin) else Modifier) { name = it.take(Viewers.MAX_NAME) }
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         TvButton("Add", { if (viewers.add(profile, name, kids = false) != null) name = "" }, enabled = name.isNotBlank())
                         if (hasPin) TvButton("Add as kids", { if (viewers.add(profile, name, kids = true) != null) name = "" }, enabled = name.isNotBlank())
@@ -245,7 +295,7 @@ private fun ViewersPanel(profile: Profile?) {
 
 /** A viewer's name: OK types with the TV's keyboard; Done, Up or Down moves on, as do Left and Right past either end of the text. */
 @Composable
-private fun NameField(value: String, onValue: (String) -> Unit) {
+private fun NameField(value: String, modifier: Modifier, onValue: (String) -> Unit) {
     val focusManager = LocalFocusManager.current
     var focused by remember { mutableStateOf(false) }
     // Kept as a TextFieldValue so the arrows know where the cursor is.
@@ -259,7 +309,7 @@ private fun NameField(value: String, onValue: (String) -> Unit) {
         cursorBrush = SolidColor(Tv.Accent),
         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
         keyboardActions = KeyboardActions(onDone = { focusManager.moveFocus(FocusDirection.Down) }),
-        modifier = Modifier.width(320.dp).onFocusChanged { focused = it.isFocused }.onPreviewKeyEvent { e ->
+        modifier = modifier.width(320.dp).onFocusChanged { focused = it.isFocused }.onPreviewKeyEvent { e ->
             val cursor = field.selection.takeIf { it.collapsed }?.start
             val dir = when (e.key) {
                 Key.DirectionUp -> FocusDirection.Up
@@ -299,7 +349,7 @@ private fun ParentalPinPanel(profile: Profile?) {
     val ctx = LocalContext.current
     val unlocked by ctx.app.adultUnlocked.collectAsState()
     val touch = LocalFormFactor.current.touch
-    val entry = pageEntry()
+    val memory = LocalFocusMemory.current
     var open by remember { mutableStateOf(false) }
     val firstKey = remember { FocusRequester() }
     LaunchedEffect(open) { if (open && !touch) { delay(50); runCatching { firstKey.requestFocus() } } }
@@ -312,8 +362,8 @@ private fun ParentalPinPanel(profile: Profile?) {
                 ctx.app.adultUnlocked.value = true
                 Usage.log(Usage.Action.SETTING_CHANGE, Usage.Word.PARENTAL_UNLOCK)
                 open = false
-                // The pad is gone; send focus back to the top of Settings.
-                if (!touch) entry.focus()
+                // The pad and its button are gone; focus goes to where it was before, close by.
+                if (!touch) memory?.restore()
             }
             else -> TvButton("Enter PIN", { open = true })
         }
