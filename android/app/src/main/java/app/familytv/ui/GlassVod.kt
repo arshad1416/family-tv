@@ -310,9 +310,11 @@ private fun RowScope.HeroCard(title: String, subtitle: String?, art: String?, ti
         Box(Modifier.fillMaxSize().background(Brush.linearGradient(tint)).border(1.dp, Color(0x24FFFFFF), shape))
         if (art != null) AsyncImage(art, contentDescription = null, contentScale = ContentScale.Crop, alignment = Alignment.TopCenter, modifier = Modifier.fillMaxSize())
         Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.35f to Color.Transparent, 1f to Color(0xC8000000))))
-        Column(Modifier.align(Alignment.BottomStart).padding(horizontal = 22.gx, vertical = 18.gx)) {
-            Text(title, fontSize = (if (subtitle != null) 22 else 16).gsp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            subtitle?.let { Text(it, fontSize = 14.gsp, color = Glass.Dim, maxLines = 1, modifier = Modifier.padding(top = 4.gx)) }
+        OnDarkArt {
+            Column(Modifier.align(Alignment.BottomStart).padding(horizontal = 22.gx, vertical = 18.gx)) {
+                Text(title, fontSize = (if (subtitle != null) 22 else 16).gsp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                subtitle?.let { Text(it, fontSize = 14.gsp, color = Glass.Dim, maxLines = 1, modifier = Modifier.padding(top = 4.gx)) }
+            }
         }
     }
 }
@@ -369,7 +371,7 @@ internal fun PageHeader(onBack: () -> Unit, title: String, art: Int? = null, det
         GlassBackButton(onBack)
         if (art != null) {
             val shape = RoundedCornerShape(12.gx)
-            Image(painterResource(art), contentDescription = title, contentScale = ContentScale.Crop, modifier = Modifier.size(112.gx, 63.gx).border(1.dp, Color(0x29FFFFFF), shape).padding(1.dp).background(Color.Black, shape))
+            Image(painterResource(art), contentDescription = title, contentScale = ContentScale.Crop, modifier = Modifier.size(112.gx, 63.gx).border(1.dp, Glass.LineSoft, shape).padding(1.dp).background(Color.Black, shape))
         } else {
             Text(title, fontSize = 34.gsp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }

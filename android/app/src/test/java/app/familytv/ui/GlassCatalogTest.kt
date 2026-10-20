@@ -20,6 +20,8 @@ class GlassCatalogTest {
         assertEquals(listOf(Provider.Sky), provider("SKY CINEMA"))
         assertEquals(listOf(Provider.Nickelodeon), provider("NICK JR"))
         assertEquals(emptyList<Provider>(), provider("EN - ACTION"))
+        // A language's own provider list stays with the language.
+        assertEquals(emptyList<Provider>(), provider("FR - NETFLIX FILMS"))
         // Whole words only: "SKYFALL" is a film, not Sky.
         assertEquals(emptyList<Provider>(), provider("SKYFALL COLLECTION"))
     }

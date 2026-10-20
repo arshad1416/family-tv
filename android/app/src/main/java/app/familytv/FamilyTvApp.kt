@@ -21,6 +21,7 @@ import app.familytv.trailer.MediaExtras
 import app.familytv.trakt.Trakt
 import app.familytv.usage.Usage
 import app.familytv.user.Favourites
+import app.familytv.user.GlassPrefs
 import app.familytv.user.MyCategoryOrder
 import app.familytv.user.SharedProgress
 import app.familytv.user.UserDb
@@ -51,6 +52,8 @@ class FamilyTvApp : Application() {
     val myCategoryOrder by lazy { MyCategoryOrder(this) }
     /** Settings' Stream quality for Live TV, Movies and Series. */
     val quality by lazy { QualityPrefs(this) }
+    /** The TV home's Appearance, weather city and world clocks. */
+    val glassPrefs by lazy { GlassPrefs(this) }
     /** The parental PIN was entered (Settings or Adult Content): adult content opens without it until the app restarts. */
     val adultUnlocked = MutableStateFlow(false)
 

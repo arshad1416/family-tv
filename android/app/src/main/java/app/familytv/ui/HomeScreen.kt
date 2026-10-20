@@ -551,7 +551,7 @@ fun PosterCard(
     val heart = touch && onFavourite != null
     Column(if (width != null) Modifier.width(width) else Modifier.fillMaxWidth()) {
         FocusBox(onClick = onClick, onLongClick = onMenu ?: onFavourite, onFocus = onFocus, outline = true, scale = FOCUS_SCALE, color = Tv.Raised, modifier = modifier.fillMaxWidth().aspectRatio(2f / 3f), contentAlignment = Alignment.Center) {
-            Text(name, Modifier.padding(8.dp), fontSize = 13.sp, maxLines = 4, color = Tv.Muted)
+            Text(name, Modifier.padding(8.dp), fontSize = 13.sp, maxLines = 4, color = MutedText)
             if (poster != null) {
                 if (logo) AsyncImage(poster, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize().padding(20.dp))
                 else AsyncImage(poster, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
@@ -565,11 +565,11 @@ fun PosterCard(
         }
         if (!touch && onTrailer != null) {
             Row(Modifier.padding(top = 4.dp).height(30.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 13.sp, color = Tv.Muted, modifier = Modifier.weight(1f))
+                Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 13.sp, color = MutedText, modifier = Modifier.weight(1f))
                 TrailerButton(onTrailer, compact = true)
             }
         } else {
-            Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 13.sp, color = Tv.Muted, modifier = Modifier.padding(top = 6.dp))
+            Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 13.sp, color = MutedText, modifier = Modifier.padding(top = 6.dp))
         }
     }
 }
@@ -631,7 +631,7 @@ fun rememberProgrammes(channels: List<ChannelEntity>, from: Long = System.curren
 }
 
 @Composable
-fun EmptyState(text: String) = Centered { Text(text, fontSize = 18.sp, color = Tv.Muted) }
+fun EmptyState(text: String) = Centered { Text(text, fontSize = 18.sp, color = MutedText) }
 
 @Composable
 fun Logo(url: String?, sizeDp: Int) {

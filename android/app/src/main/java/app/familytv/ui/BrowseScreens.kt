@@ -360,7 +360,7 @@ internal fun <T> PosterGrid(
 /** What an empty Favourites category says, and how to fill it. */
 @Composable
 internal fun FavouritesHint(text: String) {
-    Text(text, fontSize = 16.sp, color = Tv.Muted, modifier = Modifier.padding(bottom = 16.dp).widthIn(max = 560.dp))
+    Text(text, fontSize = 16.sp, color = MutedText, modifier = Modifier.padding(bottom = 16.dp).widthIn(max = 560.dp))
 }
 
 private fun vodHint(form: FormFactor, what: String) =

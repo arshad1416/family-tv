@@ -1,8 +1,13 @@
 package app.familytv.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,8 +22,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableIntState
 import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -31,14 +39,18 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.tv.material3.LocalContentColor
 import androidx.tv.material3.Text
+import app.familytv.app
 import app.familytv.data.Kind
 import app.familytv.portal.DeviceConfig
 import app.familytv.portal.Profile
 import app.familytv.usage.TrackScreen
 import app.familytv.usage.Usage
+import app.familytv.user.Appearance
 import kotlinx.coroutines.delay
 
 /** The TV's tabs, left to right. Each has its own glow and its own search. */
@@ -54,6 +66,8 @@ internal class GlassShell(
     val queries: Map<GlassTab, MutableState<String>>,
     val glow: MutableState<Color>,
     val barHidden: MutableState<Boolean>,
+    /** How many pages that keep the dark look (Settings, the guide, a film or show) are open. */
+    val darkPages: MutableIntState,
 )
 
 internal val LocalGlassShell = staticCompositionLocalOf<GlassShell?> { null }
@@ -73,8 +87,21 @@ internal fun GlassBarHidden() {
 }
 
 /**
+ * Keeps the dark look while this is composed: Settings, the TV guide and the film and show pages
+ * are still drawn for it. Does nothing off the TV's glass home.
+ */
+@Composable
+internal fun GlassDarkPage() {
+    val shell = LocalGlassShell.current ?: return
+    DisposableEffect(shell) {
+        shell.darkPages.intValue++
+        onDispose { shell.darkPages.intValue-- }
+    }
+}
+
+/**
  * The TV home: a top bar of tabs (Live TV, Movies, TV Shows, Sports) with the tab's own search,
- * the clock and Settings, over the tab's page. Back inside a page goes up to the tabs; Back on the
+ * the clock, Appearance and Settings, over the tab's page, and the weather panel below it. Back inside a page goes up to the tabs; Back on the
  * tabs leaves the app as before. Each tab keeps its place (and its search) while another is open.
  */
 @Composable
@@ -88,6 +115,12 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
     val entry = remember { PageEntry() }
     val glow = remember { mutableStateOf(tab.glow) }
     val barHidden = remember { mutableStateOf(false) }
+    val darkPages = remember { mutableIntStateOf(0) }
+    val prefs = LocalContext.current.app.glassPrefs
+    val appearance by prefs.appearance.collectAsState()
+    val weather = rememberGlassWeather()
+    var panel by remember { mutableStateOf(false) }
+    val pageFocus = remember { FocusRequester() }
     var barFocused by remember { mutableStateOf(false) }
     var anyFocused by remember { mutableStateOf(false) }
     val focusBar = { runCatching { (if (settings) settingsFocus else tabFocus.getValue(tab)).requestFocus() } }
@@ -98,14 +131,27 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
     LaunchedEffect(Unit) { delay(50); focusBar() }
     LaunchedEffect(settings) { if (!settings && barFocused) { delay(50); focusBar() } }
 
-    val shell = remember { GlassShell(queries, glow, barHidden) }
+    val shell = remember { GlassShell(queries, glow, barHidden, darkPages) }
     val shown by animateColorAsState(glow.value, tween(500), label = "glow")
+    val lightness = rememberLightness(appearance, weather.forecast)
+    val t = if (darkPages.intValue > 0) 0f else lightness
+    val palette = remember(t) { GlassPalette.lerp(GlassPalette.Dark, GlassPalette.Light, t) }
+    // Closing the panel hands focus back to where it was on the page.
+    var panelSeen by remember { mutableStateOf(false) }
+    LaunchedEffect(panel) {
+        if (panel) { panelSeen = true; return@LaunchedEffect }
+        if (!panelSeen) return@LaunchedEffect
+        delay(50)
+        if (runCatching { pageFocus.requestFocus() }.isFailure) entry.focus()
+    }
     val pages = rememberSaveableStateHolder()
     CompositionLocalProvider(
         LocalGlass provides true,
         LocalGlassScale provides rememberGlassScale(),
         LocalGlassShell provides shell,
         LocalPageEntry provides entry,
+        LocalGlassPalette provides palette,
+        LocalContentColor provides palette.text,
     ) {
         GlassBackground(shown) {
             // Inside the TV's overscan safe zone (48 dp across, 27 dp down).
@@ -117,14 +163,17 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
                         onTab = { tab = it; settings = false },
                         onSettings = { settings = true },
                         onFocused = { barFocused = it },
+                        appearance = appearance,
+                        onAppearance = prefs::setAppearance,
                     )
                     Spacer(Modifier.height(22.gx))
                 }
-                Box(Modifier.weight(1f).fillMaxWidth().restoresFocus(entry)) {
+                Box(Modifier.weight(1f).fillMaxWidth().focusRequester(pageFocus).restoresFocus(entry)) {
                     pages.SaveableStateProvider(if (settings) "settings" else tab.name) {
                         if (settings) {
                             TrackScreen(Usage.Screen.SETTINGS)
                             GlassGlow(Color(0xFF7A8BA8))
+                            GlassDarkPage()
                             SettingsScreen(vm, config)
                         } else {
                             TrackScreen(tab.usage)
@@ -139,12 +188,22 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
                     }
                 }
             }
+            if (!panel && !settings && !barHidden.value && darkPages.intValue == 0) {
+                WeatherHint({ panel = true }, Modifier.align(Alignment.BottomCenter).padding(bottom = 4.gx))
+            }
+            AnimatedVisibility(
+                panel, Modifier.align(Alignment.BottomCenter),
+                enter = slideInVertically(tween(300)) { it } + fadeIn(tween(300)),
+                exit = slideOutVertically(tween(250)) { it } + fadeOut(tween(250)),
+            ) {
+                WeatherPanel(weather, onClose = { panel = false })
+            }
         }
     }
 }
 
 /**
- * The tabs, this tab's search, the clock and Settings. Focus resting on a tab opens it. Movies and
+ * The tabs, this tab's search, the clock, the Appearance switch and Settings. Focus resting on a tab opens it. Movies and
  * TV Shows put the title above the tabs, to make room for the YouTube and JustWatch buttons.
  */
 @Composable
@@ -157,6 +216,8 @@ private fun GlassTopBar(
     onTab: (GlassTab) -> Unit,
     onSettings: () -> Unit,
     onFocused: (Boolean) -> Unit,
+    appearance: Appearance,
+    onAppearance: (Appearance) -> Unit,
 ) {
     val apps = !settings && (tab == GlassTab.Movies || tab == GlassTab.Series)
     val hovered = remember { mutableStateOf<GlassTab?>(null) }
@@ -192,6 +253,7 @@ private fun GlassTopBar(
         Row(horizontalArrangement = Arrangement.spacedBy(12.gx), verticalAlignment = Alignment.CenterVertically) {
             if (apps) AppButtons()
             Box(Modifier.padding(start = 6.gx)) { GlassClock() }
+            AppearanceSwitch(appearance, onAppearance, Modifier.onFocusChanged { if (it.isFocused) hovered.value = null })
             SettingsButton(settings, settingsFocus, onSettings)
         }
     }

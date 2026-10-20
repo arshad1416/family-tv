@@ -34,7 +34,8 @@ enum class Provider(val label: String, @DrawableRes val art: Int, val glow: Long
     Universal("Universal", R.drawable.provider_universal, 0xFF9AA4B2, """\bUNIVERSAL\b"""),
     ;
 
-    private val regex = Regex(pattern, RegexOption.IGNORE_CASE)
+    // The name must start with the provider: "FR - NETFLIX FILMS" stays with French.
+    private val regex = Regex("""^\s*(?:$pattern)""", RegexOption.IGNORE_CASE)
 
     fun matches(categoryName: String): Boolean = regex.containsMatchIn(Names.clean(categoryName))
 }
@@ -47,14 +48,15 @@ enum class LanguageGroup(val label: String, pattern: String) {
     English("English", """^(EN\s*[-|]|ENGLISH\b)"""),
     Hindi("Hindi", """^(IN\s*[-|]|INDIAN?\b|HINDI\b)"""),
     Pakistani("Pakistani", """^(PK\s*[-|]|PAKISTANI?\b)"""),
-    Persian("Persian", """^(IR\s*[-|]|PERSIAN\b|IRAN\b)"""),
-    Philippines("Philippines", """^(PH\s*[-|]|PHILIPPINES?\b|FILIPINO\b)"""),
+    Persian("Persian", """^((IR|FA)\s*[-|]|PERSIAN\b|FARSI\b|IRAN\b)"""),
+    Philippines("Philippines", """^(PH\s*[-|]|PHILIPPINES?\b|FILIPINO\b|TAGALOG\b)"""),
     Arabic("Arabic", """^(AR\s*[-|]|ARABIC\b)"""),
     French("French", """^(FR\s*[-|]|FRANCE\b|FRENCH\b)"""),
     Quebec("Québec", """^(QC\s*[-|]|QU[EÉ]BEC\b)"""),
     Bengali("Bengali", """^(BN\s*[-|]|BENGALI\b|BANGLA)"""),
     Japanese("Japanese", """^(JP\s*[-|]|JAPAN(ESE)?\b)"""),
     Turkish("Turkish", """^(TR\s*[-|]|TURKISH\b)"""),
+    Spanish("Spanish", """^(ES\s*[-|]|SPANISH\b|ESPA[NÑ]OL\b)"""),
     African("African", """^(AF\s*[-|]|AFRICAN?\b)"""),
     Somali("Somali", """^(SO\s*[-|]|SOMALI\b)"""),
     Asian("Asian", """^ASIA(N)?\b"""),

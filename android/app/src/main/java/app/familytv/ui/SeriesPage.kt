@@ -136,8 +136,10 @@ fun SeriesNav.Host(vm: MainViewModel, profile: Profile, content: @Composable () 
     val o = open
     val m = movie
     if (o != null) {
+        GlassDarkPage()
         SeriesPage(profile, o, visible) { back = o.key; refocus = true; open = null }
     } else if (m != null) {
+        GlassDarkPage()
         MoviePage(profile, m.first, m.second) { back = m.first.key; refocus = true; movie = null }
     } else {
         CompositionLocalProvider(LocalSeriesNav provides this) { content() }

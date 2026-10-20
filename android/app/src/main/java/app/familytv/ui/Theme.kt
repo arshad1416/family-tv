@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -56,6 +57,9 @@ object Tv {
     val Bad = Color(0xFFF87171)
     val Shape = RoundedCornerShape(10.dp)
 }
+
+/** Secondary text: [Tv.Muted], or the glass look's own dim text on the TV's glass pages (dark in the light look). */
+val MutedText: Color @Composable @ReadOnlyComposable get() = if (LocalGlass.current) Glass.Dim else Tv.Muted
 
 @Composable
 fun FamilyTvTheme(content: @Composable () -> Unit) {

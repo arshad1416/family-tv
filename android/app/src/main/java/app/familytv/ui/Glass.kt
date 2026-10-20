@@ -30,6 +30,11 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.runtime.Composable
+import androidx.tv.material3.LocalContentColor
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
@@ -64,6 +69,7 @@ import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
@@ -76,40 +82,114 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
- * The TV's "liquid glass" look (parity checklist, "Spec: Liquid glass TV design"): white glass
- * panels over a dark gradient with one soft coloured glow per screen. Phones and tablets keep
- * the [Tv] look.
+ * The TV's "liquid glass" look (parity checklist, "Spec: Liquid glass TV design"): glass panels
+ * over a gradient with one soft coloured glow per screen, dark or light ([GlassPalette], chosen by
+ * the Appearance switch). Phones and tablets keep the [Tv] look.
  */
 object Glass {
-    /** A panel: white at about 8% over the background. */
-    val Fill = Color(0x14FFFFFF)
+    private val p: GlassPalette @Composable @ReadOnlyComposable get() = LocalGlassPalette.current
+
+    /** A panel: white at about 8% over the dark background. */
+    val Fill: Color @Composable @ReadOnlyComposable get() = p.fill
     /** Buttons, pills and the search box: a little more white. */
-    val Raised = Color(0x1AFFFFFF)
+    val Raised: Color @Composable @ReadOnlyComposable get() = p.raised
     /** A focused row or pill that isn't selected. */
-    val Focus = Color(0x2EFFFFFF)
+    val Focus: Color @Composable @ReadOnlyComposable get() = p.focus
     /** Panel edges, 1 px at about 20%. */
-    val Line = Color(0x33FFFFFF)
-    val LineSoft = Color(0x24FFFFFF)
-    /** The selected tab: a white pill with dark text. */
-    val Selected = Color(0xEBFFFFFF)
-    val OnSelected = Color(0xFF0B0F18)
+    val Line: Color @Composable @ReadOnlyComposable get() = p.line
+    val LineSoft: Color @Composable @ReadOnlyComposable get() = p.lineSoft
+    /** The tall Live TV columns and lists: a lighter panel. */
+    val Panel: Color @Composable @ReadOnlyComposable get() = p.panel
+    val PanelLine: Color @Composable @ReadOnlyComposable get() = p.panelLine
+    /** The selected tab: a white pill with dark text (dark with white text in the light look). */
+    val Selected: Color @Composable @ReadOnlyComposable get() = p.selected
+    val OnSelected: Color @Composable @ReadOnlyComposable get() = p.onSelected
     /** The focus ring. */
-    val Ring = Color(0xF2FFFFFF)
-    val Text = Color(0xFFF5F7FA)
-    val Dim = Color(0xB3F5F7FA)
-    val Faint = Color(0x99F5F7FA)
+    val Ring: Color @Composable @ReadOnlyComposable get() = p.ring
+    val Text: Color @Composable @ReadOnlyComposable get() = p.text
+    /** Row text and headings: a touch softer than [Text]. */
+    val Soft: Color @Composable @ReadOnlyComposable get() = p.soft
+    val Dim: Color @Composable @ReadOnlyComposable get() = p.dim
+    val Faint: Color @Composable @ReadOnlyComposable get() = p.faint
     val Live = Color(0xFFE0242B)
 
     /** What [FocusBox] paints on glass pages: the [Tv] panel colours become glass, focus a white wash. */
+    @Composable
+    @ReadOnlyComposable
     internal fun fill(color: Color, focused: Boolean, selected: Boolean): Color = when {
         color == Selected -> Selected
         focused -> Focus
-        selected -> Color(0x24FFFFFF)
+        selected -> p.selectedSoft
         color == Tv.Panel -> Fill
-        color == Tv.Raised -> Color(0x1FFFFFFF)
+        color == Tv.Raised -> p.raisedAlt
         else -> color
     }
 }
+
+/** The glass look's colours; [Dark] is the design as approved, [Light] its daytime version. */
+@Immutable
+class GlassPalette(
+    val fill: Color,
+    val raised: Color,
+    val raisedAlt: Color,
+    val focus: Color,
+    val line: Color,
+    val lineSoft: Color,
+    val panel: Color,
+    val panelLine: Color,
+    val selected: Color,
+    val selectedSoft: Color,
+    val onSelected: Color,
+    val ring: Color,
+    val text: Color,
+    val soft: Color,
+    val dim: Color,
+    val faint: Color,
+    /** The background's radial gradient, top left to the far corner. */
+    val top: Color,
+    val middle: Color,
+    val bottom: Color,
+    /** How strongly the screen's glow shows. */
+    val glow: Float,
+) {
+    companion object {
+        val Dark = GlassPalette(
+            fill = Color(0x14FFFFFF), raised = Color(0x1AFFFFFF), raisedAlt = Color(0x1FFFFFFF), focus = Color(0x2EFFFFFF),
+            line = Color(0x33FFFFFF), lineSoft = Color(0x24FFFFFF), panel = Color(0x12FFFFFF), panelLine = Color(0x2EFFFFFF),
+            selected = Color(0xEBFFFFFF), selectedSoft = Color(0x24FFFFFF), onSelected = Color(0xFF0B0F18), ring = Color(0xF2FFFFFF),
+            text = Color(0xFFF5F7FA), soft = Color(0xD9F5F7FA), dim = Color(0xB3F5F7FA), faint = Color(0x99F5F7FA),
+            top = Color(0xFF151B28), middle = Color(0xFF10141D), bottom = Color(0xFF07090F), glow = 0.30f,
+        )
+
+        /** The mockup's "Light mode" board: frosted white panels and dark text on a pale gradient. */
+        val Light = GlassPalette(
+            fill = Color(0x73FFFFFF), raised = Color(0x8CFFFFFF), raisedAlt = Color(0x99FFFFFF), focus = Color(0xE6FFFFFF),
+            line = Color(0xE6FFFFFF), lineSoft = Color(0xB3FFFFFF), panel = Color(0x73FFFFFF), panelLine = Color(0xE6FFFFFF),
+            selected = Color(0xFF0B0F18), selectedSoft = Color(0x1F0B0F18), onSelected = Color(0xFFFFFFFF), ring = Color(0xFF0B0F18),
+            text = Color(0xFF0B0F18), soft = Color(0xD90B0F18), dim = Color(0x9E0B0F18), faint = Color(0x8C0B0F18),
+            top = Color(0xFFFFFFFF), middle = Color(0xFFE8EDF6), bottom = Color(0xFFCFD8E8), glow = 0.22f,
+        )
+
+        /** Between [a] (at 0) and [b] (at 1), for the crossfade when the look changes. */
+        fun lerp(a: GlassPalette, b: GlassPalette, t: Float): GlassPalette {
+            fun c(x: Color, y: Color) = androidx.compose.ui.graphics.lerp(x, y, t)
+            return GlassPalette(
+                c(a.fill, b.fill), c(a.raised, b.raised), c(a.raisedAlt, b.raisedAlt), c(a.focus, b.focus), c(a.line, b.line),
+                c(a.lineSoft, b.lineSoft), c(a.panel, b.panel), c(a.panelLine, b.panelLine), c(a.selected, b.selected),
+                c(a.selectedSoft, b.selectedSoft), c(a.onSelected, b.onSelected), c(a.ring, b.ring), c(a.text, b.text), c(a.soft, b.soft),
+                c(a.dim, b.dim), c(a.faint, b.faint), c(a.top, b.top), c(a.middle, b.middle), c(a.bottom, b.bottom), a.glow + (b.glow - a.glow) * t,
+            )
+        }
+    }
+}
+
+/** The glass colours in use; the TV home crossfades it between [GlassPalette.Dark] and [GlassPalette.Light]. */
+val LocalGlassPalette = compositionLocalOf { GlassPalette.Dark }
+
+/** Artwork with its own dark shading (hero cards, the live preview) keeps light text in either look. */
+@Composable
+internal fun OnDarkArt(content: @Composable () -> Unit) =
+    CompositionLocalProvider(LocalGlassPalette provides GlassPalette.Dark, LocalContentColor provides GlassPalette.Dark.text, content = content)
 
 /** True on the TV's glass pages: [FocusBox] rings focus in white there instead of painting it blue. */
 val LocalGlass = staticCompositionLocalOf { false }
@@ -132,17 +212,23 @@ internal fun rememberGlassScale(): Float {
 }
 
 /** A glass panel's fill and 1 px edge. */
-fun Modifier.glass(shape: Shape, fill: Color = Glass.Fill, line: Color = Glass.Line): Modifier =
+fun Modifier.glass(shape: Shape, fill: Color, line: Color): Modifier =
     clip(shape).background(fill).border(1.dp, line, shape)
 
-/** The dark radial gradient with [glow] softly lighting the top right. */
+/** A glass panel in the current look. */
+@Composable
+@ReadOnlyComposable
+fun Modifier.glass(shape: Shape): Modifier = glass(shape, Glass.Fill, Glass.Line)
+
+/** The radial gradient with [glow] softly lighting the top right. */
 @Composable
 internal fun GlassBackground(glow: Color, modifier: Modifier = Modifier, content: @Composable BoxScope.() -> Unit) {
-    val top = lerp(Color(0xFF151B28), glow, 0.16f)
+    val p = LocalGlassPalette.current
+    val top = lerp(p.top, glow, 0.16f)
     Box(
         modifier.fillMaxSize().drawBehind {
-            drawRect(Brush.radialGradient(0f to top, 0.45f to Color(0xFF10141D), 1f to Color(0xFF07090F), center = Offset(size.width * 0.22f, 0f), radius = size.width * 1.1f))
-            drawRect(Brush.radialGradient(listOf(glow.copy(alpha = 0.30f), glow.copy(alpha = 0.10f), Color.Transparent), center = Offset(size.width * 0.78f, size.height * 0.04f), radius = size.width * 0.42f))
+            drawRect(Brush.radialGradient(0f to top, 0.45f to p.middle, 1f to p.bottom, center = Offset(size.width * 0.22f, 0f), radius = size.width * 1.1f))
+            drawRect(Brush.radialGradient(listOf(glow.copy(alpha = p.glow), glow.copy(alpha = p.glow / 3), Color.Transparent), center = Offset(size.width * 0.78f, size.height * 0.04f), radius = size.width * 0.42f))
         },
         content = content,
     )
@@ -170,8 +256,9 @@ internal fun GlassPill(
     ) { focused ->
         Row(Modifier.padding(horizontal = padH, vertical = padV), verticalAlignment = Alignment.CenterVertically) {
             icon?.let { it(); Spacer(Modifier.width(10.gx)) }
+            // Labels never wrap: one line, centred in the pill.
             Text(
-                text, fontSize = fontSize, maxLines = 1,
+                text, fontSize = fontSize, maxLines = 1, softWrap = false, textAlign = TextAlign.Center,
                 fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
                 color = when { selected -> Glass.OnSelected; focused -> Glass.Text; else -> Glass.Dim },
             )
@@ -198,13 +285,13 @@ internal fun GlassBackButton(onClick: () -> Unit, modifier: Modifier = Modifier)
 @Composable
 internal fun GlassClock() {
     val now by produceState(System.currentTimeMillis()) { while (true) { delay(15_000); value = System.currentTimeMillis() } }
-    Text(time(now), fontSize = 20.gsp, color = Color(0xD9F5F7FA), maxLines = 1)
+    Text(time(now), fontSize = 20.gsp, color = Glass.Soft, maxLines = 1)
 }
 
 /** A small section heading ("Providers"). */
 @Composable
 internal fun GlassHeading(text: String, modifier: Modifier = Modifier) {
-    Text(text, fontSize = 17.gsp, fontWeight = FontWeight.SemiBold, color = Color(0xE6F5F7FA), modifier = modifier)
+    Text(text, fontSize = 17.gsp, fontWeight = FontWeight.SemiBold, color = Glass.Soft, modifier = modifier)
 }
 
 /** A column heading inside a panel ("GENRE"). */
@@ -242,7 +329,7 @@ internal fun GlassSearchBox(query: String, onQuery: (String) -> Unit, hint: Stri
                 Icon(Icons.Filled.Search, contentDescription = null, tint = Glass.Dim, modifier = Modifier.size(18.gx))
                 Spacer(Modifier.width(10.gx))
                 Box(Modifier.weight(1f)) {
-                    if (query.isEmpty()) Text(hint, fontSize = 15.gsp, color = Color(0xA6F5F7FA), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    if (query.isEmpty()) Text(hint, fontSize = 15.gsp, color = Glass.Dim, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     inner()
                 }
             }
@@ -315,7 +402,7 @@ internal fun <T> FollowFocus(state: MutableState<T?>, onRest: (T) -> Unit) {
 /** A tall glass column ("Genre", "Country") of selectable rows. */
 @Composable
 internal fun GlassColumnPanel(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
-    Column(modifier.glass(RoundedCornerShape(24.gx), Color(0x12FFFFFF), Color(0x2EFFFFFF)).padding(12.gx), verticalArrangement = Arrangement.spacedBy(6.gx)) { content() }
+    Column(modifier.glass(RoundedCornerShape(24.gx), Glass.Panel, Glass.PanelLine).padding(12.gx), verticalArrangement = Arrangement.spacedBy(6.gx)) { content() }
 }
 
 /** One selectable row in a [GlassColumnPanel]: white with dark text when selected. */
@@ -333,7 +420,7 @@ internal fun GlassRowItem(
             Text(
                 text, fontSize = 16.gsp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
                 fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                color = if (selected) Glass.OnSelected else Color(0xD9F5F7FA),
+                color = if (selected) Glass.OnSelected else Glass.Soft,
             )
             count?.let { Text("$it", fontSize = 16.gsp, maxLines = 1, color = (if (selected) Glass.OnSelected else Glass.Text).copy(alpha = 0.6f)) }
         }

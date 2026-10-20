@@ -33,6 +33,7 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.focusRestorer
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -87,6 +88,7 @@ internal fun LiveTab(vm: MainViewModel, profile: Profile) {
     when {
         guide -> Column {
             TrackScreen(Usage.Screen.GUIDE)
+            GlassDarkPage()
             PageHeader({ guide = false }, TV_GUIDE)
             GuideScreen(vm, profile)
         }
@@ -181,13 +183,17 @@ private fun ChannelBrowser(
 ) {
     val ctx = LocalContext.current
     var focused by remember { mutableStateOf<ChannelEntity?>(null) }
+    var inList by remember { mutableStateOf(false) }
     val shown = focused?.takeIf { f -> channels.any { it.sourceId == f.sourceId && it.streamId == f.streamId } } ?: channels.firstOrNull()
+    // Only a channel focus is resting on plays, never the first one shown while focus is in the columns.
+    val video = rememberLivePreview()
+    PreviewFollows(video, shown.takeIf { inList && focused != null })
     // A fixed start, so focus moving down the list doesn't re-read the guide.
     val from = remember(channels) { System.currentTimeMillis() }
     val progs = rememberProgrammes(channels, from = from)
-    val preview: @Composable (Modifier) -> Unit = { m -> ChannelPreview(shown, shown?.epgId?.let { progs[it] }.orEmpty(), live = side, modifier = m) }
+    val preview: @Composable (Modifier) -> Unit = { m -> ChannelPreview(shown, shown?.epgId?.let { progs[it] }.orEmpty(), live = side, video, modifier = m) }
     val list: @Composable (Modifier) -> Unit = { m ->
-        Column(m.glass(RoundedCornerShape(24.gx), Color(0x12FFFFFF), Color(0x2EFFFFFF)).padding(10.gx)) {
+        Column(m.glass(RoundedCornerShape(24.gx), Glass.Panel, Glass.PanelLine).onFocusChanged { inList = it.hasFocus }.padding(10.gx)) {
             header?.let { GlassLabel(it) }
             when {
                 loading -> Text("Finding the channels…", fontSize = 15.gsp, color = Glass.Dim, modifier = Modifier.padding(12.gx))
@@ -200,7 +206,12 @@ private fun ChannelBrowser(
                             modifier = entryPoint(entry && i == 0),
                             onFocus = { focused = ch },
                             onFavourite = { toggleFavourite(ctx, Kind.LIVE, ch.sourceId, ch.streamId, ch.name) },
-                        ) { onPick(i); playLive(ctx, ch.sourceId, ch.categoryId, 0, ch.streamId) }
+                        ) {
+                            onPick(i)
+                            // The line's one connection goes to full screen.
+                            video.stop()
+                            playLive(ctx, ch.sourceId, ch.categoryId, 0, ch.streamId)
+                        }
                     }
                 }
             }
@@ -220,11 +231,11 @@ private fun ChannelBrowser(
 }
 
 /**
- * The focused channel: its programme's picture (or its logo), a red LIVE badge on Sports, and a
- * glass label with the name and Now / Next.
+ * The focused channel: its live [video] once it plays, until then its programme's picture (or its
+ * logo); a red LIVE badge on Sports, and a glass label with the name and Now / Next.
  */
 @Composable
-private fun ChannelPreview(c: ChannelEntity?, progs: List<NowNext>, live: Boolean, modifier: Modifier) {
+private fun ChannelPreview(c: ChannelEntity?, progs: List<NowNext>, live: Boolean, video: LivePreview, modifier: Modifier) {
     val ctx = LocalContext.current
     val now = progs.firstOrNull { it.start <= System.currentTimeMillis() } ?: progs.firstOrNull()
     val next = progs.getOrNull(progs.indexOf(now) + 1)
@@ -237,26 +248,30 @@ private fun ChannelPreview(c: ChannelEntity?, progs: List<NowNext>, live: Boolea
         picture = ctx.app.db.catalog().programme(p.epgId, p.start)?.icon
     }
     val shape = RoundedCornerShape(24.gx)
-    Box(modifier.clip(shape).background(Brush.linearGradient(if (live) listOf(Color(0xFF24533A), Color(0xFF0E1D15)) else listOf(Color(0xFF2A4456), Color(0xFF101A22)))).border(1.dp, Color(0x2EFFFFFF), shape)) {
-        val art = picture
-        when {
-            art != null -> AsyncImage(art, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-            c?.logo != null -> AsyncImage(c.logo, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.align(Alignment.Center).fillMaxSize(0.42f))
-        }
-        if (live && c != null) {
-            Text(
-                "LIVE", fontSize = 13.gsp, fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp,
-                modifier = Modifier.padding(16.gx).clip(RoundedCornerShape(50)).background(Glass.Live).padding(horizontal = 12.gx, vertical = 6.gx),
-            )
-        }
-        if (c != null) {
-            Column(
-                Modifier.align(Alignment.BottomStart).padding(16.gx).then(if (live) Modifier.fillMaxWidth() else Modifier)
-                    .glass(RoundedCornerShape(16.gx), Color(0x8C0A0E14), Glass.Line).padding(horizontal = 16.gx, vertical = 10.gx),
-            ) {
-                Text(listOfNotNull(c.num.takeIf { !live && it > 0 }?.toString(), c.displayName).joinToString("  ·  "), fontSize = 16.gsp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                val line = listOfNotNull(now?.let { "Now: ${it.title}" }, next?.let { "Next: ${it.title}" }).joinToString("  ·  ")
-                if (line.isNotEmpty()) Text(line, fontSize = 13.gsp, color = Glass.Dim, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    // Over the dark art the text stays light in either look.
+    OnDarkArt {
+        Box(modifier.clip(shape).background(Brush.linearGradient(if (live) listOf(Color(0xFF24533A), Color(0xFF0E1D15)) else listOf(Color(0xFF2A4456), Color(0xFF101A22)))).border(1.dp, Color(0x2EFFFFFF), shape)) {
+            val art = picture
+            when {
+                art != null -> AsyncImage(art, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                c?.logo != null -> AsyncImage(c.logo, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.align(Alignment.Center).fillMaxSize(0.42f))
+            }
+            if (video.active) PreviewVideo(video, Modifier.fillMaxSize().background(Color.Black))
+            if (live && c != null) {
+                Text(
+                    "LIVE", fontSize = 13.gsp, fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp,
+                    modifier = Modifier.padding(16.gx).clip(RoundedCornerShape(50)).background(Glass.Live).padding(horizontal = 12.gx, vertical = 6.gx),
+                )
+            }
+            if (c != null) {
+                Column(
+                    Modifier.align(Alignment.BottomStart).padding(16.gx).then(if (live) Modifier.fillMaxWidth() else Modifier)
+                        .glass(RoundedCornerShape(16.gx), Color(0x8C0A0E14), Glass.Line).padding(horizontal = 16.gx, vertical = 10.gx),
+                ) {
+                    Text(listOfNotNull(c.num.takeIf { !live && it > 0 }?.toString(), c.displayName).joinToString("  ·  "), fontSize = 16.gsp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    val line = listOfNotNull(now?.let { "Now: ${it.title}" }, next?.let { "Next: ${it.title}" }).joinToString("  ·  ")
+                    if (line.isNotEmpty()) Text(line, fontSize = 13.gsp, color = Glass.Dim, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
             }
         }
     }
@@ -277,7 +292,7 @@ private fun ChannelRow(
     FocusBox(onClick = onClick, onLongClick = onFavourite, onFocus = onFocus, color = Color.Transparent, shape = RoundedCornerShape(14.gx), modifier = modifier.fillMaxWidth()) {
         Row(Modifier.padding(horizontal = 12.gx, vertical = 8.gx), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.gx)) {
             if (numbers) Text("${c.num}", fontSize = 15.gsp, color = Glass.Dim, maxLines = 1, modifier = Modifier.width(40.gx))
-            Box(Modifier.size(54.gx, 32.gx).clip(RoundedCornerShape(8.gx)).background(Color(0x24FFFFFF)), contentAlignment = Alignment.Center) {
+            Box(Modifier.size(54.gx, 32.gx).clip(RoundedCornerShape(8.gx)).background(Glass.Raised), contentAlignment = Alignment.Center) {
                 if (c.logo != null) AsyncImage(c.logo, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize().padding(3.gx))
             }
             Text(c.displayName, fontSize = 16.gsp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.width(if (numbers) 230.gx else 200.gx))
@@ -365,9 +380,9 @@ internal fun SportsTab(profile: Profile) {
                         modifier = entryPoint(on).size(112.gx, 92.gx), contentAlignment = Alignment.Center,
                     ) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(t.icon, contentDescription = null, tint = if (on) Glass.OnSelected else Color(0xE6F5F7FA), modifier = Modifier.size(34.gx))
+                            Icon(t.icon, contentDescription = null, tint = if (on) Glass.OnSelected else Glass.Soft, modifier = Modifier.size(34.gx))
                             Spacer(Modifier.height(8.gx))
-                            Text(t.label, fontSize = 14.gsp, fontWeight = FontWeight.SemiBold, maxLines = 1, color = if (on) Glass.OnSelected else Color(0xE6F5F7FA))
+                            Text(t.label, fontSize = 14.gsp, fontWeight = FontWeight.SemiBold, maxLines = 1, color = if (on) Glass.OnSelected else Glass.Soft)
                         }
                     }
                 }

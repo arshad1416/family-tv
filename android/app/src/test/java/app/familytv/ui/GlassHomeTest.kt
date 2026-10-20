@@ -2,9 +2,11 @@ package app.familytv.ui
 
 import android.content.Context
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
@@ -19,7 +21,11 @@ import app.familytv.data.Kind
 import app.familytv.data.MovieEntity
 import app.familytv.portal.DeviceConfig
 import app.familytv.portal.Profile
+import app.familytv.user.Appearance
+import app.familytv.weather.WeatherTest
 import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -60,6 +66,8 @@ class GlassHomeTest {
         dao.upsertChannels(listOf(channel("100", "BBC News", "1", 101), channel("200", "NHL Network", "2", 201)))
         fun movie(id: String, name: String, cat: String, added: Long) = MovieEntity("s", id, name, null, cat, "8.1", "mp4", null, added, 0, titleKey = name.lowercase())
         dao.upsertMovies(listOf(movie("1000", "Star Wars", "10", 2), movie("1001", "The Irishman", "11", 1)))
+        // A fresh saved forecast, so the panel never asks Open-Meteo during tests.
+        app.glassPrefs.saveWeather(System.currentTimeMillis(), WeatherTest.SAMPLE)
     }
 
     private fun home() = rule.setContent { HomeScreen(MainViewModel(app), DeviceConfig(paired = true, profile = Profile())) }
@@ -103,6 +111,31 @@ class GlassHomeTest {
         waitFor("Search movies")
         rule.onNode(hasSetTextAction()).performTextInput("star")
         waitFor("Star Wars")
+    }
+
+    @Test
+    fun appearanceSwitchStepsAndIsSaved() {
+        home()
+        waitFor("Search movies")
+        rule.onNodeWithContentDescription("Appearance: Auto").performClick()
+        rule.waitUntilAtLeastOneExists(hasContentDescription("Appearance: Dark"), 10_000)
+        assertEquals(Appearance.DARK, app.glassPrefs.appearance.value)
+        rule.onNodeWithContentDescription("Appearance: Dark").performClick()
+        rule.waitUntilAtLeastOneExists(hasContentDescription("Appearance: Light"), 10_000)
+    }
+
+    @Test
+    fun weatherPanelShowsTheWeatherAndOptionalClocks() {
+        home()
+        waitFor("Weather and clocks")
+        rule.onNodeWithText("Weather and clocks").performClick()
+        waitFor("12°")
+        waitFor("Partly cloudy")
+        waitFor("World clocks")
+        waitFor("Switch on Show world clocks to see the time in up to 4 countries.")
+        rule.onNodeWithText("Show world clocks").performClick()
+        waitFor("Karachi")
+        assertTrue(app.glassPrefs.clocksOn.value)
     }
 
     /** The app schedules its background check-in as it starts; Robolectric doesn't run WorkManager's own start-up. */
