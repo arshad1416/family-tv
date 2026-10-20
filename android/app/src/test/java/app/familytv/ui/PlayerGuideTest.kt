@@ -1,5 +1,6 @@
 package app.familytv.ui
 
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -48,6 +49,21 @@ class PlayerGuideTest {
         assertEquals(6, picked)
         assertNotNull(window)
         assertEquals(16f / 9f, window!!.width / window!!.height, 0.02f)
+    }
+
+    /** Over the video, the hint says where Back goes: the Live TV page on the TV, the categories on a touch screen. */
+    @Test
+    fun theHintOverTheVideoSaysWhereBackGoes() {
+        var form by mutableStateOf(FormFactor.Tv)
+        rule.setContent {
+            CompositionLocalProvider(LocalFormFactor provides form) {
+                PlayerGuide(GuideMode.Over, channels, playing = 5, favKeys = emptySet(), onPick = {}, onWindow = {})
+            }
+        }
+        rule.onNodeWithText("Back: Live TV", substring = true).assertExists()
+        form = FormFactor.Tablet
+        rule.waitForIdle()
+        rule.onNodeWithText("Back: categories", substring = true).assertExists()
     }
 
     /** Back's category list: focus starts on the shown category, and OK on another shows its channels from the top. */

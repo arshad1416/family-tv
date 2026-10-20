@@ -219,12 +219,14 @@ fun PlayerGuide(
                     }
                 }
             }
+            // On the TV, Back from the guide over the video goes straight to the Live TV page; touch screens step to the categories first.
+            val touch = LocalFormFactor.current.touch
             Text(
                 when {
                     open -> "OK: show this category   ·   Right: back to the guide   ·   Back: leave live TV"
                     mode == GuideMode.Picture && categories != null -> "OK: watch here, OK again: full screen   ·   Back: categories"
                     mode == GuideMode.Picture -> "OK: watch here, OK again: full screen   ·   Back: leave live TV"
-                    else -> "OK: watch in a small picture   ·   Back: categories"
+                    else -> "OK: watch in a small picture   ·   Back: " + if (touch) "categories" else "Live TV"
                 },
                 fontSize = 13.sp, color = Tv.Muted, modifier = Modifier.padding(vertical = 10.dp),
             )
