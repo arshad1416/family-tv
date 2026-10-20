@@ -6,6 +6,7 @@ import android.content.ContextWrapper
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -34,6 +35,7 @@ import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -42,11 +44,22 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -60,6 +73,7 @@ import app.familytv.usage.TrackScreen
 import app.familytv.usage.Usage
 import app.familytv.user.Appearance
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /** The TV's tabs, left to right. Each has its own glow and its own search. */
 enum class GlassTab(val label: String, val glow: Color, val usage: Usage.Screen, val searchHint: String) {
@@ -156,6 +170,27 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
         if (runCatching { pageFocus.requestFocus() }.isFailure) entry.focus()
     }
     val pages = rememberSaveableStateHolder()
+    // A new tab or Settings fades in over 200 ms (backlog item 15), opacity only; not when the system asks for less motion.
+    val still = rememberReducedMotion()
+    val pageKey = if (settings) "settings" else tab.name
+    val fade = remember { Animatable(1f) }
+    var firstPage by remember { mutableStateOf(true) }
+    LaunchedEffect(pageKey) {
+        if (firstPage || still) { firstPage = false; return@LaunchedEffect }
+        fade.snapTo(0f)
+        fade.animateTo(1f, tween(200))
+    }
+    // The screensaver (backlog item 16): after 5 minutes without a key, unless a preview is playing.
+    // Counted in delays, not read in composition, so a key press never recomposes the home.
+    val idle = remember { IdleCount() }
+    var saver by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(IDLE_STEP_MS)
+            idle.ms += IDLE_STEP_MS
+            if (!saver && idle.ms >= SCREENSAVER_IDLE_MS && !LivePreview.anyActive) saver = true
+        }
+    }
     CompositionLocalProvider(
         LocalGlass provides true,
         LocalGlassScale provides rememberGlassScale(),
@@ -165,6 +200,17 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
         LocalContentColor provides palette.text,
     ) {
         GlassBackground(shown) {
+          // Any key resets the idle count; while the screensaver shows, the key that wakes it (down and up) goes no further.
+          Box(
+            Modifier.fillMaxSize().onPreviewKeyEvent { e ->
+                idle.ms = 0
+                when {
+                    saver && e.type == KeyEventType.KeyDown -> { saver = false; idle.waking = true; true }
+                    idle.waking -> { if (e.type == KeyEventType.KeyUp) idle.waking = false; true }
+                    else -> false
+                }
+            },
+          ) {
             // Inside the TV's overscan safe zone (48 dp across, 27 dp at the top and bottom).
             Column(Modifier.fillMaxSize().padding(start = 48.dp, end = 48.dp, top = 27.dp, bottom = 18.dp).onFocusChanged { anyFocused = it.hasFocus }) {
                 if (!barHidden.value) {
@@ -179,7 +225,7 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
                     )
                     Spacer(Modifier.height(16.gx))
                 }
-                Box(Modifier.weight(1f).fillMaxWidth().focusRequester(pageFocus).restoresFocus(entry)) {
+                Box(Modifier.weight(1f).fillMaxWidth().focusRequester(pageFocus).restoresFocus(entry).graphicsLayer { alpha = fade.value }) {
                     pages.SaveableStateProvider(if (settings) "settings" else tab.name) {
                         if (settings) {
                             TrackScreen(Usage.Screen.SETTINGS)
@@ -216,9 +262,19 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
                 val activity = LocalContext.current.findActivity()
                 ExitPrompt(onStay = { exitAsk = false; focusBar() }, onLeave = { activity?.finish() })
             }
+            if (saver) Screensaver(profile, weather)
+          }
         }
     }
 }
+
+/** The TV home's idle time (ms since the last key) and whether a key is waking the screensaver. */
+private class IdleCount {
+    var ms = 0L
+    var waking = false
+}
+
+private const val IDLE_STEP_MS = 15_000L
 
 /**
  * The title with the clock, YouTube and JustWatch (Movies and TV Shows), the Appearance switch and
@@ -251,9 +307,16 @@ private fun GlassTopBar(
             }
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.gx), verticalAlignment = Alignment.CenterVertically) {
+            // The chosen tab's white pill slides to the next one (backlog item 15): drawn behind the row, so nothing re-lays out.
+            val spots = remember { mutableStateMapOf<GlassTab, Pair<Float, Float>>() }
+            val slider = rememberTabSlider(spots[tab].takeIf { !settings })
+            Row(Modifier.drawBehind(slider), horizontalArrangement = Arrangement.spacedBy(8.gx), verticalAlignment = Alignment.CenterVertically) {
                 GlassTab.entries.forEach { t ->
-                    GlassPill(t.label, { onTab(t) }, Modifier.focusRequester(tabFocus.getValue(t)), selected = t == tab && !settings)
+                    GlassPill(
+                        t.label, { onTab(t) },
+                        Modifier.focusRequester(tabFocus.getValue(t)).onPlaced { spots[t] = it.positionInParent().x to it.size.width.toFloat() },
+                        selected = t == tab && !settings, slid = true,
+                    )
                 }
             }
             if (query != null) {
@@ -262,6 +325,26 @@ private fun GlassTopBar(
             }
         }
     }
+}
+
+/**
+ * Draws the tabs' sliding pill at [spot] (x and width in the row, px), moving there over 200 ms,
+ * or at once when the system asks for less motion; none while Settings is open.
+ */
+@Composable
+private fun rememberTabSlider(spot: Pair<Float, Float>?): DrawScope.() -> Unit {
+    val color = Glass.Selected
+    val still = rememberReducedMotion()
+    val x = remember { Animatable(spot?.first ?: 0f) }
+    val w = remember { Animatable(spot?.second ?: 0f) }
+    var placed by remember { mutableStateOf(false) }
+    LaunchedEffect(spot) {
+        val (tx, tw) = spot ?: return@LaunchedEffect
+        if (still || !placed) { x.snapTo(tx); w.snapTo(tw); placed = true; return@LaunchedEffect }
+        launch { x.animateTo(tx, tween(200)) }
+        w.animateTo(tw, tween(200))
+    }
+    return { if (spot != null && placed) drawRoundRect(color, Offset(x.value, 0f), Size(w.value, size.height), CornerRadius(size.height / 2)) }
 }
 
 /** "Exit Family TV?" over the dimmed home: Stay (focused) or Exit. Back again stays; focus can't wander off it. */

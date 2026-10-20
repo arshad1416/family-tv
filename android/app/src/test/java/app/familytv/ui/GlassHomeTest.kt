@@ -275,6 +275,21 @@ class GlassHomeTest {
     }
 
     @Test
+    fun screensaverComesAfterFiveIdleMinutesAndAnyKeyWakesIt() {
+        home()
+        waitFor("Recently added")
+        rule.onNode(hasText("Movies") and hasClickAction()).requestFocus()
+        rule.waitForIdle()
+        rule.onNodeWithText("Press any button to wake").assertDoesNotExist()
+        rule.mainClock.advanceTimeBy(SCREENSAVER_IDLE_MS + 30_000)
+        waitFor("Press any button to wake")
+        // The waking key goes no further: still on Movies, nothing opened.
+        press(Key.DirectionDown)
+        rule.waitUntil(10_000) { rule.onAllNodes(hasText("Press any button to wake")).fetchSemanticsNodes().isEmpty() }
+        rule.onNode(isFocused() and hasText("Movies")).assertExists()
+    }
+
+    @Test
     fun topBarButtonsDontOverlapOnMovies() {
         home()
         waitFor("Search movies")
