@@ -95,6 +95,8 @@ object SeriesTitles {
     private val PLATFORMS = setOf(
         "NF", "NETFLIX", "AMZ", "AMAZON", "PRIME", "HBO", "HBOMAX", "DSNP", "DISNEY", "DISNEY+", "ATVP", "APPLETV",
         "APPLETV+", "HULU", "PCOK", "PEACOCK", "PMTP", "PARAMOUNT", "PARAMOUNT+", "CRAVE", "STARZ", "SHOWTIME",
+        // Shorthands seen in front of titles ("4K-D+ - Moana").
+        "D+", "P+", "AMZN",
     )
 
     /**
@@ -106,6 +108,9 @@ object SeriesTitles {
 
     /** Region shelves some providers put in front of a title ("AS - Fighting Mulan", "CA EN: …"); dropped like [FILLERS]. */
     private val REGIONS = setOf("AS", "ASIA", "ASIAN", "EU", "EUR", "AF", "AFR", "AFRICA", "EXYU", "MENA", "LATAM", "CA")
+
+    /** A language code as providers write it in front of a name: capitals, "EN", "FRA", "VF". */
+    fun isLanguageCode(token: String): Boolean = token == token.uppercase(Locale.ROOT) && token in CODES
 
     fun languageName(code: String): String = if (code == ORIGINAL) "Original" else NAMES[code] ?: code.uppercase(Locale.ROOT)
 

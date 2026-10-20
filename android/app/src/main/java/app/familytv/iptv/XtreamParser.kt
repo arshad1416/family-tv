@@ -42,6 +42,8 @@ data class XtAccount(
  * is read leniently.
  */
 object XtreamParser {
+    /** A film shorter than this has a stub running time ("1 min"), so its details page shows none. */
+    private const val MIN_MOVIE_SECS = 5 * 60
 
     fun categories(reader: Reader): List<XtCategory> {
         val out = ArrayList<XtCategory>()
@@ -212,7 +214,7 @@ object XtreamParser {
             plot = text(info["plot"] ?: info["description"] ?: info["overview"]),
             cover = url(info["movie_image"]) ?: url(info["cover_big"]),
             rating = text(info["rating"])?.takeUnless { it.toDoubleOrNull() == 0.0 },
-            durationSecs = info["duration_secs"]?.toDoubleOrNull()?.toInt()?.takeIf { it > 0 } ?: EpisodeGuide.seconds(info["duration"]),
+            durationSecs = EpisodeGuide.durationSecs(info["duration_secs"], info["duration"])?.takeIf { it >= MIN_MOVIE_SECS },
             year = text(info["releasedate"] ?: info["release_date"])?.take(4)?.toIntOrNull()?.takeIf { it > 1880 },
         )
     }
@@ -256,7 +258,7 @@ object XtreamParser {
             id = id, season = season, episode = num, title = title.trim(), ext = ext?.takeIf { it.isNotBlank() },
             plot = text(info["plot"] ?: info["overview"] ?: info["description"]),
             image = url(info["movie_image"]) ?: url(info["cover_big"]) ?: url(info["cover"]),
-            durationSecs = info["duration_secs"]?.toDoubleOrNull()?.toInt()?.takeIf { it > 0 } ?: EpisodeGuide.seconds(info["duration"]),
+            durationSecs = EpisodeGuide.durationSecs(info["duration_secs"], info["duration"]),
             airDate = text(info["air_date"] ?: info["releasedate"] ?: info["release_date"])?.take(10),
             rating = text(info["rating"])?.takeUnless { it.toDoubleOrNull() == 0.0 },
             trailer = Trailers.youtubeId(info["youtube_trailer"] ?: info["trailer"]),

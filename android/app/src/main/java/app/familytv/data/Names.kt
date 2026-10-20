@@ -1,5 +1,6 @@
 package app.familytv.data
 
+import app.familytv.iptv.SeriesTitles
 import java.text.Normalizer
 
 /**
@@ -26,6 +27,25 @@ object Names {
     }
 
     /**
+     * A channel's name as listed and captioned: [clean], without a leading country or language
+     * code ("CA EN: CBC Toronto" is "CBC Toronto", also "[UK] Sky", "US| ESPN"). Only capital codes
+     * go, so "TSN: Live" stays. Guide matching and country grouping read the raw name, code and all.
+     */
+    fun channel(raw: String): String {
+        val s = clean(raw)
+        val m = CODE_PREFIX.find(s) ?: return s
+        if (!m.groupValues[1].split(CODE_SPLIT).all { it in COUNTRY_CODES || SeriesTitles.isLanguageCode(it) }) return s
+        return s.substring(m.range.last + 1).ifBlank { s }
+    }
+
+    private val CODE_PREFIX = Regex("^\\s*[\\[(|]?\\s*([A-Z]{2,3}(?:[\\s/-]+[A-Z]{2,3})?)\\s*(?:[\\])|]\\s*[:|\\-▎•►»–—]*|[:|\\-▎•►»–—]+)\\s*")
+    private val CODE_SPLIT = Regex("[\\s/-]+")
+    private val COUNTRY_CODES = setOf(
+        "CA", "CAN", "US", "USA", "UK", "GB", "IN", "IND", "PK", "PAK", "AU", "NZ", "IE", "FR", "DE", "ES", "IT",
+        "MX", "BR", "PH", "AE", "BD", "LK", "NP", "LAT", "EU", "AF", "AS",
+    )
+
+    /**
      * A heading row, not a channel or category: "#" with only spaces, dashes and the like
      * ("######", "# - #"), three or more "#" in front, or text wrapped in "##" ("#### SPORTS ####").
      */
@@ -35,5 +55,5 @@ object Names {
     }
 }
 
-val ChannelEntity.displayName: String get() = Names.clean(name)
+val ChannelEntity.displayName: String get() = Names.channel(name)
 val CategoryEntity.displayName: String get() = Names.clean(name)

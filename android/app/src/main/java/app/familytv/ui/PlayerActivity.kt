@@ -27,7 +27,7 @@ class PlayerActivity : ComponentActivity(), PlayerHost {
     // androidx marks this restricted, but overriding the platform method is fine.
     @SuppressLint("RestrictedApi")
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        return exit.onKey(event) || super.dispatchKeyEvent(event)
+        return exit.onKey(event) || controller.seekKey(event) || super.dispatchKeyEvent(event)
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean =
