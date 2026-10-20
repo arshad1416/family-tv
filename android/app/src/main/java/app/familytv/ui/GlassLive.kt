@@ -3,6 +3,7 @@ package app.familytv.ui
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -32,6 +33,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
@@ -134,8 +137,12 @@ private fun LiveBrowser(profile: Profile, onGuide: () -> Unit) {
     val hoverCountry = remember { mutableStateOf<String?>(null) }
     FollowFocus(hoverGenre) { if (it != g && it != TV_GUIDE) { genre = it; country = null } }
     FollowFocus(hoverCountry) { if (it != c) country = it }
+    // Right from a country goes to the channel list: by position it often went to the top bar's
+    // search box instead, which is level with the columns' headings. Left comes back to the chosen country.
+    val toChannels = remember { PageEntry() }
+    val toCountry = remember { PageEntry() }
 
-    Row(Modifier.fillMaxSize().padding(bottom = 32.gx), horizontalArrangement = Arrangement.spacedBy(18.gx)) {
+    Row(Modifier.fillMaxSize().padding(bottom = 32.gx).focusGroup(), horizontalArrangement = Arrangement.spacedBy(18.gx)) {
         GlassColumnPanel(Modifier.width(200.gx).fillMaxHeight()) {
             GlassLabel("Category")
             LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.gx)) {
@@ -149,11 +156,16 @@ private fun LiveBrowser(profile: Profile, onGuide: () -> Unit) {
             GlassLabel("$g · Country")
             LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.gx)) {
                 items(countries, key = { it }) { x ->
-                    GlassRowItem(x, x == c, { country = x }, count = byCountry[x]?.size, onFocus = { hoverCountry.value = x })
+                    GlassRowItem(
+                        x, x == c, { country = x },
+                        Modifier.focusProperties { right = if (channels.isEmpty()) FocusRequester.Cancel else toChannels.orNearest }
+                            .then(landing(toCountry, x == c)),
+                        count = byCountry[x]?.size, onFocus = { hoverCountry.value = x },
+                    )
                 }
             }
         }
-        ChannelBrowser(channels, favKeys, Modifier.weight(1f), side = false, header = null, loading = loaded == null && g != FAVOURITES)
+        ChannelBrowser(channels, favKeys, Modifier.weight(1f), side = false, header = null, loading = loaded == null && g != FAVOURITES, arrival = toChannels, leftTo = toCountry)
     }
 }
 
@@ -179,6 +191,8 @@ private fun ChannelBrowser(
     header: String?,
     loading: Boolean = false,
     entry: Boolean = false,
+    arrival: PageEntry? = null,
+    leftTo: PageEntry? = null,
     onPick: (Int) -> Unit = {},
 ) {
     val ctx = LocalContext.current
@@ -204,7 +218,9 @@ private fun ChannelBrowser(
                         ChannelRow(
                             ch, ch.epgId?.let { progs[it] }?.firstOrNull { it.start <= System.currentTimeMillis() }, numbers = !side,
                             favourite = Favourites.key(Kind.LIVE, ch.sourceId, ch.streamId) in favKeys,
-                            modifier = entryPoint(entry && i == 0),
+                            modifier = entryPoint(entry && i == 0)
+                                .then(if (arrival != null) landing(arrival, ch == shown) else Modifier)
+                                .then(if (leftTo != null) Modifier.focusProperties { left = leftTo.orNearest } else Modifier),
                             onFocus = { focused = ch },
                             onFavourite = { toggleFavourite(ctx, Kind.LIVE, ch.sourceId, ch.streamId, ch.name) },
                         ) {

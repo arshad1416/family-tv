@@ -133,12 +133,18 @@ internal val LocalPageEntry = staticCompositionLocalOf { PageEntry() }
 
 /** Marks the composable this modifier goes on as the page's entry point (when [on]). */
 @Composable
-fun entryPoint(on: Boolean = true): Modifier {
+fun entryPoint(on: Boolean = true): Modifier = landing(LocalPageEntry.current, on)
+
+/** Puts [spot]'s requester on the composable this modifier goes on (when [on]), counting it while it's on screen. */
+@Composable
+fun landing(spot: PageEntry, on: Boolean = true): Modifier {
     if (!on) return Modifier
-    val e = LocalPageEntry.current
-    DisposableEffect(e) { e.attached++; onDispose { e.attached-- } }
-    return Modifier.focusRequester(e.requester)
+    DisposableEffect(spot) { spot.attached++; onDispose { spot.attached-- } }
+    return Modifier.focusRequester(spot.requester)
 }
+
+/** A focus redirect to this spot, or the usual neighbour while it's scrolled away (a requester with nothing on screen throws). */
+val PageEntry.orNearest: FocusRequester get() = if (attached > 0) requester else FocusRequester.Default
 
 /** Sends focus to the page's entry point, e.g. after closing an episode list. */
 fun PageEntry.focus() { if (attached > 0) runCatching { requester.requestFocus() } }

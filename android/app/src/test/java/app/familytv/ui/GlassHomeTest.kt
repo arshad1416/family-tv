@@ -4,9 +4,11 @@ import android.content.Context
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsNotFocused
+import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isFocused
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -88,7 +90,8 @@ class GlassHomeTest {
 
     private fun home() = rule.setContent { HomeScreen(MainViewModel(app), DeviceConfig(paired = true, profile = Profile())) }
 
-    private fun waitFor(text: String) = rule.waitUntilAtLeastOneExists(hasText(text), 10_000)
+    // Generous: the first test in a busy run also pays for Robolectric, Compose and Room warming up.
+    private fun waitFor(text: String) = rule.waitUntilAtLeastOneExists(hasText(text), 20_000)
 
     @Test
     fun opensOnMoviesWithItsShelves() {
@@ -137,8 +140,52 @@ class GlassHomeTest {
     fun moviesSearchFindsMovies() {
         home()
         waitFor("Search movies")
+        // OK (a click) starts typing; until then the field can't take focus.
+        rule.onNodeWithText("Search movies").performClick()
         rule.onNode(hasSetTextAction()).performTextInput("star")
         waitFor("Star Wars")
+    }
+
+    @Test
+    fun arrowsPassOverTheSearchBox() {
+        home()
+        waitFor("Search movies")
+        val box = rule.onNode(hasText("Search movies") and hasClickAction())
+        box.requestFocus()
+        box.performKeyInput { pressKey(Key.DirectionLeft) }
+        rule.waitForIdle()
+        box.assertIsNotFocused()
+        rule.onNode(hasSetTextAction()).assertIsNotFocused()
+    }
+
+    @Test
+    fun rightStepsFromCountryToTheChannels() = runBlocking {
+        // Canada comes first, so UK's row sits below the top of the channel list.
+        app.db.catalog().upsertCategories(listOf(CategoryEntity("s", Kind.LIVE, "3", "CA| NEWS EN", 3, 0)))
+        app.db.catalog().upsertChannels(listOf(ChannelEntity("s", "300", "CBC News", 301, null, "3", null, null, 0, 0)))
+        home()
+        waitFor("Live TV")
+        rule.onNodeWithText("Live TV").performClick()
+        waitFor("CBC News")
+        // Into the page on News, its entry point; then only the arrows, as on a remote.
+        rule.onNode(hasText("News") and hasClickAction()).requestFocus()
+        rule.waitUntilAtLeastOneExists(isFocused() and hasText("News"), 10_000)
+        press(Key.DirectionRight)
+        rule.waitUntilAtLeastOneExists(isFocused() and hasText("Canada"), 10_000)
+        press(Key.DirectionDown)
+        rule.waitForIdle()
+        rule.waitUntilAtLeastOneExists(isFocused() and hasText("UK"), 10_000)
+        waitFor("BBC News")
+        press(Key.DirectionRight)
+        rule.waitUntilAtLeastOneExists(isFocused() and hasText("BBC News"), 10_000)
+        press(Key.DirectionLeft)
+        rule.waitForIdle()
+        rule.waitUntilAtLeastOneExists(isFocused() and hasText("UK"), 10_000)
+    }
+
+    private fun press(key: Key) {
+        rule.waitForIdle()
+        rule.onNode(isFocused()).performKeyInput { pressKey(key) }
     }
 
     @Test
