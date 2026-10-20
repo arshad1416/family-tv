@@ -11,6 +11,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotFocused
 import androidx.compose.ui.test.hasAnyDescendant
@@ -112,15 +113,37 @@ class GlassHomeTest {
         app.glassPrefs.saveWeather(System.currentTimeMillis(), WeatherTest.SAMPLE)
     }
 
-    private fun home() = rule.setContent { HomeScreen(MainViewModel(app), DeviceConfig(paired = true, profile = Profile())) }
+    /** The home for [profile], moved on to Movies (it opens on Home). */
+    private fun home(profile: Profile = Profile()) {
+        rule.setContent { HomeScreen(MainViewModel(app), DeviceConfig(paired = true, profile = profile)) }
+        tab("Movies").performClick()
+        waitFor("Search movies")
+    }
+
+    /** The top bar's [name] tab; on Home a tile of the same name sits below it. */
+    private fun tab(name: String): SemanticsNodeInteraction {
+        val m = hasText(name) and hasClickAction()
+        rule.waitUntilAtLeastOneExists(m, 20_000)
+        val top = rule.onAllNodes(m).fetchSemanticsNodes().minBy { it.boundsInRoot.top }
+        return rule.onNode(SemanticsMatcher("$name tab") { it.id == top.id })
+    }
 
     // Generous: the first test in a busy run also pays for Robolectric, Compose and Room warming up.
     private fun waitFor(text: String) = rule.waitUntilAtLeastOneExists(hasText(text), 20_000)
 
     @Test
-    fun opensOnMoviesWithItsShelves() {
-        home()
+    fun opensOnHomeAndItsTilesOpenTheTabs() {
+        rule.setContent { HomeScreen(MainViewModel(app), DeviceConfig(paired = true, profile = Profile())) }
+        waitFor("Channels and the TV guide")
+        rule.onNodeWithText("Search movies").assertDoesNotExist()
+        // The tile, below its tab, opens Movies.
+        rule.onNode(hasClickAction() and hasAnyDescendant(hasText("Films")), useUnmergedTree = true).performClick()
         waitFor("Search movies")
+    }
+
+    @Test
+    fun moviesHasItsShelves() {
+        home()
         waitFor("Languages")
         waitFor("English")
         waitFor("Recently added")
@@ -156,12 +179,13 @@ class GlassHomeTest {
     fun liveTvListsCategoriesCountriesAndChannels() {
         home()
         waitFor("Live TV")
-        rule.onNodeWithText("Live TV").performClick()
+        tab("Live TV").performClick()
         waitFor("Search channels")
         waitFor("CATEGORY")
         waitFor("News")
         waitFor("UK")
-        waitFor("BBC News")
+        // All opens first, on Canada (it leads the countries).
+        waitFor("NHL Network")
         waitFor("TV guide")
     }
 
@@ -170,23 +194,40 @@ class GlassHomeTest {
         val line = Profile(sources = listOf(Source("s", "xtream", "Line")))
         app.lastChannels.played(line, ChannelRef("s", "1", "100"))
         app.lastChannels.played(line, ChannelRef("s", "2", "200"))
-        rule.setContent { HomeScreen(MainViewModel(app), DeviceConfig(paired = true, profile = line)) }
+        home(line)
         waitFor("Live TV")
-        rule.onNodeWithText("Live TV").performClick()
+        tab("Live TV").performClick()
         waitFor("RECENTLY WATCHED")
-        // NHL Network played last, so its pill comes first, left of BBC News's.
-        // News is the open category, so NHL Network is only in the row.
-        val nhl = rule.onNode(hasText("NHL Network") and hasClickAction()).fetchSemanticsNode().boundsInRoot
+        // NHL Network played last, so its pill comes first, left of BBC News's (the row is above the lists).
+        val nhl = rule.onAllNodes(hasText("NHL Network") and hasClickAction()).fetchSemanticsNodes().map { it.boundsInRoot }.minBy { it.top }
         val bbc = rule.onAllNodes(hasText("BBC News") and hasClickAction()).fetchSemanticsNodes().map { it.boundsInRoot }.single { abs(it.top - nhl.top) < 1f }
         assertTrue("NHL $nhl before BBC $bbc", nhl.right <= bbc.left)
+    }
+
+    @Test
+    fun liveTvAllListsEveryCountry() {
+        runBlocking {
+            val dao = app.db.catalog()
+            // A category with no genre word and a country code the app doesn't know.
+            dao.upsertCategories(listOf(CategoryEntity("s", Kind.LIVE, "3", "XY| LOCAL", 3, 0)))
+            dao.upsertChannels(listOf(ChannelEntity("s", "300", "Local One", 301, null, "3", null, null, 0, 0)))
+        }
+        home()
+        tab("Live TV").performClick()
+        waitFor("ALL · COUNTRY")
+        waitFor("Canada")
+        waitFor("UK")
+        waitFor("XY")
+        rule.onNode(hasText("XY") and hasClickAction()).performClick()
+        waitFor("Local One")
     }
 
     @Test
     fun liveTvHasNoRecentRowBeforeAnythingPlayed() {
         home()
         waitFor("Live TV")
-        rule.onNodeWithText("Live TV").performClick()
-        waitFor("BBC News")
+        tab("Live TV").performClick()
+        waitFor("NHL Network")
         rule.onNodeWithText("RECENTLY WATCHED").assertDoesNotExist()
     }
 
@@ -194,10 +235,12 @@ class GlassHomeTest {
     fun okOnACountryMovesIntoItsChannels() {
         home()
         waitFor("Live TV")
-        rule.onNodeWithText("Live TV").performClick()
-        waitFor("BBC News")
-        rule.onNode(hasText("News") and hasClickAction()).requestFocus()
-        rule.waitUntilAtLeastOneExists(isFocused() and hasText("News"), 10_000)
+        tab("Live TV").performClick()
+        // All opens on Canada; wait for its list so nothing arriving later moves focus.
+        waitFor("NHL Network")
+        focusGenre("News")
+        // All opens first; resting on News switches to it.
+        waitFor("NEWS · COUNTRY")
         press(Key.DirectionRight)
         rule.waitUntilAtLeastOneExists(isFocused() and hasText("UK"), 10_000)
         press(Key.DirectionCenter)
@@ -217,10 +260,12 @@ class GlassHomeTest {
             }
         }
         waitFor("Live TV")
-        rule.onNodeWithText("Live TV").performClick()
-        waitFor("BBC News")
-        rule.onNode(hasText("News") and hasClickAction()).requestFocus()
-        rule.waitUntilAtLeastOneExists(isFocused() and hasText("News"), 10_000)
+        tab("Live TV").performClick()
+        // All opens on Canada; wait for its list so nothing arriving later moves focus.
+        waitFor("NHL Network")
+        focusGenre("News")
+        // All opens first; resting on News switches to it.
+        waitFor("NEWS · COUNTRY")
         press(Key.DirectionRight)
         rule.waitUntilAtLeastOneExists(isFocused() and hasText("UK"), 10_000)
         press(Key.DirectionCenter)
@@ -238,7 +283,8 @@ class GlassHomeTest {
     fun liveTvGuideBoxShowsNowAndNext() {
         home()
         waitFor("Live TV")
-        rule.onNodeWithText("Live TV").performClick()
+        tab("Live TV").performClick()
+        rule.onNode(hasText("News") and hasClickAction()).performClick()
         waitFor("GUIDE · BBC NEWS")
         waitFor("The latest headlines from around the world.")
         waitFor("World Business Report")
@@ -249,7 +295,7 @@ class GlassHomeTest {
     fun sportsGroupsChannelsUnderTheirSport() {
         home()
         waitFor("Sports")
-        rule.onNodeWithText("Sports").performClick()
+        tab("Sports").performClick()
         waitFor("Hockey")
         waitFor("NHL Network")
         // No guide, so nothing says it's live.
@@ -310,11 +356,12 @@ class GlassHomeTest {
         }
         home()
         waitFor("Live TV")
-        rule.onNodeWithText("Live TV").performClick()
+        tab("Live TV").performClick()
         waitFor("CBC News")
-        // Into the page on News, its entry point; then only the arrows, as on a remote.
-        rule.onNode(hasText("News") and hasClickAction()).requestFocus()
-        rule.waitUntilAtLeastOneExists(isFocused() and hasText("News"), 10_000)
+        // Onto News; then only the arrows, as on a remote.
+        focusGenre("News")
+        // All opens first; resting on News switches to it.
+        waitFor("NEWS · COUNTRY")
         press(Key.DirectionRight)
         rule.waitUntilAtLeastOneExists(isFocused() and hasText("Canada"), 10_000)
         press(Key.DirectionDown)
@@ -326,6 +373,15 @@ class GlassHomeTest {
         press(Key.DirectionLeft)
         rule.waitForIdle()
         rule.waitUntilAtLeastOneExists(isFocused() and hasText("UK"), 10_000)
+    }
+
+    /** Focus on Live TV's [name] genre. Coming in from the tabs lands on the page's entry point (All) first. */
+    private fun focusGenre(name: String) {
+        val row = hasText(name) and hasClickAction()
+        rule.onNode(row).requestFocus()
+        rule.waitForIdle()
+        rule.onNode(row).requestFocus()
+        rule.waitUntilAtLeastOneExists(isFocused() and hasText(name), 10_000)
     }
 
     private fun press(key: Key) {
@@ -382,7 +438,7 @@ class GlassHomeTest {
         val arshad = app.viewers.all().first()
         app.viewers.choose(arshad)
         app.viewers.played(ProgressKey.movie("s", "1000"))
-        rule.setContent { HomeScreen(MainViewModel(app), DeviceConfig(paired = true, profile = profile)) }
+        home(profile)
         waitFor(CONTINUE_WATCHING)
         // For you: more from the category Arshad plays, not what he played.
         val page = rule.onAllNodes(hasScrollToNodeAction()).fetchSemanticsNodes().indices.maxBy {
@@ -399,7 +455,7 @@ class GlassHomeTest {
     @Test
     fun viewersAreAddedInSettingsOnTheTv() {
         val profile = Profile(sources = listOf(Source("s", "xtream", "Line")))
-        rule.setContent { HomeScreen(MainViewModel(app), DeviceConfig(paired = true, profile = profile)) }
+        home(profile)
         waitFor("Search movies")
         rule.onNodeWithContentDescription("Who's watching?").assertDoesNotExist()
         rule.onNode(hasContentDescription("Settings") and hasClickAction()).performClick()
@@ -416,7 +472,7 @@ class GlassHomeTest {
     @Test
     fun aKidsViewerSeesOnlyKidsCategoriesAndLeavingAsksForThePin() {
         val profile = twoViewers()
-        rule.setContent { HomeScreen(MainViewModel(app), DeviceConfig(paired = true, profile = profile)) }
+        home(profile)
         waitFor("Recently added")
         rule.onNode(hasText("Who's watching?") and hasClickAction()).performClick()
         rule.onNode(hasText("Izaan · Kids") and hasClickAction()).performClick()
@@ -450,7 +506,7 @@ class GlassHomeTest {
             }
         }
         val profile = twoViewers()
-        rule.setContent { HomeScreen(MainViewModel(app), DeviceConfig(paired = true, profile = profile)) }
+        home(profile)
         // The narrowest card naming the film is its poster (a highlight tile is wider).
         fun poster(title: String): Float {
             val card = hasClickAction() and hasAnyDescendant(hasText(title))
@@ -518,9 +574,15 @@ class GlassHomeTest {
             HomeScreen(MainViewModel(app), DeviceConfig(paired = true, profile = Profile()))
         }
         fun pressBack() = rule.runOnUiThread { back!!.onBackPressed() }
+        tab("Movies").performClick()
         waitFor("Search movies")
-        rule.onNode(hasText("Movies") and hasClickAction()).requestFocus()
+        tab("Movies").requestFocus()
         rule.waitForIdle()
+        // Back on another tab goes to Home first, without asking.
+        pressBack()
+        rule.waitUntilAtLeastOneExists(isFocused() and hasText("Home"), 10_000)
+        rule.onNodeWithText("Exit Family TV?").assertDoesNotExist()
+        rule.onNodeWithText("Search movies").assertDoesNotExist()
         pressBack()
         waitFor("Exit Family TV?")
         rule.waitUntilAtLeastOneExists(isFocused() and hasText("Stay"), 10_000)

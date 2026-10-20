@@ -67,6 +67,12 @@ class GlassCatalogTest {
         assertEquals("India", liveCountry("ASIA| HINDI"))
         assertNull(liveCountry("HR| HORSE RACING"))
         assertNull(liveCountry("4K| RELAX"))
+        assertEquals("Bangladesh", liveCountry("BD| BANGLA"))
+        // An unknown code keeps its own row; quality, sports and language prefixes don't.
+        assertEquals("XY", liveCountry("XY| LOCAL"))
+        assertNull(liveCountry("VIP| EVENTS"))
+        assertNull(liveCountry("NBA| LEAGUE PASS"))
+        assertNull(liveCountry("EN| NEWS"))
     }
 
     @Test

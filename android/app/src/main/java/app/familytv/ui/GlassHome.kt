@@ -83,7 +83,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /** The TV's tabs, left to right. Each has its own glow and its own search. */
-enum class GlassTab(val label: String, val glow: Color, val usage: Usage.Screen, val searchHint: String) {
+enum class GlassTab(val label: String, val glow: Color, val usage: Usage.Screen, val searchHint: String?) {
+    Home("Home", Color(0xFFE0A94A), Usage.Screen.HOME, null),
     Live("Live TV", Color(0xFF2FB8A6), Usage.Screen.LIVE, "Search channels"),
     Movies("Movies", Color(0xFF4F7CFF), Usage.Screen.MOVIES, "Search movies"),
     Series("TV Shows", Color(0xFF9B6BFF), Usage.Screen.SERIES, "Search TV shows"),
@@ -129,9 +130,9 @@ internal fun GlassDarkPage() {
 }
 
 /**
- * The TV home: a top bar of tabs (Live TV, Movies, TV Shows, Sports) with the tab's own search,
- * the clock, Appearance and Settings, over the tab's page, and the weather panel below it. Back inside a page goes up to the tabs; Back on the
- * tabs leaves the app as before. Each tab keeps its place (and its search) while another is open.
+ * The TV home: a top bar of tabs (Home, Live TV, Movies, TV Shows, Sports) with the tab's own search,
+ * the clock, Appearance and Settings, over the tab's page, and the weather panel below it. Back inside a page goes up to the tabs;
+ * Back on another tab's name goes to Home, and Back on Home asks before leaving. Each tab keeps its place (and its search) while another is open.
  */
 @Composable
 internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
@@ -143,7 +144,7 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
     val hasViewers = remember(viewerTick) { app.viewers.all().isNotEmpty() }
     val profile = remember(base, viewerTick) { app.viewers.apply(base) }
     var picking by remember { mutableStateOf(false) }
-    var tab by rememberSaveable { mutableStateOf(GlassTab.Movies) }
+    var tab by rememberSaveable { mutableStateOf(GlassTab.Home) }
     var settings by rememberSaveable { mutableStateOf(false) }
     val queries = GlassTab.entries.associateWith { rememberSaveable(key = "query/${it.name}") { mutableStateOf("") } }
     val tabFocus = remember { GlassTab.entries.associateWith { FocusRequester() } }
@@ -164,9 +165,14 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
     BackHandler(enabled = anyFocused && !barFocused && !barHidden.value) { Usage.log(Usage.Action.BACK); focusBar() }
     BackHandler(enabled = barFocused && settings) { settings = false }
     BackHandler(enabled = barFocused && !settings && queries.getValue(tab).value.isNotEmpty()) { queries.getValue(tab).value = "" }
-    // Back on the tabs asks before leaving (apps never see the Home button, so this is the one place to ask).
+    // Back on another tab goes to Home; Back on Home asks before leaving (apps never see the Home button, so this is the one place to ask).
     var exitAsk by remember { mutableStateOf(false) }
-    BackHandler(enabled = (barFocused || !anyFocused) && !settings && !barHidden.value && queries.getValue(tab).value.isEmpty()) { exitAsk = true }
+    val onTabs = (barFocused || !anyFocused) && !settings && !barHidden.value && queries.getValue(tab).value.isEmpty()
+    BackHandler(enabled = onTabs && tab != GlassTab.Home) {
+        tab = GlassTab.Home
+        runCatching { tabFocus.getValue(GlassTab.Home).requestFocus() }
+    }
+    BackHandler(enabled = onTabs && tab == GlassTab.Home) { exitAsk = true }
     LaunchedEffect(Unit) { delay(50); focusBar() }
     LaunchedEffect(settings) { if (!settings && barFocused) { delay(50); focusBar() } }
 
@@ -232,7 +238,7 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
                 if (!barHidden.value) {
                     GlassTopBar(
                         tab, settings, tabFocus, settingsFocus,
-                        query = queries.getValue(tab).takeIf { !settings },
+                        query = queries.getValue(tab).takeIf { !settings && tab.searchHint != null },
                         onTab = { tab = it; settings = false },
                         onSettings = { settings = true },
                         onFocused = { barFocused = it },
@@ -254,6 +260,7 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
                             TrackScreen(tab.usage)
                             GlassGlow(tab.glow)
                             when (tab) {
+                                GlassTab.Home -> HomeTab(profile, viewer?.name) { tab = it; runCatching { tabFocus.getValue(it).requestFocus() } }
                                 GlassTab.Live -> LiveTab(vm, profile)
                                 GlassTab.Movies -> VodTab(vm, profile, Kind.MOVIE)
                                 GlassTab.Series -> VodTab(vm, profile, Kind.SERIES)
@@ -350,7 +357,7 @@ private fun GlassTopBar(
             }
             if (query != null) {
                 Spacer(Modifier.width(18.gx))
-                GlassSearchBox(query.value, { query.value = it }, tab.searchHint)
+                GlassSearchBox(query.value, { query.value = it }, tab.searchHint.orEmpty())
             }
             // Who's watching, when this TV has viewers; OK picks another.
             if (onViewers != null) {
