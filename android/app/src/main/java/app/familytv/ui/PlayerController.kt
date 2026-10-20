@@ -241,7 +241,7 @@ class PlayerController(
     init {
         openedAt = SystemClock.elapsedRealtime()
         Usage.opened(Usage.Screen.PLAYER)
-        profile = app.portal.cachedConfig?.profile
+        profile = app.portal.cachedConfig?.profile?.let(app.viewers::apply)
         val form = activity.formFactor()
         touch = form.touch
 

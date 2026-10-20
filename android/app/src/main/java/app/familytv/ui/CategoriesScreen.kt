@@ -1,5 +1,6 @@
 package app.familytv.ui
 
+import android.view.WindowManager
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -18,6 +19,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -173,6 +175,12 @@ private fun Tiles(tiles: List<Tile>) {
  */
 @Composable
 internal fun PinPrompt(profile: Profile, firstKey: Modifier? = null, onOk: () -> Unit) {
+    // No screenshots or casting while the PIN pad is up (backlog item 18).
+    val window = LocalContext.current.findActivity()?.window
+    DisposableEffect(window) {
+        window?.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        onDispose { window?.clearFlags(WindowManager.LayoutParams.FLAG_SECURE) }
+    }
     var pin by remember { mutableStateOf("") }
     var wrong by remember { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {

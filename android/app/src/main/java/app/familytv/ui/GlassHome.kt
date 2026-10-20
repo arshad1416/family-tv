@@ -24,8 +24,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -63,12 +67,14 @@ import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.tv.material3.Icon
 import androidx.tv.material3.LocalContentColor
 import androidx.tv.material3.Text
 import app.familytv.app
 import app.familytv.data.Kind
 import app.familytv.portal.DeviceConfig
 import app.familytv.portal.Profile
+import app.familytv.portal.Viewer
 import app.familytv.usage.TrackScreen
 import app.familytv.usage.Usage
 import app.familytv.user.Appearance
@@ -128,7 +134,13 @@ internal fun GlassDarkPage() {
  */
 @Composable
 internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
-    val profile = config.profile ?: Profile()
+    val app = LocalContext.current.app
+    val base = config.profile ?: Profile()
+    // Who's watching (backlog items 17 and 18): a kids viewer sees the profile through kids' categories only.
+    val viewerTick by app.viewers.changes.collectAsState()
+    val viewer = remember(base, viewerTick) { app.viewers.current(base) }
+    val profile = remember(base, viewerTick) { app.viewers.apply(base) }
+    var picking by remember { mutableStateOf(false) }
     var tab by rememberSaveable { mutableStateOf(GlassTab.Movies) }
     var settings by rememberSaveable { mutableStateOf(false) }
     val queries = GlassTab.entries.associateWith { rememberSaveable(key = "query/${it.name}") { mutableStateOf("") } }
@@ -159,7 +171,8 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
     val shell = remember { GlassShell(queries, glow, barHidden, darkPages) }
     val shown by animateColorAsState(glow.value, tween(500), label = "glow")
     val lightness = rememberLightness(appearance, weather.forecast)
-    val t = if (darkPages.intValue > 0) 0f else lightness
+    // Kids get the bright look.
+    val t = if (darkPages.intValue > 0) 0f else if (profile.kidsOnly) 1f else lightness
     val palette = remember(t) { GlassPalette.lerp(GlassPalette.Dark, GlassPalette.Light, t) }
     // Closing the panel hands focus back to where it was on the page.
     var panelSeen by remember { mutableStateOf(false) }
@@ -222,6 +235,8 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
                         onFocused = { barFocused = it },
                         appearance = appearance,
                         onAppearance = prefs::setAppearance,
+                        viewer = viewer?.name ?: "Who's watching?",
+                        onViewers = { picking = true }.takeIf { !base.viewers.isNullOrEmpty() },
                     )
                     Spacer(Modifier.height(16.gx))
                 }
@@ -262,6 +277,7 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
                 val activity = LocalContext.current.findActivity()
                 ExitPrompt(onStay = { exitAsk = false; focusBar() }, onLeave = { activity?.finish() })
             }
+            if (picking) ViewerPicker(base, viewer, onDone = { picking = false; focusBar() })
             if (saver) Screensaver(profile, weather)
           }
         }
@@ -293,6 +309,8 @@ private fun GlassTopBar(
     onFocused: (Boolean) -> Unit,
     appearance: Appearance,
     onAppearance: (Appearance) -> Unit,
+    viewer: String,
+    onViewers: (() -> Unit)?,
 ) {
     val apps = !settings && (tab == GlassTab.Movies || tab == GlassTab.Series)
     Column(Modifier.fillMaxWidth().onFocusChanged { onFocused(it.hasFocus) }, verticalArrangement = Arrangement.spacedBy(12.gx)) {
@@ -322,6 +340,11 @@ private fun GlassTopBar(
             if (query != null) {
                 Spacer(Modifier.width(18.gx))
                 GlassSearchBox(query.value, { query.value = it }, tab.searchHint)
+            }
+            // Who's watching, when the profile has viewers; OK picks another.
+            if (onViewers != null) {
+                Spacer(Modifier.weight(1f))
+                GlassPill(viewer, onViewers, fill = Glass.Raised, border = true, icon = { Icon(Icons.Filled.Person, contentDescription = null, modifier = Modifier.size(18.gx)) })
             }
         }
     }
@@ -371,7 +394,54 @@ private fun ExitPrompt(onStay: () -> Unit, onLeave: () -> Unit) {
     }
 }
 
-private tailrec fun Context.findActivity(): Activity? = when (this) {
+/**
+ * "Who's watching?" over the dimmed home: one pill per viewer. Moving away from a kids viewer asks
+ * for the parental PIN first (backlog item 18); the PIN shows as dots and is never logged.
+ */
+@Composable
+private fun ViewerPicker(profile: Profile, current: Viewer?, onDone: () -> Unit) {
+    val ctx = LocalContext.current
+    val first = remember { FocusRequester() }
+    var asking by remember { mutableStateOf<Viewer?>(null) }
+    BackHandler { if (asking != null) asking = null else onDone() }
+    LaunchedEffect(asking) { delay(50); runCatching { first.requestFocus() } }
+    val shape = RoundedCornerShape(28.gx)
+    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.55f)), contentAlignment = Alignment.Center) {
+        Column(
+            Modifier.widthIn(min = 520.gx).background(LocalGlassPalette.current.middle, shape).border(1.dp, Glass.Line, shape)
+                .focusProperties { onExit = { cancelFocusChange() } }.focusGroup()
+                .padding(horizontal = 36.gx, vertical = 32.gx),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(26.gx),
+        ) {
+            val leaving = asking
+            if (leaving == null) {
+                Text("Who's watching?", fontSize = 30.gsp, fontWeight = FontWeight.Bold, maxLines = 1)
+                Row(horizontalArrangement = Arrangement.spacedBy(16.gx)) {
+                    profile.viewers.orEmpty().forEachIndexed { i, v ->
+                        GlassPill(
+                            if (v.kids == true) "${v.name} · Kids" else v.name,
+                            {
+                                when {
+                                    v.id == current?.id -> onDone()
+                                    current?.kids == true -> asking = v
+                                    else -> { ctx.app.viewers.choose(profile, v); onDone() }
+                                }
+                            },
+                            if (i == 0) Modifier.focusRequester(first) else Modifier,
+                            selected = v.id == current?.id, fill = Glass.Raised, border = true, fontSize = 18.gsp, padH = 28.gx, padV = 12.gx,
+                        )
+                    }
+                }
+            } else {
+                Text("Switch to ${leaving.name}?", fontSize = 26.gsp, fontWeight = FontWeight.Bold, maxLines = 1)
+                PinPrompt(profile, Modifier.focusRequester(first)) { ctx.app.viewers.choose(profile, leaving); onDone() }
+            }
+        }
+    }
+}
+
+internal tailrec fun Context.findActivity(): Activity? = when (this) {
     is Activity -> this
     is ContextWrapper -> baseContext.findActivity()
     else -> null

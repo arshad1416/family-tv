@@ -603,8 +603,8 @@ fun categories(profile: Profile, kind: String, liveTv: Boolean = false): List<Ca
     return remember(all, profile, mine, unlocked) { visibleCategories(all, profile, mine[kind].orEmpty(), liveTv && adultOpen(profile, unlocked)) }
 }
 
-/** True when the profile has a parental PIN. Without one, adult content is hidden everywhere. */
-fun adultAllowed(profile: Profile?): Boolean = !profile?.parentalPin.isNullOrEmpty()
+/** True when the profile has a parental PIN and no kids viewer is watching. Without one, adult content is hidden everywhere. */
+fun adultAllowed(profile: Profile?): Boolean = !profile?.parentalPin.isNullOrEmpty() && profile?.kidsOnly != true
 
 /** True when adult content may show without asking: the profile has a PIN and it was entered this run. */
 fun adultOpen(profile: Profile?, unlocked: Boolean): Boolean = unlocked && adultAllowed(profile)
@@ -615,13 +615,20 @@ fun adultOpen(profile: Profile?, unlocked: Boolean): Boolean = unlocked && adult
  * those in the profile's order, then the rest in the provider's order.
  */
 fun visibleCategories(all: List<CategoryEntity>, profile: Profile?, mine: List<String> = emptyList(), adultLive: Boolean = false): List<CategoryEntity> =
-    arranged(all, profile, mine) { c -> !isAdult(c) || adultLive && c.kind == Kind.LIVE }
+    // A kids viewer (backlog item 18) sees kids' categories only, and never adult ones.
+    if (profile?.kidsOnly == true) arranged(all, profile, mine) { c -> !isAdult(c) && isKids(c) }
+    else arranged(all, profile, mine) { c -> !isAdult(c) || adultLive && c.kind == Kind.LIVE }
 
 /** Only the adult categories of [all], arranged like [visibleCategories]; none when the profile has no PIN. */
 fun adultCategories(all: List<CategoryEntity>, profile: Profile?, mine: List<String> = emptyList()): List<CategoryEntity> =
     if (adultAllowed(profile)) arranged(all, profile, mine, ::isAdult) else emptyList()
 
 internal fun isAdult(c: CategoryEntity) = ADULT.containsMatchIn(c.name)
+
+/** Categories for children: Live TV's kids genre words, plus animation, family and the kids' studios. */
+internal fun isKids(c: CategoryEntity) = LiveGenre.Kids.regex!!.containsMatchIn(Names.clean(c.name)) || KIDS_MORE.containsMatchIn(Names.clean(c.name))
+
+private val KIDS_MORE = Regex("""ANIMATION|ANIMATED|\bFAMILY\b|DISNEY|PIXAR|DREAMWORKS|NICKELODEON|NICK JR|JUNIOR|\bBABY\b|TODDLER""", RegexOption.IGNORE_CASE)
 
 private fun arranged(all: List<CategoryEntity>, profile: Profile?, mine: List<String>, keep: (CategoryEntity) -> Boolean): List<CategoryEntity> {
     val hidden = profile?.hiddenCategories.orEmpty().map { it.lowercase() }.toSet()

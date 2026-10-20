@@ -39,6 +39,18 @@ class CategoryOrderTest {
     }
 
     @Test
+    fun aKidsViewerSeesKidsCategoriesOnlyAndNeverAdultOnes() {
+        val kids = Profile(parentalPin = "1234", kidsOnly = true)
+        val movies = cats(Kind.MOVIE, "EN - ACTION", "EN - KIDS", "EN - ANIMATION", "DISNEY+ MOVIES", "FAMILY MOVIES", "XXX", "KIDS XXX")
+        assertEquals(listOf("EN - KIDS", "EN - ANIMATION", "DISNEY+ MOVIES", "FAMILY MOVIES"), visibleCategories(movies, kids).map { it.name })
+        assertEquals(listOf("Kids"), visibleCategories(all, kids, adultLive = true).map { it.name })
+        // Adult content stays shut even with the PIN entered.
+        assertFalse(adultAllowed(kids))
+        assertFalse(adultOpen(kids, unlocked = true))
+        assertEquals(emptyList<String>(), adultCategories(movies, kids).map { it.name })
+    }
+
+    @Test
     fun withoutAPinThereIsNoAdultContentAtAll() {
         for (p in listOf(Profile(), Profile(parentalPin = ""), null)) {
             assertFalse(adultAllowed(p))
