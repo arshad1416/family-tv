@@ -10,6 +10,7 @@ import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotFocused
 import androidx.compose.ui.test.hasAnyDescendant
@@ -478,6 +479,31 @@ class GlassHomeTest {
         assertTrue("switch $switch overlaps Settings $gear", switch.right <= gear.left)
         // 96 x 44 when it has its room.
         assertTrue("switch is squeezed: $switch", switch.width > switch.height * 2)
+    }
+
+    @Test
+    fun focusNeverSticksOnSettings() {
+        home()
+        waitFor("Search movies")
+        rule.waitUntilAtLeastOneExists(hasContentDescription("Settings"), 20_000)
+        val movies = hasText("Movies") and hasClickAction()
+        // Up from the right-most card goes to the chosen tab, not the Settings button above it.
+        val tabs = rule.onNode(movies).fetchSemanticsNode().boundsInRoot
+        val right = rule.onAllNodes(hasClickAction()).fetchSemanticsNodes().filter { it.boundsInRoot.top > tabs.bottom }.maxBy { it.boundsInRoot.right }
+        rule.onNode(SemanticsMatcher("right-most card") { it.id == right.id }).requestFocus()
+        repeat(8) {
+            if (rule.onNode(isFocused()).fetchSemanticsNode().boundsInRoot.top <= tabs.bottom) return@repeat
+            press(Key.DirectionUp)
+        }
+        rule.onNode(movies).assertIsFocused()
+        // Left from Settings reaches the Appearance switch; Right moves on to the tabs.
+        rule.onNodeWithContentDescription("Settings").requestFocus()
+        press(Key.DirectionLeft)
+        rule.onNodeWithContentDescription("Appearance: Auto").assertIsFocused()
+        rule.onNodeWithContentDescription("Settings").requestFocus()
+        press(Key.DirectionRight)
+        rule.waitForIdle()
+        rule.onNode(movies).assertIsFocused()
     }
 
     @Test

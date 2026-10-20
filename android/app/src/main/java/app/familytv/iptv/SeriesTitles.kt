@@ -98,8 +98,9 @@ object SeriesTitles {
     )
 
     /**
-     * Shop-window words some providers add to a quality tag ("4K-TOP - Dune"). Only dropped beside
-     * a quality, platform or language tag, so "Top Gun" or "New Girl" keep their names.
+     * Shop-window words some providers add to a title ("4K-TOP - Dune", "TOP - The Mandalorian").
+     * Dropped beside a quality, platform or language tag, or alone when written in capitals and
+     * cut off by a separator, so "Top Gun", "New Girl" and "Top - Gun" keep their names.
      */
     private val FILLERS = setOf("TOP", "NEW", "VIP", "BEST", "HOT", "PREMIUM", "PREM", "PLUS", "ONLY", "EXCLUSIVE")
 
@@ -141,12 +142,13 @@ object SeriesTitles {
     /** What a tag (prefix, suffix or bracket contents) holds, or null when it is part of the title. */
     private class Tag(val lang: String?, val tags: List<String>)
 
-    private fun tag(text: String, allowYear: Boolean, allowLang: Boolean = true): Tag? {
+    private fun tag(text: String, allowYear: Boolean, allowLang: Boolean = true, separated: Boolean = true): Tag? {
         val tokens = text.split(Regex("[\\s\\-/,]+")).filter { it.isNotEmpty() }
         if (tokens.isEmpty()) return null
         var lang: String? = null
         val tags = ArrayList<String>()
         var fillers = false
+        var shouted = true
         for (t in tokens) {
             val up = t.uppercase(Locale.ROOT)
             val l = if (allowLang) langOf(t) else null
@@ -154,11 +156,11 @@ object SeriesTitles {
                 l != null -> if (lang == null) lang = l
                 up in QUALITY || up in PLATFORMS -> tags += up
                 allowYear && isYear(t) -> Unit
-                up in FILLERS -> fillers = true
+                up in FILLERS -> { fillers = true; if (t != up) shouted = false }
                 else -> return null
             }
         }
-        if (fillers && lang == null && tags.isEmpty()) return null
+        if (fillers && lang == null && tags.isEmpty() && !(separated && shouted)) return null
         return Tag(lang, tags)
     }
 
@@ -185,7 +187,7 @@ object SeriesTitles {
             val (m, t) = when {
                 bracket != null -> bracket to tag(bracket.groupValues[1], allowYear = true)
                 else -> PLAIN_SUFFIX.find(s)?.let { it to tag(it.groupValues[1], allowYear = true) }
-                    ?: BARE_SUFFIX.find(s)?.let { it to tag(it.groupValues[1], allowYear = true, allowLang = false) }
+                    ?: BARE_SUFFIX.find(s)?.let { it to tag(it.groupValues[1], allowYear = true, allowLang = false, separated = false) }
                     ?: return@repeat
             }
             if (t == null) return@repeat

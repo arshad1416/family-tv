@@ -280,6 +280,8 @@ internal fun GlassPill(
     FocusBox(
         onClick = onClick, onFocus = onFocus, shape = shape, scale = 1.06f, lift = Lift.Glow, contentAlignment = Alignment.Center,
         color = when { selected && slid -> Color.Transparent; selected -> Glass.Selected; focused -> Glass.Focus; else -> fill },
+        // Focus on the slid pill keeps the slider showing through: a wash over it hid the label in the light look.
+        outline = selected && slid,
         modifier = modifier.onFocusChanged { focused = it.isFocused }.then(if (border && !selected && !focused) Modifier.border(1.dp, Glass.LineSoft, shape) else Modifier),
     ) { _ ->
         Row(Modifier.padding(horizontal = padH, vertical = padV), verticalAlignment = Alignment.CenterVertically) {
@@ -486,8 +488,8 @@ internal fun openApp(ctx: Context, name: String, packages: List<String>, web: St
 
 /** The page's settings button. */
 @Composable
-internal fun SettingsButton(selected: Boolean, requester: FocusRequester, onClick: () -> Unit) {
-    GlassIconButton(Icons.Outlined.Settings, "Settings", onClick, Modifier.focusRequester(requester), selected = selected)
+internal fun SettingsButton(selected: Boolean, requester: FocusRequester, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    GlassIconButton(Icons.Outlined.Settings, "Settings", onClick, modifier.focusRequester(requester), selected = selected)
 }
 
 /** Selects [value] once focus has rested on it (as the old rail did), so passing over an item doesn't load it. */
