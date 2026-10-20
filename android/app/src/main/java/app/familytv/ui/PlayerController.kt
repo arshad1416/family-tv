@@ -203,11 +203,14 @@ class PlayerController(
     private var touch = false
     private var controls by mutableStateOf(false)
     private var controlsJob: Job? = null
-    /** TV live: Back opens the guide over the video, then shrinks the video with the categories open, then leaves. */
+    /**
+     * TV live: Back opens the guide over the video, then leaves for the home's Live TV page, which
+     * focuses the channel playing and previews it there (it took the small-picture guide's place).
+     */
     private val guideBack = object : OnBackPressedCallback(false) {
         override fun handleOnBackPressed() = when {
             bigGuide == GuideMode.Off -> openBigGuide()
-            bigGuide == GuideMode.Over -> showGuideCategories()
+            bigGuide == GuideMode.Over -> host.close()
             !guideCategories -> guideCategories = true
             else -> host.close()
         }

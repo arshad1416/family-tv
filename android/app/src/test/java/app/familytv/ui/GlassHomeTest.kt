@@ -7,6 +7,7 @@ import android.content.IntentFilter
 import android.speech.RecognizerIntent
 import androidx.activity.OnBackPressedDispatcher
 import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsFocused
@@ -28,6 +29,10 @@ import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.requestFocus
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.LifecycleRegistry
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.test.core.app.ApplicationProvider
 import androidx.work.Configuration
 import androidx.work.WorkManager
@@ -196,6 +201,36 @@ class GlassHomeTest {
         rule.waitUntilAtLeastOneExists(isFocused() and hasText("UK"), 10_000)
         press(Key.DirectionCenter)
         rule.waitUntilAtLeastOneExists(isFocused() and hasText("BBC News"), 10_000)
+    }
+
+    @Test
+    fun comingBackFromFullScreenFocusesTheChannelLastPlaying() {
+        runBlocking { app.db.catalog().upsertChannels(listOf(ChannelEntity("s", "101", "Sky News", 102, null, "1", null, null, 0, 0))) }
+        val line = Profile(sources = listOf(Source("s", "xtream", "Line")))
+        // The home's own start and stop, which full screen (another activity) brings.
+        val owner = object : LifecycleOwner { override val lifecycle = LifecycleRegistry.createUnsafe(this) }
+        val screen = owner.lifecycle.apply { currentState = Lifecycle.State.RESUMED }
+        rule.setContent {
+            CompositionLocalProvider(LocalLifecycleOwner provides owner) {
+                HomeScreen(MainViewModel(app), DeviceConfig(paired = true, profile = line))
+            }
+        }
+        waitFor("Live TV")
+        rule.onNodeWithText("Live TV").performClick()
+        waitFor("BBC News")
+        rule.onNode(hasText("News") and hasClickAction()).requestFocus()
+        rule.waitUntilAtLeastOneExists(isFocused() and hasText("News"), 10_000)
+        press(Key.DirectionRight)
+        rule.waitUntilAtLeastOneExists(isFocused() and hasText("UK"), 10_000)
+        press(Key.DirectionCenter)
+        rule.waitUntilAtLeastOneExists(isFocused() and hasText("BBC News"), 10_000)
+        // OK plays BBC News full screen; there Up zaps to Sky News, then Back leaves.
+        press(Key.DirectionCenter)
+        rule.runOnUiThread { screen.currentState = Lifecycle.State.CREATED }
+        app.lastChannels.played(line, ChannelRef("s", "1", "101"))
+        rule.runOnUiThread { screen.currentState = Lifecycle.State.RESUMED }
+        rule.waitUntilAtLeastOneExists(isFocused() and hasText("Sky News"), 10_000)
+        waitFor("GUIDE · SKY NEWS")
     }
 
     @Test

@@ -41,7 +41,9 @@ object GuideMatch {
         if (id != null && id in index.ids) return Link(id, How.ID)
         val country = countryOfId(id) ?: countryOfName(c.name) ?: c.category?.let(::countryOfName)
         id?.let { unique(index, key(idName(it)), country) }?.let { return Link(it, How.ID_NAME) }
-        unique(index, key(c.name), country)?.let { return Link(it, How.NAME) }
+        val name = key(c.name)
+        unique(index, name, country)?.let { return Link(it, How.NAME) }
+        NAME_ALIASES[name]?.let { unique(index, it, country) }?.let { return Link(it, How.NAME) }
         return null
     }
 
@@ -57,7 +59,7 @@ object GuideMatch {
 
     /**
      * Letters and digits only, lower case, without the provider's country prefix ("CA|", "[US]",
-     * "IN:"), picture-quality words (HD, FHD, SD) or a leading "The". "+1" stays: a channel an hour
+     * "IN:", "CA EN:"), picture-quality words (HD, FHD, SD) or a leading "The". "+1" stays: a channel an hour
      * behind has another schedule.
      */
     fun key(name: String): String {
@@ -73,9 +75,10 @@ object GuideMatch {
     /** The country an id's suffix names: "ca" for "CTV.Toronto.HD.ca2" or "ctv.ca"; null for "Discovery.HD". */
     fun countryOfId(id: String?): String? = id?.let { SUFFIX.find(it) }?.groupValues?.get(1)?.lowercase()?.let { COUNTRIES[it] }
 
-    /** The country a channel or category name's prefix or words name ("CA| CTV", "USA Entertainment"). */
+    /** The country a channel or category name's prefix or words name ("CA| CTV", "CA EN: CTV", "USA Entertainment"). */
     fun countryOfName(name: String): String? {
-        PREFIX.find(name)?.let { m -> COUNTRIES[m.value.lowercase().filter { it.isLetter() }]?.let { return it } }
+        // The prefix's first word: "CA EN:" is Canada, its "EN" the language.
+        PREFIX.find(name)?.let { m -> COUNTRIES[m.value.lowercase().split(NOT_WORD).firstOrNull { it.isNotEmpty() }]?.let { return it } }
         val words = name.lowercase().split(NOT_WORD)
         return words.firstNotNullOfOrNull { COUNTRY_WORDS[it] }
     }
@@ -151,7 +154,12 @@ object GuideMatch {
     /** A short code in brackets, such as a call sign or "CP24"; words like "(Pacific)" are not aliases. */
     private val ALIAS = Regex("""\(([A-Z0-9][A-Z0-9-]{2,7})\)""")
     private val SUFFIX = Regex("""\.([a-zA-Z]{2})\d*$""")
-    private val PREFIX = Regex("""^\s*(?:\[[^\]]{1,10}]|\([^)]{1,10}\)|[\p{L}\d]{1,8}\s*[|:]|24/7)\s*""")
+    private val PREFIX = Regex("""^\s*(?:\[[^\]]{1,10}]|\([^)]{1,10}\)|[\p{L}\d]{1,8}(?:\s+\p{L}{2,3})?\s*[|:]|24/7)\s*""")
+    /** Provider names the guides spell another way, by key: "Global News BC" is the guide's "Global BC". */
+    private val NAME_ALIASES = mapOf(
+        "globalnewsbc" to "globalbc",
+        "globalnewstoronto" to "globaltoronto",
+    )
     private val PLACEHOLDER = Regex("""(?i)no (programme |program |epg )?(information|info|data)|to be announced|tba|tbd|no epg|off air|n/?a""")
     private val COUNTRIES = mapOf(
         "ca" to "ca", "can" to "ca", "canada" to "ca",
