@@ -1,5 +1,7 @@
 package app.familytv.sync
 
+import app.familytv.perf.Perf
+
 /** What this TV is doing right now; sent to the portal with every heartbeat. */
 object PlaybackStatus {
     @Volatile var title: String? = null
@@ -44,5 +46,6 @@ object PlaybackStatus {
         "followed" to followed,
         "openOnStart" to openOnStart,
         "serverSwitch" to serverSwitch,
+        "perf" to runCatching { Perf.snapshot() }.getOrNull(),
     )
 }

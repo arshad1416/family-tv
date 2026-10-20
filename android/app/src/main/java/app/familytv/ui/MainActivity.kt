@@ -48,6 +48,7 @@ import androidx.tv.material3.SurfaceDefaults
 import androidx.tv.material3.Text
 import app.familytv.BuildConfig
 import app.familytv.app
+import app.familytv.perf.Perf
 import app.familytv.start.OpenOnStart
 import app.familytv.sync.CommandRunner
 import kotlinx.coroutines.launch
@@ -88,6 +89,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Perf.activityCreated()
+        Perf.watchFrames(this)
         if (savedInstanceState == null) splash = Splash.video(app.portal.cachedConfig?.profile?.splash, Calendar.getInstance().get(Calendar.MONTH) + 1)
         lifecycleScope.launch {
             app.commands.events.collect { e ->

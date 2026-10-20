@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import app.familytv.app
 import app.familytv.diag.DiagnosisReport
 import app.familytv.iptv.ServerSwitch
+import app.familytv.perf.Perf
 import app.familytv.portal.DeviceConfig
 import app.familytv.portal.LatestApp
 import app.familytv.portal.PortalException
@@ -61,16 +62,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             // Portal unreachable: keep working from the last known setup.
             app.portal.cachedConfig ?: run {
                 _screen.value = Screen.Failed("Can't reach the setup service. Check the internet connection.")
+                Perf.skipColdStart()
                 return
             }
         }
         if (!config.paired) {
             _screen.value = Screen.Pairing(config.pairCode.orEmpty(), config.pairExpires ?: 0, app.portal.unpaired)
+            Perf.skipColdStart()
             return
         }
         val profile = config.profile ?: return
         if (app.db.catalog().channelCount() == 0) {
             _screen.value = Screen.Syncing("Loading channels")
+            Perf.skipColdStart()
             try {
                 app.catalog.refresh(profile) { _screen.value = Screen.Syncing(it.step, it.fraction, it.detail) }
                 PlaybackStatus.lastRefresh = System.currentTimeMillis()
@@ -82,6 +86,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
         _screen.value = Screen.Ready(config)
+        Perf.firstScreen()
         // Pull favourites, watched marks and resume points from Trakt on every start and reload.
         app.trakt.refreshState()
         app.trakt.sync.soon(0)

@@ -1,5 +1,6 @@
 package app.familytv.iptv
 
+import android.os.SystemClock
 import android.util.Xml
 import app.familytv.core.Http
 import app.familytv.data.AppDb
@@ -11,6 +12,7 @@ import app.familytv.data.Names
 import app.familytv.data.ProgrammeEntity
 import app.familytv.data.SeriesEntity
 import app.familytv.data.SourceEntity
+import app.familytv.perf.Perf
 import app.familytv.portal.Profile
 import app.familytv.portal.Source
 import app.familytv.sync.PlaybackStatus
@@ -63,6 +65,7 @@ class Catalog(private val db: AppDb) {
         val errors = mutableListOf<String>()
         val extras = profile.extraGuides.orEmpty().distinct().take(MAX_EXTRA_GUIDES)
         val t = Tracker(profile.sources.size + (if (extras.isEmpty()) 0 else 1), onProgress)
+        val began = SystemClock.elapsedRealtime()
         for ((i, s) in profile.sources.withIndex()) {
             t.startSource(i)
             try {
@@ -74,6 +77,8 @@ class Catalog(private val db: AppDb) {
                 errors += "${s.name}: ${e.message}"
             }
         }
+        // The lists alone (the extra guides load after), so it compares with the Rust app's.
+        if (profile.sources.isNotEmpty() && errors.size < profile.sources.size) Perf.listLoadMs = SystemClock.elapsedRealtime() - began
         t.startSource(profile.sources.size)
         loadExtraGuides(profile, extras, t)
         onProgress(Progress("Finishing", 1f))

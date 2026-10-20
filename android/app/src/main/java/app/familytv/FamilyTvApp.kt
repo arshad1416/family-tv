@@ -11,6 +11,7 @@ import app.familytv.data.AppDb
 import app.familytv.diag.Diagnoser
 import app.familytv.iptv.Catalog
 import app.familytv.iptv.ServerSwitch
+import app.familytv.perf.Perf
 import app.familytv.portal.PortalClient
 import app.familytv.sync.CommandRunner
 import app.familytv.sync.NewEpisodes
@@ -62,6 +63,7 @@ class FamilyTvApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        Perf.init(this)
         CrashLog.install(this)
         CrashLog.last(this)?.let { (trace, at) -> PlaybackStatus.lastCrash = trace; PlaybackStatus.lastCrashAt = at }
         Usage.enabled = portal.cachedConfig?.profile?.usageStats == true
