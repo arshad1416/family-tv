@@ -237,14 +237,16 @@ class GlassHomeTest {
     }
 
     @Test
-    fun appearanceSwitchStepsAndIsSaved() {
+    fun appearancePickerChoosesAndIsSaved() {
         home()
         waitFor("Search movies")
         rule.onNodeWithContentDescription("Appearance: Auto").performClick()
+        // OK opens the picker with Auto, the current one, focused.
+        rule.waitUntilAtLeastOneExists(isFocused() and hasText("Auto"), 10_000)
+        rule.onNode(hasText("Dark") and hasClickAction()).performClick()
         rule.waitUntilAtLeastOneExists(hasContentDescription("Appearance: Dark"), 10_000)
         assertEquals(Appearance.DARK, app.glassPrefs.appearance.value)
-        rule.onNodeWithContentDescription("Appearance: Dark").performClick()
-        rule.waitUntilAtLeastOneExists(hasContentDescription("Appearance: Light"), 10_000)
+        rule.onNodeWithText("Light").assertDoesNotExist()
     }
 
     @Test
