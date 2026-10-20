@@ -97,6 +97,12 @@ object SeriesTitles {
         "APPLETV+", "HULU", "PCOK", "PEACOCK", "PMTP", "PARAMOUNT", "PARAMOUNT+", "CRAVE", "STARZ", "SHOWTIME",
     )
 
+    /**
+     * Shop-window words some providers add to a quality tag ("4K-TOP - Dune"). Only dropped beside
+     * a quality, platform or language tag, so "Top Gun" or "New Girl" keep their names.
+     */
+    private val FILLERS = setOf("TOP", "NEW", "VIP", "BEST", "HOT", "PREMIUM", "PREM", "PLUS", "ONLY", "EXCLUSIVE")
+
     fun languageName(code: String): String = if (code == ORIGINAL) "Original" else NAMES[code] ?: code.uppercase(Locale.ROOT)
 
     private fun langOf(token: String): String? {
@@ -140,6 +146,7 @@ object SeriesTitles {
         if (tokens.isEmpty()) return null
         var lang: String? = null
         val tags = ArrayList<String>()
+        var fillers = false
         for (t in tokens) {
             val up = t.uppercase(Locale.ROOT)
             val l = if (allowLang) langOf(t) else null
@@ -147,9 +154,11 @@ object SeriesTitles {
                 l != null -> if (lang == null) lang = l
                 up in QUALITY || up in PLATFORMS -> tags += up
                 allowYear && isYear(t) -> Unit
+                up in FILLERS -> fillers = true
                 else -> return null
             }
         }
+        if (fillers && lang == null && tags.isEmpty()) return null
         return Tag(lang, tags)
     }
 
@@ -187,6 +196,21 @@ object SeriesTitles {
         val title = s.replace(EDGE, "").ifBlank { raw.trim() }
         return Parsed(title, key(title), lang, tags)
     }
+
+    /**
+     * The picture-quality badge for a title's copies ("4K", "HDR" or "4K HDR"), from the tags in
+     * their [raw] names; null when none says 4K or HDR.
+     */
+    fun qualityBadge(raw: List<String>): String? {
+        val tags = raw.flatMap { parse(it).tags }.toSet()
+        return listOfNotNull(
+            "4K".takeIf { tags.any { it in UHD } },
+            "HDR".takeIf { tags.any { it in HDR } },
+        ).joinToString(" ").ifEmpty { null }
+    }
+
+    private val UHD = setOf("4K", "8K", "UHD", "2160P")
+    private val HDR = setOf("HDR", "HDR10", "DV")
 
     /** Casefolded, accent-free, punctuation-free form of a title, for grouping. */
     fun key(title: String): String =

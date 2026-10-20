@@ -532,8 +532,9 @@ fun ChannelCard(
  * Artwork tile. [onFavourite] adds hold-OK or Menu (TV) or a heart button (touch) to toggle the
  * favourite; [onMenu], when set, takes over hold-OK, Menu and long press (an [ItemMenu]);
  * [newBadge] marks a show with new episodes ([newCount] of them, when known); [watched] and [progress] draw the tick and the resume line. [logo] fits a channel
- * logo instead of cropping a poster. [onTrailer] adds a Trailer button (over the poster on touch,
- * beside the name on TV).
+ * logo instead of cropping a poster. [onTrailer] adds a Trailer button over the poster on touch; on
+ * TV the Trailer lives on the details page. [badge] ("4K HDR") sits on the poster's lower left;
+ * [caption] ("42 min left") goes under the name, and [fullName] lets the name take two lines.
  */
 @Composable
 fun PosterCard(
@@ -550,6 +551,9 @@ fun PosterCard(
     onMenu: (() -> Unit)? = null,
     newBadge: Boolean = false,
     newCount: Int = 0,
+    badge: String? = null,
+    caption: String? = null,
+    fullName: Boolean = false,
     onFocus: () -> Unit = {},
     onClick: () -> Unit,
 ) {
@@ -568,11 +572,20 @@ fun PosterCard(
             else MarkBadge(Modifier.align(Alignment.TopEnd), favourite = favourite)
             if (progress > 0f) ProgressLine(progress, Modifier.align(Alignment.BottomCenter).padding(8.dp), height = 4.dp)
             if (touch && onTrailer != null) TrailerButton(onTrailer, Modifier.align(Alignment.BottomStart), compact = true)
+            else if (badge != null) QualityBadge(badge, Modifier.align(Alignment.BottomStart).padding(start = 8.dp, bottom = if (progress > 0f) 18.dp else 8.dp))
         }
-        Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 13.sp, color = MutedText, modifier = Modifier.padding(top = 6.dp))
-        // Under the name, not beside it: beside it, a short name like "4K Movies" was cut to "4K…".
-        if (!touch && onTrailer != null) TrailerButton(onTrailer, Modifier.padding(top = 4.dp), compact = true)
+        Text(name, maxLines = if (fullName) 2 else 1, overflow = TextOverflow.Ellipsis, fontSize = 13.sp, color = MutedText, modifier = Modifier.padding(top = 6.dp))
+        caption?.let { Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 12.sp, color = MutedText) }
     }
+}
+
+/** "4K", "HDR" or "4K HDR" on a poster: small, dark, readable over any artwork. */
+@Composable
+fun QualityBadge(text: String, modifier: Modifier = Modifier) {
+    Text(
+        text, modifier.clip(RoundedCornerShape(4.dp)).background(Color(0xCC060A14)).padding(horizontal = 5.dp, vertical = 1.dp),
+        fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1, softWrap = false,
+    )
 }
 
 // ---- shared helpers ----

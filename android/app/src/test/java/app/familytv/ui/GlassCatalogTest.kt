@@ -39,6 +39,9 @@ class GlassCatalogTest {
         assertTrue(LanguageGroup.Quebec.matches("QC - FILMS"))
         assertFalse(LanguageGroup.English.matches("NETFLIX ENGLISH"))
         assertFalse(LanguageGroup.Hindi.matches("INDEPENDENT FILMS"))
+        // Places are regions, with place names; languages are languages.
+        assertEquals(listOf("Pakistan", "Philippines", "Québec", "Africa", "Asia"), LanguageGroup.entries.filter { it.region }.map { it.label })
+        assertFalse(LanguageGroup.Hindi.region)
     }
 
     @Test

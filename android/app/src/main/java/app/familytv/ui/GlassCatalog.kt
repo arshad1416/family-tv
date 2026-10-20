@@ -41,25 +41,26 @@ enum class Provider(val label: String, @DrawableRes val art: Int, val glow: Long
 }
 
 /**
- * "By language and country" on the Movies and TV Shows homes: the first five lead, the rest
- * follow in this order. A group shows only when the line has a category it matches.
+ * The Languages and Regions rows on the Movies and TV Shows homes ([region] says which), each in
+ * this order. A group shows only when the line has a category it matches. Labels are plain
+ * names: a language ("Hindi") or a place ("Pakistan"), never a mix like "Pakistani".
  */
-enum class LanguageGroup(val label: String, pattern: String) {
+enum class LanguageGroup(val label: String, pattern: String, val region: Boolean = false) {
     English("English", """^(EN\s*[-|]|ENGLISH\b)"""),
     Hindi("Hindi", """^(IN\s*[-|]|INDIAN?\b|HINDI\b)"""),
-    Pakistani("Pakistani", """^(PK\s*[-|]|PAKISTANI?\b)"""),
+    Pakistani("Pakistan", """^(PK\s*[-|]|PAKISTANI?\b)""", region = true),
     Persian("Persian", """^((IR|FA)\s*[-|]|PERSIAN\b|FARSI\b|IRAN\b)"""),
-    Philippines("Philippines", """^(PH\s*[-|]|PHILIPPINES?\b|FILIPINO\b|TAGALOG\b)"""),
+    Philippines("Philippines", """^(PH\s*[-|]|PHILIPPINES?\b|FILIPINO\b|TAGALOG\b)""", region = true),
     Arabic("Arabic", """^(AR\s*[-|]|ARABIC\b)"""),
     French("French", """^(FR\s*[-|]|FRANCE\b|FRENCH\b)"""),
-    Quebec("Québec", """^(QC\s*[-|]|QU[EÉ]BEC\b)"""),
+    Quebec("Québec", """^(QC\s*[-|]|QU[EÉ]BEC\b)""", region = true),
     Bengali("Bengali", """^(BN\s*[-|]|BENGALI\b|BANGLA)"""),
     Japanese("Japanese", """^(JP\s*[-|]|JAPAN(ESE)?\b)"""),
     Turkish("Turkish", """^(TR\s*[-|]|TURKISH\b)"""),
     Spanish("Spanish", """^(ES\s*[-|]|SPANISH\b|ESPA[NÑ]OL\b)"""),
-    African("African", """^(AF\s*[-|]|AFRICAN?\b)"""),
+    African("Africa", """^(AF\s*[-|]|AFRICAN?\b)""", region = true),
     Somali("Somali", """^(SO\s*[-|]|SOMALI\b)"""),
-    Asian("Asian", """^ASIA(N)?\b"""),
+    Asian("Asia", """^ASIA(N)?\b""", region = true),
     ;
 
     private val regex = Regex(pattern, RegexOption.IGNORE_CASE)

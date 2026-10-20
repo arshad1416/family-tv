@@ -56,8 +56,8 @@ import kotlinx.coroutines.launch
 
 /**
  * One film before it plays, like the series page: poster, title, year, rating, running time and
- * synopsis from the provider's movie info, Play (or "Resume from 42:10" and Start over) and
- * Favourite. A failed info call still shows the poster and title with Play.
+ * synopsis from the provider's movie info, a 4K/HDR note, Play (or "Resume · 42 min left" and
+ * Start over), Favourite and Trailer. A failed info call still shows the poster and title with Play.
  */
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
@@ -94,6 +94,7 @@ fun MoviePage(profile: Profile, group: MovieGroup, visible: Set<Pair<String, Str
         (m.rating?.takeIf { it.isNotBlank() && it.toDoubleOrNull() != 0.0 } ?: info?.rating)?.let { "★ $it" },
         info?.durationSecs?.let(::runtime),
         SeriesTitles.languageName(m.language).takeIf { copies.size > 1 },
+        SeriesTitles.qualityBadge(listOf(m.name)),
     )
     val playFirst = remember { FocusRequester() }
     LaunchedEffect(Unit) { if (!form.touch) { delay(60); runCatching { playFirst.requestFocus() } } }
@@ -117,7 +118,10 @@ fun MoviePage(profile: Profile, group: MovieGroup, visible: Set<Pair<String, Str
                 LazyRow(Modifier.focusRestorer(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     item("play") {
                         TvButton(
-                            if (resumeAt != null) "▶  Resume from ${PlaybackTracker.clock(resumeAt)}" else "▶  Play",
+                            when {
+                                resumeAt == null -> "▶  Play"
+                                else -> ProgressRules.timeLeft(p)?.let { "▶  Resume · $it" } ?: "▶  Resume from ${PlaybackTracker.clock(resumeAt)}"
+                            },
                             { scope.launch { playMovieNow(ctx, profile, m) } },
                             Modifier.focusRequester(playFirst),
                         )

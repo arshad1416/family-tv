@@ -33,6 +33,24 @@ class SeriesTitlesTest {
     }
 
     @Test
+    fun shopWindowWordsGoOnlyBesideATag() {
+        assertEquals("Dune", title("4K-TOP - Dune"))
+        assertEquals(listOf("4K"), SeriesTitles.parse("4K-TOP - Dune").tags)
+        assertEquals("Oppenheimer", title("NEW-4K - Oppenheimer"))
+        // Alone they are part of the name.
+        assertEquals("TOP - Gun", title("TOP - Gun"))
+        assertEquals("New - Girl", title("New - Girl"))
+    }
+
+    @Test
+    fun qualityBadgeSaysFourKAndHdr() {
+        assertEquals("4K", SeriesTitles.qualityBadge(listOf("4K-TOP - Dune")))
+        assertEquals("4K HDR", SeriesTitles.qualityBadge(listOf("EN - Dune [4K]", "Dune (HDR10)")))
+        assertEquals("HDR", SeriesTitles.qualityBadge(listOf("Dune - DV")))
+        assertNull(SeriesTitles.qualityBadge(listOf("EN - Dune FHD")))
+    }
+
+    @Test
     fun languageSuffixesAreStrippedAndDetected() {
         assertEquals("Dark", title("Dark (DE)"))
         assertEquals("de", lang("Dark (DE)"))
