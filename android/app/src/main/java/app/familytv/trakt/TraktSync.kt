@@ -271,7 +271,7 @@ class TraktSync(private val app: FamilyTvApp, private val trakt: Trakt) {
                 updatedAt = System.currentTimeMillis(),
             )
             user.upsertProgress(row)
-            if (action != TICK) app.sharedProgress.soon()
+            if (action != TICK) { app.sharedProgress.soon(); app.viewers.played(item.key) }
             if (action == TICK || !trakt.signedIn) return@launch
             val sent = runCatching { scrobble(item, action, percent) }.isSuccess
             if (finished && !sent) user.upsertProgress(row.copy(pendingHistory = true))

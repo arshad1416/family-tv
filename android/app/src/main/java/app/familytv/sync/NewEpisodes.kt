@@ -56,8 +56,10 @@ class NewEpisodes(private val app: FamilyTvApp) {
     }
 
     suspend fun check(profile: Profile) {
-        val favs = dao.allFavouriteRows()
-            .filter { it.kind == Kind.SERIES && it.pending != Pending.REMOVE && it.pending != Pending.HIDDEN }
+        // This TV's favourite shows and each viewer's own.
+        val favs = (dao.allFavouriteRows().filter { it.pending != Pending.REMOVE && it.pending != Pending.HIDDEN } + app.viewers.everyonesFavourites())
+            .filter { it.kind == Kind.SERIES }
+            .distinctBy { it.sourceId to it.itemId }
             // Shows favourited by hand before ones followed from Trakt history.
             .sortedWith(compareBy({ it.fromHistory }, { -it.addedAt }))
         val known = dao.episodeWatches().associateBy { it.sourceId to it.seriesId }

@@ -40,18 +40,7 @@ export interface ProfileData {
   openOnStart?: boolean;
   /** TVs send anonymous feature use (screens and buttons, never what's watched or searched); unset sends nothing. */
   usageStats?: boolean;
-  /** The people who watch on this profile's TVs, picked from the TV's top bar; unset or empty means no picker. */
-  viewers?: Viewer[];
 }
-
-/** A person on a profile. A [kids] viewer sees kids' categories only, and leaving them needs the parental PIN. */
-export interface Viewer {
-  id: string;
-  name: string;
-  kids?: boolean;
-}
-
-export const MAX_VIEWERS = 8;
 
 export const SPLASHES = ["the-nook"] as const;
 export type Splash = (typeof SPLASHES)[number];
@@ -188,28 +177,9 @@ export function validateProfile(p: unknown): ProfileData {
   if (d.usageStats === true) d.usageStats = true;
   else if (d.usageStats === undefined || d.usageStats === null || d.usageStats === false) delete d.usageStats;
   else throw new Error("usageStats must be true, false or unset");
-  if (d.viewers === undefined || d.viewers === null) delete d.viewers;
-  else d.viewers = validateViewers(d.viewers, !!d.parentalPin);
-  if (d.viewers?.length === 0) delete d.viewers;
+  // Viewers are added on each TV now; a list from an older save is dropped.
+  delete (d as { viewers?: unknown }).viewers;
   return d;
-}
-
-/** Viewers as the admin page saves them: named, with short unique ids; a kids viewer needs the PIN to leave. */
-function validateViewers(v: unknown, hasPin: boolean): Viewer[] {
-  if (!Array.isArray(v)) throw new Error("viewers must be a list");
-  if (v.length > MAX_VIEWERS) throw new Error(`at most ${MAX_VIEWERS} viewers`);
-  const ids = new Set<string>();
-  return v.map((x) => {
-    const r = (x ?? {}) as Record<string, unknown>;
-    const id = typeof r.id === "string" ? r.id.trim() : "";
-    const name = typeof r.name === "string" ? r.name.trim().slice(0, 24) : "";
-    if (!/^[a-z0-9-]{1,36}$/.test(id) || ids.has(id)) throw new Error("each viewer needs its own id");
-    if (!name) throw new Error("each viewer needs a name");
-    if (r.kids !== undefined && r.kids !== null && typeof r.kids !== "boolean") throw new Error(`${name}: kids must be true, false or unset`);
-    if (r.kids && !hasPin) throw new Error(`${name} is a kids viewer: set a parental PIN so leaving it can ask for it`);
-    ids.add(id);
-    return r.kids ? { id, name, kids: true } : { id, name };
-  });
 }
 
 export function assertHttpUrl(u: string) {

@@ -197,9 +197,10 @@ internal fun rememberMovieShelves(visible: List<CategoryEntity>, favMovies: List
     var watching by remember { mutableStateOf(emptyList<MovieGroup>()) }
     var recent by remember { mutableStateOf(emptyList<MovieGroup>()) }
     var top by remember { mutableStateOf(emptyList<MovieGroup>()) }
-    LaunchedEffect(visible, progress) {
+    val seen = rememberSeen()
+    LaunchedEffect(visible, progress, seen) {
         val ok = categoryKeys(visible)
-        val started = ProgressRules.continueWatching(progress.values, ProgressKey.MOVIE).take(SHELF_SIZE)
+        val started = ProgressRules.continueWatching(progress.values.playedBy(seen), ProgressKey.MOVIE).take(SHELF_SIZE)
         watching = groupMovies(started.mapNotNull { dao.movie(it.sourceId, it.itemId) }.filter { (it.sourceId to it.categoryId) in ok })
     }
     LaunchedEffect(visible) {

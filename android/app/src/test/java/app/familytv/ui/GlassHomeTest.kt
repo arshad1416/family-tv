@@ -25,6 +25,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.pressKey
@@ -46,7 +47,6 @@ import app.familytv.data.ProgrammeEntity
 import app.familytv.portal.DeviceConfig
 import app.familytv.portal.Profile
 import app.familytv.portal.Source
-import app.familytv.portal.Viewer
 import app.familytv.user.Appearance
 import app.familytv.user.ChannelRef
 import app.familytv.user.ProgressEntity
@@ -360,12 +360,61 @@ class GlassHomeTest {
         rule.onNode(isFocused() and hasText("Movies")).assertExists()
     }
 
+    /** Arshad and Izaan (a kids viewer) on this TV, for a profile with a parental PIN. */
+    private fun twoViewers(): Profile {
+        val profile = Profile(sources = listOf(Source("s", "xtream", "Line")), parentalPin = "1234")
+        app.viewers.add(profile, "Arshad", kids = false)
+        app.viewers.add(profile, "Izaan", kids = true)
+        return profile
+    }
+
+    @Test
+    fun aViewerGetsTheirOwnContinueWatchingAndForYou() {
+        runBlocking {
+            val dao = app.db.catalog()
+            dao.upsertMovies(listOf(MovieEntity("s", "1003", "Die Hard", null, "10", "8.2", "mp4", null, 3, 0, titleKey = "die hard")))
+            app.userDb.user().upsertProgress(
+                ProgressEntity(ProgressKey.movie("s", "1000"), ProgressKey.MOVIE, "s", "1000", positionMs = 3_000_000, durationMs = 6_000_000, percent = 50f, updatedAt = 1),
+            )
+        }
+        val profile = twoViewers()
+        val arshad = app.viewers.all().first()
+        app.viewers.choose(arshad)
+        app.viewers.played(ProgressKey.movie("s", "1000"))
+        rule.setContent { HomeScreen(MainViewModel(app), DeviceConfig(paired = true, profile = profile)) }
+        waitFor(CONTINUE_WATCHING)
+        // For you: more from the category Arshad plays, not what he played.
+        val page = rule.onAllNodes(hasScrollToNodeAction()).fetchSemanticsNodes().indices.maxBy {
+            rule.onAllNodes(hasScrollToNodeAction())[it].fetchSemanticsNode().boundsInRoot.height
+        }
+        rule.waitUntil(20_000) { runCatching { rule.onAllNodes(hasScrollToNodeAction())[page].performScrollToNode(hasText("Die Hard")) }.isSuccess }
+        rule.onNodeWithText("For you").assertExists()
+        // A grown-up switching to another grown-up needs no PIN; their rows start empty.
+        rule.runOnUiThread { app.viewers.add(profile, "Sara", kids = false)?.let(app.viewers::choose) }
+        rule.waitUntil(10_000) { rule.onAllNodes(hasText("For you")).fetchSemanticsNodes().isEmpty() }
+        rule.onNodeWithText(CONTINUE_WATCHING).assertDoesNotExist()
+    }
+
+    @Test
+    fun viewersAreAddedInSettingsOnTheTv() {
+        val profile = Profile(sources = listOf(Source("s", "xtream", "Line")))
+        rule.setContent { HomeScreen(MainViewModel(app), DeviceConfig(paired = true, profile = profile)) }
+        waitFor("Search movies")
+        rule.onNodeWithContentDescription("Who's watching?").assertDoesNotExist()
+        rule.onNode(hasContentDescription("Settings") and hasClickAction()).performClick()
+        waitFor("Who's watching")
+        // No parental PIN: grown-ups only.
+        waitFor("A kids viewer needs a parental PIN: set one for this profile in the portal.")
+        rule.onNode(hasSetTextAction()).performTextInput("Arshad")
+        // Settings scrolls; the panel sits below the first screenful.
+        rule.onNode(hasText("Add") and hasClickAction()).performScrollTo().performClick()
+        waitFor("Remove Arshad")
+        assertEquals(listOf("Arshad"), app.viewers.all().map { it.name })
+    }
+
     @Test
     fun aKidsViewerSeesOnlyKidsCategoriesAndLeavingAsksForThePin() {
-        val profile = Profile(
-            sources = listOf(Source("s", "xtream", "Line")), parentalPin = "1234",
-            viewers = listOf(Viewer("a", "Arshad"), Viewer("k", "Izaan", kids = true)),
-        )
+        val profile = twoViewers()
         rule.setContent { HomeScreen(MainViewModel(app), DeviceConfig(paired = true, profile = profile)) }
         waitFor("Recently added")
         rule.onNode(hasText("Who's watching?") and hasClickAction()).performClick()
@@ -397,10 +446,7 @@ class GlassHomeTest {
                 )
             }
         }
-        val profile = Profile(
-            sources = listOf(Source("s", "xtream", "Line")), parentalPin = "1234",
-            viewers = listOf(Viewer("a", "Arshad"), Viewer("k", "Izaan", kids = true)),
-        )
+        val profile = twoViewers()
         rule.setContent { HomeScreen(MainViewModel(app), DeviceConfig(paired = true, profile = profile)) }
         // The narrowest card naming the film is its poster (a highlight tile is wider).
         fun poster(title: String): Float {
@@ -413,6 +459,8 @@ class GlassHomeTest {
         rule.onNode(hasText("Izaan · Kids") and hasClickAction()).performClick()
         waitFor("Izaan")
         rule.waitUntil(10_000) { rule.onAllNodes(hasText("Star Wars")).fetchSemanticsNodes().isEmpty() }
+        // Continue watching is what this viewer played here.
+        app.viewers.played(ProgressKey.movie("s", "1002"))
         val kids = poster("Frozen")
         assertTrue("kids poster $kids is not bigger than $adult", kids > adult * 1.2f)
     }
