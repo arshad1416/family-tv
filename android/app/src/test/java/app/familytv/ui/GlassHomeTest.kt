@@ -113,10 +113,12 @@ class GlassHomeTest {
     }
 
     @Test
-    fun continueWatchingLeadsWithTimeLeftAndCategoriesStartFolded() = runBlocking {
-        app.userDb.user().upsertProgress(
-            ProgressEntity(ProgressKey.movie("s", "1001"), ProgressKey.MOVIE, "s", "1001", positionMs = 3_000_000, durationMs = 6_000_000, percent = 50f, updatedAt = 1),
-        )
+    fun continueWatchingLeadsWithTimeLeftAndCategoriesStartFolded() {
+        runBlocking {
+            app.userDb.user().upsertProgress(
+                ProgressEntity(ProgressKey.movie("s", "1001"), ProgressKey.MOVIE, "s", "1001", positionMs = 3_000_000, durationMs = 6_000_000, percent = 50f, updatedAt = 1),
+            )
+        }
         home()
         waitFor("Continue watching")
         waitFor("50 min left")
@@ -232,10 +234,13 @@ class GlassHomeTest {
     }
 
     @Test
-    fun rightStepsFromCountryToTheChannels() = runBlocking {
+    fun rightStepsFromCountryToTheChannels() {
         // Canada comes first, so UK's row sits below the top of the channel list.
-        app.db.catalog().upsertCategories(listOf(CategoryEntity("s", Kind.LIVE, "3", "CA| NEWS EN", 3, 0)))
-        app.db.catalog().upsertChannels(listOf(ChannelEntity("s", "300", "CBC News", 301, null, "3", null, null, 0, 0)))
+        // Only the writes block: the UI steps run outside runBlocking, as in the other tests.
+        runBlocking {
+            app.db.catalog().upsertCategories(listOf(CategoryEntity("s", Kind.LIVE, "3", "CA| NEWS EN", 3, 0)))
+            app.db.catalog().upsertChannels(listOf(ChannelEntity("s", "300", "CBC News", 301, null, "3", null, null, 0, 0)))
+        }
         home()
         waitFor("Live TV")
         rule.onNodeWithText("Live TV").performClick()

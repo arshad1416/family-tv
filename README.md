@@ -41,6 +41,10 @@ passwords on a remote, and when a TV goes black the portal tells you why.
   screens and buttons get used (screen, action and a number or fixed word, e.g. time on a page or a
   search's result count) to `POST /api/device/usage`, never what's watched or searched. The portal
   keeps them 30 days in D1 `usage_events`; the allowed names are in `portal/src/usage.ts`.
+- **Live scores:** on a sports channel whose programme title names both teams of a game today, the
+  live info bar shows the score. The TV asks `GET /api/device/scores?league=nhl` (NHL, NBA, WNBA,
+  NFL, MLB, MLS, Premier League, Champions League, LaLiga; `portal/src/scores.ts`), which reads ESPN's
+  public scoreboard and keeps it a minute. Nothing about the TV or the channel is sent or stored.
 - **Automatic server switch:** after 3 server-side stream failures in a row within 10 minutes (HTTP
   5xx, or a connection/DNS failure the portal's reachability check confirms), the TV moves the line
   to the first of its other servers that plays the same stream within 5 s, and says "Server not

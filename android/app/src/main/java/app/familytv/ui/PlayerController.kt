@@ -180,6 +180,11 @@ class PlayerController(
     private var guideWindow: android.graphics.Rect? = null
     private var programmes by mutableStateOf<Map<String, List<NowNext>>>(emptyMap())
     private var programmesAt = 0L
+    /** The live score line for a channel (its stream id to the line), when its programme is a game ([refreshScore]). */
+    private var score by mutableStateOf<Pair<String, String>?>(null)
+    private var scoreJob: Job? = null
+    /** The sport of the list playing, from its category name, worked out once per list. */
+    private var listSport: Pair<ListKey, Sport?>? = null
     private var bannerJob: Job? = null
     private var guideJob: Job? = null
     private var okPending = false
@@ -374,7 +379,7 @@ class PlayerController(
                         onPick = ::pickFromBigGuide, onWindow = ::onGuideWindow,
                     )
                 }
-                if (bigGuide == GuideMode.Off) LiveOverlay(channels, playing, banner, guideOpen, programmes, onTune = ::tuneFromGuide, onFocusChannel = { if (guideOpen) banner = it }, touch = touchUi, sleep = sleep)
+                if (bigGuide == GuideMode.Off) LiveOverlay(channels, playing, banner, guideOpen, programmes, onTune = ::tuneFromGuide, onFocusChannel = { if (guideOpen) banner = it }, touch = touchUi, sleep = sleep, score = score)
             } else if ((vodControls || buttonsActive) && panel == null) {
                 if (touch && host.canDock) RoundIcon(ExitFullScreenIcon, "Leave full screen", Modifier.align(Alignment.TopStart).safeDrawingPadding().padding(24.dp), host::leaveFullScreen)
                 PlayerButtons(
@@ -859,6 +864,7 @@ class PlayerController(
     private fun showBanner(i: Int) {
         banner = i
         refreshProgrammes()
+        channels.getOrNull(i)?.let(::refreshScore)
         bannerJob?.cancel()
         if (!guideOpen) bannerJob = scope.launch { delay(4_000); banner = null }
     }
@@ -988,6 +994,25 @@ class PlayerController(
             runCatching { ids.chunked(500).flatMap { app.db.catalog().programmes(it, now, now + 3 * 3_600_000L) }.groupBy { it.epgId } }
                 .onSuccess { programmes = it }
                 .onFailure { programmesAt = 0 }
+        }
+    }
+
+    /**
+     * The score line for [ch] (backlog item 4) when it's a sports channel showing a game today that
+     * the portal's scoreboard knows; other channels never ask. Asked again each time the bar shows.
+     */
+    private fun refreshScore(ch: ChannelEntity) {
+        val epg = ch.epgId ?: return
+        scoreJob?.cancel()
+        scoreJob = scope.launch {
+            val now = System.currentTimeMillis()
+            val dao = app.db.catalog()
+            val title = runCatching { dao.programmes(listOf(epg), now, now + 1) }.getOrNull()?.firstOrNull { it.start <= now }?.title ?: return@launch
+            val list: ListKey = ch.sourceId to ch.categoryId
+            val listed = listSport?.takeIf { it.first == list }
+                ?: (list to dao.categoryList(Kind.LIVE).firstOrNull { it.sourceId == ch.sourceId && it.categoryId == ch.categoryId }?.let { Sport.of(ch.name, it.name) }).also { listSport = it }
+            val sport = Sport.match(title) ?: listed.second
+            score = app.liveScores.lineFor(title, sport)?.let { ch.streamId to it }
         }
     }
 

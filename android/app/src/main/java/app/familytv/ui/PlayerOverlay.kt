@@ -80,6 +80,7 @@ fun LiveOverlay(
     onFocusChannel: (Int) -> Unit,
     touch: TouchControls? = null,
     sleep: SleepTimer? = null,
+    score: Pair<String, String>? = null,
 ) {
     Box(Modifier.fillMaxSize().safeDrawingPadding()) {
         // Touch: a tap on the video shows the controls (or closes the guide), and a swipe up or down
@@ -98,7 +99,7 @@ fun LiveOverlay(
         // The info bar hides while the list is open (backlog item 25): beside it, it was squashed, and the list already shows what's on.
         if (!guideOpen) banner?.let { channels.getOrNull(it) }?.let { ch ->
             // The quick row (backlog item 4): Right opens Options, where these three are first.
-            InfoBanner(ch, programmes[ch.epgId], Modifier.align(Alignment.BottomStart), hint = if (touch == null) "→  Audio · Subtitles · Sleep timer" else null, sleep = sleep)
+            InfoBanner(ch, programmes[ch.epgId], Modifier.align(Alignment.BottomStart), hint = if (touch == null) "→  Audio · Subtitles · Sleep timer" else null, sleep = sleep, score = score?.takeIf { it.first == ch.streamId }?.second)
         }
         if (touch != null && touch.visible && !guideOpen) {
             RoundIcon(Icons.AutoMirrored.Filled.ArrowBack, "Close player", Modifier.align(Alignment.TopStart).padding(16.dp), touch.onClose)
@@ -140,7 +141,7 @@ fun RoundIcon(icon: ImageVector, label: String, modifier: Modifier = Modifier, o
 }
 
 @Composable
-private fun InfoBanner(ch: ChannelEntity, progs: List<NowNext>?, modifier: Modifier, hint: String? = null, sleep: SleepTimer? = null) {
+private fun InfoBanner(ch: ChannelEntity, progs: List<NowNext>?, modifier: Modifier, hint: String? = null, sleep: SleepTimer? = null, score: String? = null) {
     val now = System.currentTimeMillis()
     val (cur, next) = progs.nowAndNext(now)
     // The current programme's episode, genre and description, from the guide.
@@ -157,6 +158,8 @@ private fun InfoBanner(ch: ChannelEntity, progs: List<NowNext>?, modifier: Modif
             Column(Modifier.weight(1f)) {
                 Text(ch.displayName, fontSize = 16.sp, color = Tv.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(cur?.title ?: "No guide information", fontSize = 26.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                // The game's score, from the portal's scoreboard (backlog item 4).
+                score?.let { Text(it, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = Tv.Good, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp)) }
                 detail?.let(::programmeFacts)?.let { Text(it, fontSize = 15.sp, color = Tv.Accent, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp)) }
                 detail?.description?.takeIf { it.isNotBlank() }?.let { Text(it, fontSize = 14.sp, color = Tv.Muted, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp)) }
                 if (cur != null) Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
