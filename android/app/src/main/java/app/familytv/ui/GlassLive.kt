@@ -200,7 +200,7 @@ private fun LiveBrowser(profile: Profile, onGuide: () -> Unit) {
  */
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
-internal fun RecentStrip(profile: Profile, visible: List<CategoryEntity>) {
+private fun RecentStrip(profile: Profile, visible: List<CategoryEntity>) {
     val ctx = LocalContext.current
     val last = ctx.app.lastChannels
     // The player records each channel as it starts, so coming back from it refreshes the row.

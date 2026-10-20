@@ -132,13 +132,12 @@ class GlassHomeTest {
     private fun waitFor(text: String) = rule.waitUntilAtLeastOneExists(hasText(text), 20_000)
 
     @Test
-    fun opensOnHomeAndItsTilesOpenTheTabs() {
+    fun opensOnHomeTheMainScreen() {
         rule.setContent { HomeScreen(MainViewModel(app), DeviceConfig(paired = true, profile = Profile())) }
-        waitFor("Channels and the TV guide")
-        rule.onNodeWithText("Search movies").assertDoesNotExist()
-        // The tile, below its tab, opens Movies.
-        rule.onNode(hasClickAction() and hasAnyDescendant(hasText("Films")), useUnmergedTree = true).performClick()
-        waitFor("Search movies")
+        // Home is the film highlights, rows and providers the app has always opened on.
+        waitFor("Recently added")
+        waitFor("Top rated")
+        assertEquals(2, rule.onAllNodes(hasText("Home")).fetchSemanticsNodes().size)
     }
 
     @Test
@@ -582,7 +581,6 @@ class GlassHomeTest {
         pressBack()
         rule.waitUntilAtLeastOneExists(isFocused() and hasText("Home"), 10_000)
         rule.onNodeWithText("Exit Family TV?").assertDoesNotExist()
-        rule.onNodeWithText("Search movies").assertDoesNotExist()
         pressBack()
         waitFor("Exit Family TV?")
         rule.waitUntilAtLeastOneExists(isFocused() and hasText("Stay"), 10_000)

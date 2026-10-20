@@ -83,8 +83,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /** The TV's tabs, left to right. Each has its own glow and its own search. */
-enum class GlassTab(val label: String, val glow: Color, val usage: Usage.Screen, val searchHint: String?) {
-    Home("Home", Color(0xFFE0A94A), Usage.Screen.HOME, null),
+enum class GlassTab(val label: String, val glow: Color, val usage: Usage.Screen, val searchHint: String) {
+    /** The main screen the app opens on: the film highlights, rows and providers. */
+    Home("Home", Color(0xFF4F7CFF), Usage.Screen.HOME, "Search movies"),
     Live("Live TV", Color(0xFF2FB8A6), Usage.Screen.LIVE, "Search channels"),
     Movies("Movies", Color(0xFF4F7CFF), Usage.Screen.MOVIES, "Search movies"),
     Series("TV Shows", Color(0xFF9B6BFF), Usage.Screen.SERIES, "Search TV shows"),
@@ -238,7 +239,7 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
                 if (!barHidden.value) {
                     GlassTopBar(
                         tab, settings, tabFocus, settingsFocus,
-                        query = queries.getValue(tab).takeIf { !settings && tab.searchHint != null },
+                        query = queries.getValue(tab).takeIf { !settings },
                         onTab = { tab = it; settings = false },
                         onSettings = { settings = true },
                         onFocused = { barFocused = it },
@@ -260,7 +261,7 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
                             TrackScreen(tab.usage)
                             GlassGlow(tab.glow)
                             when (tab) {
-                                GlassTab.Home -> HomeTab(profile, viewer?.name) { tab = it; runCatching { tabFocus.getValue(it).requestFocus() } }
+                                GlassTab.Home -> VodTab(vm, profile, Kind.MOVIE, GlassTab.Home)
                                 GlassTab.Live -> LiveTab(vm, profile)
                                 GlassTab.Movies -> VodTab(vm, profile, Kind.MOVIE)
                                 GlassTab.Series -> VodTab(vm, profile, Kind.SERIES)
@@ -322,7 +323,7 @@ private fun GlassTopBar(
     viewer: String,
     onViewers: (() -> Unit)?,
 ) {
-    val apps = !settings && (tab == GlassTab.Movies || tab == GlassTab.Series)
+    val apps = !settings && (tab == GlassTab.Home || tab == GlassTab.Movies || tab == GlassTab.Series)
     val home = if (settings) settingsFocus else tabFocus.getValue(tab)
     // Up from the page always lands on the chosen tab (or Settings), never on whatever sits nearest above.
     Column(
@@ -357,7 +358,7 @@ private fun GlassTopBar(
             }
             if (query != null) {
                 Spacer(Modifier.width(18.gx))
-                GlassSearchBox(query.value, { query.value = it }, tab.searchHint.orEmpty())
+                GlassSearchBox(query.value, { query.value = it }, tab.searchHint)
             }
             // Who's watching, when this TV has viewers; OK picks another.
             if (onViewers != null) {
