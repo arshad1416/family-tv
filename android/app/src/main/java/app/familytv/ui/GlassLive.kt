@@ -1,6 +1,7 @@
 package app.familytv.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusGroup
@@ -17,14 +18,18 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -37,6 +42,9 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -75,7 +83,8 @@ private const val TV_GUIDE = "TV guide"
  * Live TV on the TV: a Category column, its countries (with channel counts), the channel list, and
  * at the right the focused channel's live preview over its guide ([GuideBox]). Both columns come from the provider's category names
  * ([LiveGenre], [liveCountry]); adult categories show only once the PIN is entered. TV guide, at the
- * foot of the Category column, opens the classic grid guide. The top bar's search searches channels.
+ * foot of the Category column, opens the classic grid guide. Above them, "Recently watched" ([RecentStrip]).
+ * The top bar's search searches channels.
  */
 @Composable
 internal fun LiveTab(vm: MainViewModel, profile: Profile) {
@@ -141,32 +150,78 @@ private fun LiveBrowser(profile: Profile, onGuide: () -> Unit) {
     // search box instead, which is level with the columns' headings. Left comes back to the chosen country.
     val toChannels = remember { PageEntry() }
     val toCountry = remember { PageEntry() }
+    // OK on a country moves focus into its channel list (backlog item 1), once the list has its rows.
+    var intoList by remember { mutableIntStateOf(0) }
+    LaunchedEffect(intoList) {
+        if (intoList == 0) return@LaunchedEffect
+        repeat(40) { delay(50); if (toChannels.attached > 0) return@LaunchedEffect toChannels.focus() }
+    }
 
-    Row(Modifier.fillMaxSize().focusGroup(), horizontalArrangement = Arrangement.spacedBy(18.gx)) {
-        GlassColumnPanel(Modifier.width(200.gx).fillMaxHeight()) {
-            GlassLabel("Category")
-            // Leaving the column before the 300 ms rest cancels the pending pick, so the list never changes under focus.
-            LazyColumn(Modifier.weight(1f).onFocusChanged { if (!it.hasFocus) hoverGenre.value = null }, verticalArrangement = Arrangement.spacedBy(6.gx)) {
-                items(genres, key = { it }) { x ->
-                    GlassRowItem(x, x == g, { genre = x; country = null }, entryPoint(x == g), onFocus = { hoverGenre.value = x })
+    Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(14.gx)) {
+        RecentStrip(profile, cats)
+        Row(Modifier.fillMaxWidth().weight(1f).focusGroup(), horizontalArrangement = Arrangement.spacedBy(18.gx)) {
+            GlassColumnPanel(Modifier.width(200.gx).fillMaxHeight()) {
+                GlassLabel("Category")
+                // Leaving the column before the 300 ms rest cancels the pending pick, so the list never changes under focus.
+                LazyColumn(Modifier.weight(1f).onFocusChanged { if (!it.hasFocus) hoverGenre.value = null }, verticalArrangement = Arrangement.spacedBy(6.gx)) {
+                    items(genres, key = { it }) { x ->
+                        GlassRowItem(x, x == g, { genre = x; country = null }, entryPoint(x == g), onFocus = { hoverGenre.value = x })
+                    }
+                    item(TV_GUIDE) { GlassRowItem(TV_GUIDE, false, onGuide, onFocus = { hoverGenre.value = TV_GUIDE }) }
                 }
-                item(TV_GUIDE) { GlassRowItem(TV_GUIDE, false, onGuide, onFocus = { hoverGenre.value = TV_GUIDE }) }
             }
+            GlassColumnPanel(Modifier.width(200.gx).fillMaxHeight()) {
+                GlassLabel("$g · Country")
+                LazyColumn(Modifier.weight(1f).onFocusChanged { if (!it.hasFocus) hoverCountry.value = null }, verticalArrangement = Arrangement.spacedBy(6.gx)) {
+                    items(countries, key = { it }) { x ->
+                        GlassRowItem(
+                            x, x == c, { country = x; if (byCountry[x].orEmpty().isNotEmpty()) intoList++ },
+                            Modifier.focusProperties { right = if (channels.isEmpty()) FocusRequester.Cancel else toChannels.orNearest }
+                                .then(landing(toCountry, x == c)),
+                            count = byCountry[x]?.size, onFocus = { hoverCountry.value = x },
+                        )
+                    }
+                }
+            }
+            ChannelBrowser(channels, favKeys, Modifier.weight(1f), side = false, header = null, loading = loaded == null && g != FAVOURITES, arrival = toChannels, leftTo = toCountry)
         }
-        GlassColumnPanel(Modifier.width(200.gx).fillMaxHeight()) {
-            GlassLabel("$g · Country")
-            LazyColumn(Modifier.weight(1f).onFocusChanged { if (!it.hasFocus) hoverCountry.value = null }, verticalArrangement = Arrangement.spacedBy(6.gx)) {
-                items(countries, key = { it }) { x ->
-                    GlassRowItem(
-                        x, x == c, { country = x },
-                        Modifier.focusProperties { right = if (channels.isEmpty()) FocusRequester.Cancel else toChannels.orNearest }
-                            .then(landing(toCountry, x == c)),
-                        count = byCountry[x]?.size, onFocus = { hoverCountry.value = x },
+    }
+}
+
+/**
+ * "Recently watched" (backlog item 2): the last channels this profile played on this TV, newest
+ * first, as one row of small pills; OK plays one. Channels the provider dropped, or in hidden or
+ * locked categories, are left out, and with none the row isn't shown at all.
+ */
+@OptIn(ExperimentalComposeUiApi::class)
+@Composable
+private fun RecentStrip(profile: Profile, visible: List<CategoryEntity>) {
+    val ctx = LocalContext.current
+    val last = ctx.app.lastChannels
+    // The player records each channel as it starts, so coming back from it refreshes the row.
+    val changed by last.changes.collectAsState()
+    var rows by remember { mutableStateOf(emptyList<ChannelEntity>()) }
+    LaunchedEffect(changed, visible, profile) {
+        val ok = visible.mapTo(HashSet()) { it.sourceId to it.categoryId }
+        val dao = ctx.app.db.catalog()
+        rows = last.recent(profile).mapNotNull { dao.channel(it.sourceId, it.streamId) }.filter { (it.sourceId to it.categoryId) in ok }
+    }
+    if (rows.isEmpty()) return
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        GlassLabel("Recently watched", Modifier.width(200.gx))
+        val row = rememberLazyListState()
+        Box(Modifier.weight(1f)) {
+            LazyRow(Modifier.focusRestorer(), state = row, horizontalArrangement = Arrangement.spacedBy(10.gx), contentPadding = PaddingValues(horizontal = 6.gx, vertical = 6.gx)) {
+                items(rows, key = { "${it.sourceId}/${it.streamId}" }) { ch ->
+                    GlassPill(
+                        ch.displayName, { playLive(ctx, ch.sourceId, ch.categoryId, 0, ch.streamId) },
+                        Modifier.widthIn(max = 280.gx), fill = Glass.Raised, border = true, fontSize = 15.gsp, padH = 14.gx, padV = 6.gx,
+                        icon = ch.logo?.let { logo -> { AsyncImage(logo, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.size(36.gx, 22.gx)) } },
                     )
                 }
             }
+            MoreChevrons(row)
         }
-        ChannelBrowser(channels, favKeys, Modifier.weight(1f), side = false, header = null, loading = loaded == null && g != FAVOURITES, arrival = toChannels, leftTo = toCountry)
     }
 }
 
@@ -218,7 +273,7 @@ private fun ChannelBrowser(
                 else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(6.gx), contentPadding = PaddingValues(vertical = 2.dp)) {
                     itemsIndexed(channels, key = { _, ch -> "${ch.sourceId}/${ch.streamId}" }) { i, ch ->
                         ChannelRow(
-                            ch, ch.epgId?.let { progs[it] }?.onAt(minute), numbers = !side,
+                            ch, ch.epgId?.let { progs[it] }.orEmpty(), minute, numbers = !side,
                             favourite = Favourites.key(Kind.LIVE, ch.sourceId, ch.streamId) in favKeys,
                             modifier = entryPoint(entry && i == 0)
                                 .then(if (arrival != null) landing(arrival, ch == shown) else Modifier)
@@ -347,11 +402,12 @@ private fun ChannelPreview(c: ChannelEntity?, progs: List<NowNext>, live: Boolea
     }
 }
 
-/** One channel in a glass list: number (Live TV), logo, name and what's on now. */
+/** One channel in a glass list: number (Live TV), logo, name, what's on now and the next two hours as a thin bar. */
 @Composable
 private fun ChannelRow(
     c: ChannelEntity,
-    now: NowNext?,
+    progs: List<NowNext>,
+    minute: Long,
     numbers: Boolean,
     favourite: Boolean,
     modifier: Modifier,
@@ -368,9 +424,31 @@ private fun ChannelRow(
             // What's on goes under the name, so the name gets the row's whole width (a fixed name column cut Sports names in half).
             Column(Modifier.weight(1f)) {
                 Text(c.displayName, fontSize = 16.gsp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                now?.let { Text("Now: ${it.title}", fontSize = 13.gsp, color = Glass.Dim, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                progs.onAt(minute)?.let { Text("Now: ${it.title}", fontSize = 13.gsp, color = Glass.Dim, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                if (progs.any { it.stop > minute && it.start < minute + TIMELINE }) Timeline(progs, minute, Modifier.padding(top = 5.gx).fillMaxWidth().height(4.gx))
             }
             if (favourite) MarkBadge(favourite = true, size = 18.dp)
+        }
+    }
+}
+
+/**
+ * The mini guide timeline (backlog item 19): the next two hours from [minute], one segment per
+ * programme with a small gap at each change; the one on now is brighter. Drawn, not laid out, so a long list stays cheap.
+ */
+@Composable
+private fun Timeline(progs: List<NowNext>, minute: Long, modifier: Modifier) {
+    val now = Glass.Dim
+    val later = Glass.LineSoft
+    Canvas(modifier) {
+        val end = minute + TIMELINE
+        val gap = 2.dp.toPx()
+        val r = CornerRadius(size.height / 2)
+        progs.forEach { p ->
+            if (p.stop <= minute || p.start >= end) return@forEach
+            val x0 = size.width * (maxOf(p.start, minute) - minute) / TIMELINE
+            val x1 = size.width * (minOf(p.stop, end) - minute) / TIMELINE - gap
+            if (x1 > x0) drawRoundRect(if (p.start <= minute) now else later, Offset(x0, 0f), Size(x1 - x0, size.height), r)
         }
     }
 }
@@ -466,6 +544,7 @@ internal fun SportsTab(profile: Profile) {
 }
 
 private const val HALF_HOUR = 30 * 60_000L
+private const val TIMELINE = 2 * 60 * 60_000L
 
 /** Event channels' titles when nothing is live: "ENDED: …", "Full time", "Replay", "Coming up", "Starts at 8 PM". */
 private val OVER = Regex("""(?i)\b(ended|full time|replay|upcoming|coming up|starts at)\b""")
