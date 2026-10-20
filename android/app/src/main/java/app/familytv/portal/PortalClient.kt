@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Build
 import app.familytv.BuildConfig
 import app.familytv.core.Http
+import app.familytv.scores.ScoreBoard
 import app.familytv.start.OpenOnStart
 import app.familytv.usage.Usage
 import app.familytv.user.SharedProgressPage
@@ -127,6 +128,9 @@ class PortalClient(context: Context, private val baseUrl: String = BuildConfig.P
     suspend fun progressPush(rows: List<SharedProgressRow>) {
         post("/api/device/progress", mapOf("rows" to rows), Map::class.java)
     }
+
+    /** Today's games in one league, for the live info bar's score line. 404 from a portal without them. */
+    suspend fun scores(league: String): ScoreBoard = get("/api/device/scores?league=$league", ScoreBoard::class.java)
 
     /** Anonymous usage events (up to 500); false when the profile has Usage stats off. */
     suspend fun usage(app: String, appVersion: String, events: List<Usage.Event>): Boolean =

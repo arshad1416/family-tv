@@ -13,6 +13,7 @@ import app.familytv.iptv.Catalog
 import app.familytv.iptv.ServerSwitch
 import app.familytv.perf.Perf
 import app.familytv.portal.PortalClient
+import app.familytv.scores.LiveScores
 import app.familytv.sync.CommandRunner
 import app.familytv.sync.NewEpisodes
 import app.familytv.sync.PlaybackStatus
@@ -57,6 +58,7 @@ class FamilyTvApp : Application() {
     val glassPrefs by lazy { GlassPrefs(this) }
     /** The last two live channels per profile, for Left's previous channel. */
     val lastChannels by lazy { LastChannels(this) }
+    val liveScores by lazy { LiveScores(portal) }
     /** The parental PIN was entered (Settings or Adult Content): adult content opens without it until the app restarts. */
     val adultUnlocked = MutableStateFlow(false)
 

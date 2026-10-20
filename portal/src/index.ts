@@ -6,6 +6,7 @@ import { preferServer, suggestions } from "./advice";
 import { daysLeft, loginFromLineUrl, Panel, PanelError, RENEW_MONTHS } from "./panel";
 import { USAGE_APPS, USAGE_BATCH_MAX, USAGE_KEEP_MS, usageEvent } from "./usage";
 import { addonStates, validateAddon, type AddonRow, type DeviceAddon, type PurchaseStatus } from "./addons";
+import { SCORE_LEAGUES, scoresFor } from "./scores";
 
 export interface Env {
   DB: D1Database;
@@ -762,6 +763,14 @@ async function progressPull(req: Request, env: Env, url: URL) {
   return json({ profile: profileId, rows, seq: results.length ? results[results.length - 1].seq : since, more: results.length === PROGRESS_PAGE });
 }
 
+/** Today's games in one league for the TV's info bar ([scoresFor]); paired TVs only. */
+async function deviceScores(req: Request, env: Env, url: URL) {
+  await requirePaired(req, env);
+  const league = url.searchParams.get("league") ?? "";
+  if (!Object.hasOwn(SCORE_LEAGUES, league)) throw new HttpError(400, `league: one of ${Object.keys(SCORE_LEAGUES).join(", ")}`);
+  return json({ league, games: await scoresFor(league) });
+}
+
 /**
  * Anonymous usage stats from a TV, kept only for profiles with Usage stats on (`on: false` tells the
  * TV to stop queueing). Rows past 30 days go as new ones arrive.
@@ -1402,6 +1411,7 @@ export async function handle(req: Request, env: Env): Promise<Response> {
   if (m === "GET" && p === "/api/device/progress") return progressPull(req, env, url);
   if (m === "POST" && p === "/api/device/progress") return progressPush(req, env);
   if (m === "POST" && p === "/api/device/usage") return usagePush(req, env);
+  if (m === "GET" && p === "/api/device/scores") return deviceScores(req, env, url);
   let mm = p.match(/^\/api\/device\/commands\/([a-f0-9]+)\/ack$/);
   if (m === "POST" && mm) return deviceAck(req, env, mm[1]);
 
