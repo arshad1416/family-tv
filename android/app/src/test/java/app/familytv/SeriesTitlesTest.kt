@@ -42,6 +42,7 @@ class SeriesTitlesTest {
         assertEquals("The Mandalorian", title("TOP - The Mandalorian"))
         assertEquals("The Bear", title("NEW | The Bear"))
         assertEquals("Shogun", title("VIP: Shogun"))
+        assertEquals("Fighting Mulan", title("AS - Fighting Mulan"))
         // Otherwise they are part of the name.
         assertEquals("Top - Gun", title("Top - Gun"))
         assertEquals("New - Girl", title("New - Girl"))

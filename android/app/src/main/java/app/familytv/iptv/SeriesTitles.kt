@@ -104,6 +104,9 @@ object SeriesTitles {
      */
     private val FILLERS = setOf("TOP", "NEW", "VIP", "BEST", "HOT", "PREMIUM", "PREM", "PLUS", "ONLY", "EXCLUSIVE")
 
+    /** Region shelves some providers put in front of a title ("AS - Fighting Mulan"); dropped like [FILLERS]. */
+    private val REGIONS = setOf("AS", "ASIA", "ASIAN", "EU", "EUR", "AF", "AFR", "AFRICA", "EXYU", "MENA", "LATAM")
+
     fun languageName(code: String): String = if (code == ORIGINAL) "Original" else NAMES[code] ?: code.uppercase(Locale.ROOT)
 
     private fun langOf(token: String): String? {
@@ -159,7 +162,7 @@ object SeriesTitles {
                 l != null -> if (lang == null) lang = l
                 up in QUALITY || up in PLATFORMS -> tags += up
                 allowYear && isYear(t) -> Unit
-                up in FILLERS -> { fillers = true; if (t != up) shouted = false }
+                up in FILLERS || up in REGIONS -> { fillers = true; if (t != up) shouted = false }
                 else -> return null
             }
         }

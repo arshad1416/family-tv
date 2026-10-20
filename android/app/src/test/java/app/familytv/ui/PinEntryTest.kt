@@ -1,8 +1,10 @@
 package app.familytv.ui
 
+import android.os.SystemClock
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertContentDescriptionEquals
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -14,6 +16,8 @@ import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.requestFocus
 import app.familytv.portal.Profile
 import org.junit.Assert.assertEquals
+import org.junit.After
+import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -26,7 +30,7 @@ import org.robolectric.annotation.Config
 class PinEntryTest {
     @get:Rule val rule = createComposeRule()
 
-    private val profile = Profile(parentalPin = "1234")
+    private val profile = Profile(parentalPin = "9134")
     private var opened = 0
 
     private fun show(form: FormFactor = FormFactor.Tv) = rule.setContent {
@@ -40,47 +44,64 @@ class PinEntryTest {
         rule.waitForIdle()
     }
 
+    private fun entered(n: Int) = row.assertContentDescriptionEquals("PIN, $n of 4 digits entered")
+
+    @Before fun unlock() = PinLock.reset()
+
+    @After fun clock() { PinLock.now = SystemClock::elapsedRealtime }
+
     @Test
-    fun upAndDownRollTheSlotAndOnlyItShowsItsDigit() {
+    fun upAndDownRollTheSlotAndOkOnTheLastChecksIt() {
         show()
         row.requestFocus()
         rule.waitForIdle()
-        // No keypad: nothing to click, and the focused slot starts at 0.
+        // No keypad to click, and no digit in the accessibility text.
         assertEquals(0, rule.onAllNodes(hasClickAction()).fetchSemanticsNodes().size)
-        rule.onNodeWithText("0").assertExists()
-        press(listOf(Key.DirectionDown))
-        rule.onNodeWithText("9").assertExists()
-        press(listOf(Key.DirectionUp, Key.DirectionUp))
-        rule.onNodeWithText("1").assertExists()
-        // Right makes it a dot; the next slot starts again at 0.
-        press(listOf(Key.DirectionRight))
-        rule.onNodeWithText("1").assertDoesNotExist()
-        rule.onNodeWithText("•").assertExists()
-        rule.onNodeWithText("0").assertExists()
+        assertEquals(0, rule.onAllNodesWithText("0").fetchSemanticsNodes().size)
+        // Down from 0 wraps to 9, so 9 then 1 then 3 then 4: the PIN is 9134 here.
+        press(listOf(Key.DirectionUp, Key.DirectionRight))
+        entered(1)
         // Left steps back and clears it.
         press(listOf(Key.DirectionLeft))
-        assertEquals(0, rule.onAllNodesWithText("•").fetchSemanticsNodes().size)
-        // 1, 2, 3, 4 by rolling; OK on the last slot checks it.
-        press(listOf(Key.DirectionUp, Key.DirectionRight, Key.DirectionUp, Key.DirectionUp, Key.DirectionCenter))
+        entered(0)
+        press(listOf(Key.DirectionDown, Key.DirectionRight, Key.DirectionUp, Key.DirectionCenter))
         press(listOf(Key.DirectionUp, Key.DirectionUp, Key.DirectionUp, Key.DirectionRight))
-        assertEquals(3, rule.onAllNodesWithText("•").fetchSemanticsNodes().size)
+        entered(3)
+        assertEquals(0, opened)
         press(listOf(Key.DirectionUp, Key.DirectionUp, Key.DirectionUp, Key.DirectionUp, Key.DirectionCenter))
         assertEquals(1, opened)
     }
 
     @Test
-    fun numberKeysShowOnlyDotsAndAWrongPinStartsOver() {
+    fun numberKeysFillSlotsAndAWrongPinStartsOver() {
         show()
         row.requestFocus()
         press(listOf(Key.Nine, Key.Eight))
-        rule.onNodeWithText("9").assertDoesNotExist()
-        rule.onNodeWithText("8").assertDoesNotExist()
-        assertEquals(2, rule.onAllNodesWithText("•").fetchSemanticsNodes().size)
-        press(listOf(Key.Seven, Key.Six))
+        entered(2)
+        // Back takes the last digit away.
+        press(listOf(Key.Back))
+        entered(1)
+        press(listOf(Key.Eight, Key.Seven, Key.Six))
         rule.onNodeWithText("Wrong PIN").assertExists()
-        assertEquals(0, rule.onAllNodesWithText("•").fetchSemanticsNodes().size)
+        entered(0)
         assertEquals(0, opened)
-        press(listOf(Key.One, Key.Two, Key.Three, Key.Four))
+        press(listOf(Key.Nine, Key.One, Key.Three, Key.Four))
+        assertEquals(1, opened)
+    }
+
+    @Test
+    fun fiveWrongTriesLockEntryForThirtySeconds() {
+        var t = 1_000_000L
+        PinLock.now = { t }
+        show()
+        row.requestFocus()
+        repeat(PinLock.TRIES) { press(listOf(Key.One, Key.One, Key.One, Key.One)) }
+        rule.onNodeWithText("Too many tries", substring = true).assertExists()
+        press(listOf(Key.Nine, Key.One, Key.Three, Key.Four))
+        assertEquals(0, opened)
+        entered(0)
+        t += PinLock.LOCK_MS
+        press(listOf(Key.Nine, Key.One, Key.Three, Key.Four))
         assertEquals(1, opened)
     }
 
@@ -90,7 +111,7 @@ class PinEntryTest {
         rule.onNode(hasContentDescription("PIN")).performTextInput("1111")
         rule.waitForIdle()
         rule.onNodeWithText("Wrong PIN").assertExists()
-        rule.onNode(hasContentDescription("PIN")).performTextInput("1234")
+        rule.onNode(hasContentDescription("PIN")).performTextInput("9134")
         rule.waitForIdle()
         assertEquals(1, opened)
     }

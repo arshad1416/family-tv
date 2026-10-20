@@ -1,5 +1,6 @@
 package app.familytv.ui
 
+import android.os.SystemClock
 import android.view.WindowManager
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.keyframes
@@ -35,6 +36,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
@@ -46,14 +48,17 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Text
 import app.familytv.portal.Profile
+import kotlinx.coroutines.delay
 
 /**
  * The parental PIN, entered the way Google TV's parental controls ask for it: a row of slots and
  * no keypad, so nobody watching sees which digit was pressed. Up and Down roll the focused slot
  * through 0-9 (its digit shows only there, only while choosing); Right or OK makes it a dot and
  * moves on, Left steps back and clears; confirming the last slot checks the PIN. The remote's
- * number keys fill a slot with a dot straight away. A wrong PIN shakes the row and starts over.
- * Touch screens get a hidden number field instead. [onOk] runs once the right PIN is entered;
+ * number keys fill a slot with a dot straight away; Back takes the last digit away, and on an
+ * empty row goes back as usual. A wrong PIN shakes the row and starts over; five in a row lock
+ * entry for 30 seconds ([PinLock]). The digits never reach the accessibility text, only how many
+ * are entered. Touch screens get a hidden number field instead. [onOk] runs once the right PIN is entered;
  * the row is the page's entry point unless [firstKey] is given.
  */
 @Composable
@@ -65,13 +70,45 @@ internal fun PinPrompt(profile: Profile, firstKey: Modifier? = null, onOk: () ->
         onDispose { window?.clearFlags(WindowManager.LayoutParams.FLAG_SECURE) }
     }
     var wrong by remember { mutableStateOf(false) }
-    val check = { pin: String -> if (pinMatches(profile, pin)) { wrong = false; onOk(); true } else { wrong = true; false } }
+    var wait by remember { mutableIntStateOf(PinLock.secondsLeft()) }
+    LaunchedEffect(wait > 0) { while (wait > 0) { delay(1_000); wait = PinLock.secondsLeft() } }
+    val check = { pin: String ->
+        when {
+            PinLock.secondsLeft() > 0 -> false
+            pinMatches(profile, pin) -> { PinLock.right(); wrong = false; onOk(); true }
+            else -> { PinLock.wrong(); wrong = true; wait = PinLock.secondsLeft(); false }
+        }
+    }
     val focus = firstKey ?: entryPoint()
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("Enter the parental PIN", fontSize = 16.sp, color = MutedText)
         if (LocalFormFactor.current.touch) PinField(pinLength(profile), check, focus) else PinSlots(pinLength(profile), check, focus)
-        if (wrong) Text("Wrong PIN", color = Tv.Bad)
+        when {
+            wait > 0 -> Text("Too many tries. Try again in $wait s", color = Tv.Bad)
+            wrong -> Text("Wrong PIN", color = Tv.Bad)
+        }
     }
+}
+
+/** Wrong PINs in a row, for every PIN on this TV: the fifth locks entry for 30 seconds. Kept until the app closes. */
+internal object PinLock {
+    const val TRIES = 5
+    const val LOCK_MS = 30_000L
+    var now: () -> Long = SystemClock::elapsedRealtime
+    private var wrongs = 0
+    private var until = 0L
+
+    fun secondsLeft(): Int = ((until - now() + 999) / 1_000).toInt().coerceAtLeast(0)
+
+    fun wrong() {
+        if (++wrongs < TRIES) return
+        wrongs = 0
+        until = now() + LOCK_MS
+    }
+
+    fun right() { wrongs = 0 }
+
+    fun reset() { wrongs = 0; until = 0 }
 }
 
 /** How many slots to show: the PIN's own length (the portal takes any), four when there is none. */
@@ -84,6 +121,7 @@ private fun PinSlots(count: Int, check: (String) -> Boolean, modifier: Modifier)
     var entered by remember { mutableStateOf("") }
     var digit by remember { mutableIntStateOf(0) }
     var focused by remember { mutableStateOf(false) }
+    var backTaken by remember { mutableStateOf(false) }
     val shake = remember { Animatable(0f) }
     var shakes by remember { mutableIntStateOf(0) }
     val still = rememberReducedMotion()
@@ -92,6 +130,7 @@ private fun PinSlots(count: Int, check: (String) -> Boolean, modifier: Modifier)
         shake.animateTo(0f, keyframes { durationMillis = 300; -14f at 50; 14f at 110; -9f at 170; 6f at 230 })
     }
     fun confirm(d: Int) {
+        if (PinLock.secondsLeft() > 0) return
         entered += d
         digit = 0
         if (entered.length < count) return
@@ -103,9 +142,14 @@ private fun PinSlots(count: Int, check: (String) -> Boolean, modifier: Modifier)
     val text = if (glass) Glass.Text else Tv.Text
     Row(
         modifier
-            .semantics { contentDescription = "PIN, ${entered.length} of $count entered" }
             .onFocusChanged { focused = it.isFocused }
             .onKeyEvent { e ->
+                // Back takes a digit away (down and up both, so the page doesn't also go back); on an empty row it passes.
+                if (e.key == Key.Back) {
+                    if (e.type == KeyEventType.KeyDown && entered.isNotEmpty()) { entered = entered.dropLast(1); digit = 0; backTaken = true; return@onKeyEvent true }
+                    if (e.type == KeyEventType.KeyUp && backTaken) { backTaken = false; return@onKeyEvent true }
+                    return@onKeyEvent false
+                }
                 if (e.type != KeyEventType.KeyDown) return@onKeyEvent false
                 val typed = NUMBER_KEYS[e.key]
                 when {
@@ -119,6 +163,8 @@ private fun PinSlots(count: Int, check: (String) -> Boolean, modifier: Modifier)
                 }
             }
             .focusable()
+            // After focusable, so the row stays focusable for TalkBack while the slots' digits stay out of it.
+            .clearAndSetSemantics { contentDescription = "PIN, ${entered.length} of $count digits entered" }
             .graphicsLayer { translationX = shake.value },
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
