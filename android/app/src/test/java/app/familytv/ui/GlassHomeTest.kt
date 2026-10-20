@@ -462,6 +462,12 @@ class GlassHomeTest {
         // No parental PIN: grown-ups only.
         waitFor("A kids viewer needs a parental PIN: set one for this profile in the portal.")
         rule.onNode(hasSetTextAction()).performTextInput("Arshad")
+        // The D-pad leaves the name field: Down moves on, and Right does once the cursor is at the end.
+        rule.onNode(hasSetTextAction()).requestFocus()
+        rule.onNode(hasSetTextAction()).assertIsFocused()
+        rule.onNode(hasSetTextAction()).performKeyInput { pressKey(Key.DirectionDown) }
+        rule.waitForIdle()
+        rule.onNode(hasSetTextAction()).assertIsNotFocused()
         // Settings scrolls; the panel sits below the first screenful.
         rule.onNode(hasText("Add") and hasClickAction()).performScrollTo().performClick()
         waitFor("Remove Arshad")
@@ -577,10 +583,14 @@ class GlassHomeTest {
         waitFor("Search movies")
         tab("Movies").requestFocus()
         rule.waitForIdle()
-        // Back on another tab goes to Home first, without asking.
+        // Back on another tab goes to Home first, without asking, with focus on its page.
+        pressBack()
+        val home = tab("Home").fetchSemanticsNode().boundsInRoot
+        rule.waitUntil(10_000) { rule.onAllNodes(isFocused()).fetchSemanticsNodes().any { it.boundsInRoot.top > home.bottom } }
+        rule.onNodeWithText("Exit Family TV?").assertDoesNotExist()
+        // Back from the page goes up to the tabs, then Back on Home asks.
         pressBack()
         rule.waitUntilAtLeastOneExists(isFocused() and hasText("Home"), 10_000)
-        rule.onNodeWithText("Exit Family TV?").assertDoesNotExist()
         pressBack()
         waitFor("Exit Family TV?")
         rule.waitUntilAtLeastOneExists(isFocused() and hasText("Stay"), 10_000)

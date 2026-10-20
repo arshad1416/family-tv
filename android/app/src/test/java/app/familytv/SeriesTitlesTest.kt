@@ -223,6 +223,14 @@ class SeriesTitlesTest {
     }
 
     @Test
+    fun anImageAddressIsNeverShownAsText() {
+        val json = """{"seasons":[{"season_number":1,"overview":"https://img.example/s1.jpg"}],"info":{"plot":"www.example.com/c.jpg"},"episodes":{}}"""
+        val info = XtreamParser.seriesInfo(json.reader())
+        assertNull(info.seasons[0].overview)
+        assertNull(info.plot)
+    }
+
+    @Test
     fun seriesInfoKeepsStillsSynopsesAndSeasons() {
         val json = """{"seasons":[{"season_number":1,"name":"Season 1","overview":"It begins.","cover_big":"http://i/s1.jpg","air_date":"2008-01-20"},{"season_number":"2","overview":""}],
             "info":{"name":"Show","plot":"A teacher.","cover":"http://i/c.jpg","youtube_trailer":"HhesaQXLuRY","backdrop_path":["http://i/b.jpg"]},

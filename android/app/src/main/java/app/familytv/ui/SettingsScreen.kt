@@ -11,9 +11,16 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.TextFieldValue
 import app.familytv.user.Viewers
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -236,20 +243,34 @@ private fun ViewersPanel(profile: Profile?) {
     }
 }
 
-/** A viewer's name: OK types with the TV's keyboard, Done or Down moves on. */
+/** A viewer's name: OK types with the TV's keyboard; Done, Up or Down moves on, as do Left and Right past either end of the text. */
 @Composable
 private fun NameField(value: String, onValue: (String) -> Unit) {
     val focusManager = LocalFocusManager.current
     var focused by remember { mutableStateOf(false) }
+    // Kept as a TextFieldValue so the arrows know where the cursor is.
+    var field by remember { mutableStateOf(TextFieldValue(value)) }
+    if (field.text != value) field = TextFieldValue(value, TextRange(value.length))
     BasicTextField(
-        value = value,
-        onValueChange = onValue,
+        value = field,
+        onValueChange = { field = it; if (it.text != value) onValue(it.text) },
         singleLine = true,
         textStyle = TextStyle(color = Tv.Text, fontSize = 17.sp),
         cursorBrush = SolidColor(Tv.Accent),
         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
         keyboardActions = KeyboardActions(onDone = { focusManager.moveFocus(FocusDirection.Down) }),
-        modifier = Modifier.width(320.dp).onFocusChanged { focused = it.isFocused },
+        modifier = Modifier.width(320.dp).onFocusChanged { focused = it.isFocused }.onPreviewKeyEvent { e ->
+            val cursor = field.selection.takeIf { it.collapsed }?.start
+            val dir = when (e.key) {
+                Key.DirectionUp -> FocusDirection.Up
+                Key.DirectionDown -> FocusDirection.Down
+                Key.DirectionLeft -> FocusDirection.Left.takeIf { cursor == 0 }
+                Key.DirectionRight -> FocusDirection.Right.takeIf { cursor == field.text.length }
+                else -> null
+            }
+            if (dir != null && e.type == KeyEventType.KeyDown) focusManager.moveFocus(dir)
+            dir != null
+        },
         decorationBox = { inner ->
             val shape = RoundedCornerShape(24.dp)
             Box(Modifier.clip(shape).background(Tv.Raised).border(if (focused) 3.dp else 1.dp, if (focused) Tv.Accent else Tv.Line, shape).padding(horizontal = 18.dp, vertical = 10.dp)) {

@@ -169,10 +169,9 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
     // Back on another tab goes to Home; Back on Home asks before leaving (apps never see the Home button, so this is the one place to ask).
     var exitAsk by remember { mutableStateOf(false) }
     val onTabs = (barFocused || !anyFocused) && !settings && !barHidden.value && queries.getValue(tab).value.isEmpty()
-    BackHandler(enabled = onTabs && tab != GlassTab.Home) {
-        tab = GlassTab.Home
-        runCatching { tabFocus.getValue(GlassTab.Home).requestFocus() }
-    }
+    // Home's page keeps its place, so focus goes back to where it was there (else its first row).
+    var backHome by remember { mutableIntStateOf(0) }
+    BackHandler(enabled = onTabs && tab != GlassTab.Home) { tab = GlassTab.Home; backHome++ }
     BackHandler(enabled = onTabs && tab == GlassTab.Home) { exitAsk = true }
     LaunchedEffect(Unit) { delay(50); focusBar() }
     LaunchedEffect(settings) { if (!settings && barFocused) { delay(50); focusBar() } }
@@ -183,6 +182,17 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
     // Kids get the bright look.
     val t = if (darkPages.intValue > 0) 0f else if (profile.kidsOnly) 1f else lightness
     val palette = remember(t) { GlassPalette.lerp(GlassPalette.Dark, GlassPalette.Light, t) }
+    LaunchedEffect(backHome) {
+        if (backHome == 0) return@LaunchedEffect
+        // Once Home's rows are back on screen.
+        repeat(40) {
+            delay(50)
+            if (entry.attached > 0) {
+                if (runCatching { pageFocus.requestFocus() }.isFailure) entry.focus()
+                return@LaunchedEffect
+            }
+        }
+    }
     // Closing the panel hands focus back to where it was on the page.
     var panelSeen by remember { mutableStateOf(false) }
     LaunchedEffect(panel) {
