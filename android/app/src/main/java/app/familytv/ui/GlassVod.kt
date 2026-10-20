@@ -346,7 +346,7 @@ private fun RowScope.HeroCard(title: String, subtitle: String?, art: String?, ti
         OnDarkArt {
             Column(Modifier.align(Alignment.BottomStart).padding(horizontal = 22.gx, vertical = 18.gx)) {
                 Text(title, fontSize = (if (subtitle != null) 22 else 16).gsp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                subtitle?.let { Text(it, fontSize = 14.gsp, color = Glass.Dim, maxLines = 1, modifier = Modifier.padding(top = 4.gx)) }
+                subtitle?.let { Text(it, fontSize = 15.gsp, color = Glass.Dim, maxLines = 1, modifier = Modifier.padding(top = 4.gx)) }
             }
         }
     }
@@ -365,7 +365,7 @@ private fun ProvidersShelf(providers: List<Provider>, target: String?, onOpen: (
                     modifier = entryPoint(target == "provider/${p.name}").size(168.gx, 95.gx),
                 ) {
                     Image(painterResource(p.art), contentDescription = p.label, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-                    // A faint rim, so white art (Crunchyroll) keeps its edge on the Light panel.
+                    // Brand-coloured art fills every tile (backlog item 10); a faint rim keeps dark ones edged on the dark panel.
                     Box(Modifier.matchParentSize().border(1.dp, Glass.Line, RoundedCornerShape(10.gx)))
                 }
             }

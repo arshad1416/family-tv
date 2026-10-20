@@ -336,9 +336,9 @@ private fun GuideBox(c: ChannelEntity, progs: List<NowNext>, modifier: Modifier)
         }
         if (now != null) {
             Text(now.title, fontSize = 17.gsp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text("${time(now.start)} – ${time(now.stop)}", fontSize = 13.gsp, color = Glass.Dim)
+            Text("${time(now.start)} – ${time(now.stop)}", fontSize = 15.gsp, color = Glass.Dim)
             ProgressLine(progress(now.start, now.stop, minute), track = Glass.Line, fill = Glass.Text)
-            about?.let { Text(it, fontSize = 13.gsp, color = Glass.Soft, maxLines = 3, overflow = TextOverflow.Ellipsis) }
+            about?.let { Text(it, fontSize = 15.gsp, color = Glass.Soft, maxLines = 3, overflow = TextOverflow.Ellipsis) }
         }
         if (next.isNotEmpty()) {
             Spacer(Modifier.height(2.gx))
@@ -354,7 +354,8 @@ private fun GuideBox(c: ChannelEntity, progs: List<NowNext>, modifier: Modifier)
 
 /**
  * The focused channel: its live [video] once it plays, until then its programme's picture (or its
- * logo); a red LIVE badge on Sports while the guide has a game on, and a glass label with the name and Now / Next.
+ * logo); on Sports a badge saying whether the game on is live, a replay, upcoming or over; under the
+ * picture, the name and Now / Next.
  */
 @Composable
 private fun ChannelPreview(c: ChannelEntity?, progs: List<NowNext>, live: Boolean, video: LivePreview, modifier: Modifier) {
@@ -371,32 +372,31 @@ private fun ChannelPreview(c: ChannelEntity?, progs: List<NowNext>, live: Boolea
         picture = ctx.app.db.catalog().programme(p.epgId, p.start)?.icon
     }
     val shape = RoundedCornerShape(24.gx)
-    // Over the dark art the text stays light in either look.
-    OnDarkArt {
-        Box(modifier.clip(shape).background(Brush.linearGradient(if (live) listOf(Color(0xFF24533A), Color(0xFF0E1D15)) else listOf(Color(0xFF2A4456), Color(0xFF101A22)))).border(1.dp, Color(0x2EFFFFFF), shape)) {
-            val art = picture
-            when {
-                art != null -> AsyncImage(art, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-                c?.logo != null -> AsyncImage(c.logo, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.align(Alignment.Center).fillMaxSize(0.42f))
-            }
-            if (video.active) PreviewVideo(video, Modifier.fillMaxSize().background(Color.Black))
-            // LIVE only while the guide has a programme on that isn't marked as over; event channels keep
-            // their last game's art and name long after it ends.
-            if (live && c != null && progs.onAt(minute)?.title?.contains(OVER) == false) {
-                Text(
-                    "LIVE", fontSize = 13.gsp, fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp,
-                    modifier = Modifier.padding(16.gx).clip(RoundedCornerShape(50)).background(Glass.Live).padding(horizontal = 12.gx, vertical = 6.gx),
-                )
-            }
-            if (c != null) {
-                Column(
-                    Modifier.align(Alignment.BottomStart).padding(16.gx).then(if (live) Modifier.fillMaxWidth() else Modifier)
-                        .glass(RoundedCornerShape(16.gx), Color(0x8C0A0E14), Glass.Line).padding(horizontal = 16.gx, vertical = 10.gx),
-                ) {
-                    Text(listOfNotNull(c.num.takeIf { !live && it > 0 }?.toString(), c.displayName).joinToString("  ·  "), fontSize = 16.gsp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    val line = listOfNotNull(now?.let { "Now: ${it.title}" }, next?.let { "Next: ${it.title}" }).joinToString("  ·  ")
-                    if (line.isNotEmpty()) Text(line, fontSize = 13.gsp, color = Glass.Dim, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    Column(modifier) {
+        // Over the dark art the badge stays light in either look.
+        OnDarkArt {
+            Box(Modifier.weight(1f).fillMaxWidth().clip(shape).background(Brush.linearGradient(if (live) listOf(Color(0xFF24533A), Color(0xFF0E1D15)) else listOf(Color(0xFF2A4456), Color(0xFF101A22)))).border(1.dp, Color(0x2EFFFFFF), shape)) {
+                val art = picture
+                when {
+                    art != null -> AsyncImage(art, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                    c?.logo != null -> AsyncImage(c.logo, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.align(Alignment.Center).fillMaxSize(0.42f))
                 }
+                if (video.active) PreviewVideo(video, Modifier.fillMaxSize().background(Color.Black))
+                // Sports: LIVE, REPLAY, UPCOMING or ENDED from the programme on now (backlog item 22); none when nothing is.
+                if (live && c != null) EventStatus.of(progs.onAt(minute)?.title)?.let { status ->
+                    Text(
+                        status.label, fontSize = 13.gsp, fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp, color = Color.White,
+                        modifier = Modifier.padding(16.gx).clip(RoundedCornerShape(50)).background(status.color).padding(horizontal = 12.gx, vertical = 6.gx),
+                    )
+                }
+            }
+        }
+        // The caption sits under the picture, not over it (backlog item 22).
+        if (c != null) {
+            Column(Modifier.fillMaxWidth().padding(start = 8.gx, end = 8.gx, top = 10.gx)) {
+                Text(listOfNotNull(c.num.takeIf { !live && it > 0 }?.toString(), c.displayName).joinToString("  ·  "), fontSize = 16.gsp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                val line = listOfNotNull(now?.let { "Now: ${it.title}" }, next?.let { "Next: ${it.title}" }).joinToString("  ·  ")
+                if (line.isNotEmpty()) Text(line, fontSize = 15.gsp, color = Glass.Dim, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
     }
@@ -424,7 +424,7 @@ private fun ChannelRow(
             // What's on goes under the name, so the name gets the row's whole width (a fixed name column cut Sports names in half).
             Column(Modifier.weight(1f)) {
                 Text(c.displayName, fontSize = 16.gsp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                progs.onAt(minute)?.let { Text("Now: ${it.title}", fontSize = 13.gsp, color = Glass.Dim, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                progs.onAt(minute)?.let { Text("Now: ${it.title}", fontSize = 15.gsp, color = Glass.Dim, maxLines = 1, overflow = TextOverflow.Ellipsis) }
                 if (progs.any { it.stop > minute && it.start < minute + TIMELINE }) Timeline(progs, minute, Modifier.padding(top = 5.gx).fillMaxWidth().height(4.gx))
             }
             if (favourite) MarkBadge(favourite = true, size = 18.dp)
@@ -545,9 +545,6 @@ internal fun SportsTab(profile: Profile) {
 
 private const val HALF_HOUR = 30 * 60_000L
 private const val TIMELINE = 2 * 60 * 60_000L
-
-/** Event channels' titles when nothing is live: "ENDED: …", "Full time", "Replay", "Coming up", "Starts at 8 PM". */
-private val OVER = Regex("""(?i)\b(ended|full time|replay|upcoming|coming up|starts at)\b""")
 
 /** The programme on at [t], if any (one that has ended is not "now"). */
 private fun List<NowNext>.onAt(t: Long): NowNext? = firstOrNull { it.start <= t && it.stop > t }

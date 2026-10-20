@@ -1,11 +1,17 @@
 package app.familytv.ui
 
 import android.content.Context
+import android.content.ComponentName
+import android.content.Intent
+import android.content.IntentFilter
+import android.speech.RecognizerIntent
 import androidx.activity.OnBackPressedDispatcher
 import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotFocused
+import androidx.compose.ui.test.hasAnyDescendant
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasScrollToNodeAction
@@ -13,6 +19,7 @@ import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isFocused
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -47,6 +54,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.Implementation
 import org.robolectric.annotation.Implements
@@ -225,12 +233,28 @@ class GlassHomeTest {
     fun arrowsPassOverTheSearchBox() {
         home()
         waitFor("Search movies")
-        val box = rule.onNode(hasText("Search movies") and hasClickAction())
+        // The pill itself: the merged node's focus action is the text field's, which only OK may focus.
+        val box = rule.onAllNodes(hasClickAction() and hasAnyDescendant(hasText("Search movies")), useUnmergedTree = true).onFirst()
         box.requestFocus()
+        box.assertIsFocused()
         box.performKeyInput { pressKey(Key.DirectionLeft) }
         rule.waitForIdle()
         box.assertIsNotFocused()
         rule.onNode(hasSetTextAction()).assertIsNotFocused()
+    }
+
+    @Test
+    fun theSearchPillOffersVoiceWhenTheTvCanListen() {
+        val recogniser = ComponentName("com.example.speech", "com.example.speech.Recogniser")
+        shadowOf(app.packageManager).addActivityIfNotPresent(recogniser)
+        shadowOf(app.packageManager).addIntentFilterForActivity(recogniser, IntentFilter(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply { addCategory(Intent.CATEGORY_DEFAULT) })
+        home()
+        waitFor("Search movies")
+        rule.onAllNodes(hasClickAction() and hasAnyDescendant(hasText("Search movies")), useUnmergedTree = true).onFirst().requestFocus()
+        waitFor("Hold OK to speak")
+        // A short OK still starts typing.
+        press(Key.DirectionCenter)
+        rule.waitUntilAtLeastOneExists(hasSetTextAction() and isFocused(), 10_000)
     }
 
     @Test
