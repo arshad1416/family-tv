@@ -139,7 +139,7 @@ internal fun WeatherHint(onOpen: () -> Unit, modifier: Modifier = Modifier) {
     FocusBox(onClick = onOpen, onFocus = onOpen, color = Color.Transparent, shape = RoundedCornerShape(50), modifier = modifier) {
         Row(Modifier.padding(horizontal = 12.gx, vertical = 4.gx), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.gx)) {
             Icon(Icons.Filled.KeyboardArrowDown, contentDescription = null, tint = Glass.Faint, modifier = Modifier.size(16.gx))
-            Text("Weather and clocks", fontSize = 13.gsp, color = Glass.Faint, maxLines = 1)
+            Text("Weather and clocks", fontSize = 15.gsp, color = Glass.Faint, maxLines = 1)
         }
     }
 }
@@ -190,7 +190,7 @@ internal fun WeatherPanel(weather: GlassWeather, onClose: () -> Unit, modifier: 
                 Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(12.gx)) {
                     ClocksCard(Modifier.fillMaxWidth()) { page = PanelPage.Clocks }
                     Spacer(Modifier.weight(1f))
-                    Text("Back to close", fontSize = 14.gsp, color = Glass.Faint, modifier = Modifier.align(Alignment.End))
+                    Text("Back to close", fontSize = 15.gsp, color = Glass.Faint, modifier = Modifier.align(Alignment.End))
                 }
             }
             PanelPage.Ask -> AskPage(first, onCity = { note = it; page = PanelPage.City }) { page = PanelPage.Main }
@@ -212,7 +212,7 @@ private fun WeatherCard(weather: GlassWeather, modifier: Modifier, first: FocusR
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(place.name, fontSize = 18.gsp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                if (f != null) Text("Updated ${time(weather.updatedAt)}", fontSize = 13.gsp, color = Glass.Dim, maxLines = 1)
+                if (f != null) Text("Updated ${time(weather.updatedAt)}", fontSize = 15.gsp, color = Glass.Dim, maxLines = 1)
             }
             GlassPill("Change city", onChangeCity, Modifier.focusRequester(first), fill = Glass.Raised, border = true, fontSize = 14.gsp, padH = 14.gx, padV = 6.gx)
         }
@@ -310,7 +310,7 @@ private fun ClockFace(c: WorldClock, now: Long) {
             drawCircle(Color(0xFFFF9F43), 3.2f * u, c0)
         }
         Text(c.city, fontSize = 16.gsp, fontWeight = FontWeight.SemiBold, maxLines = 1)
-        Text("${c.country} · ${hourDifference(zone, ZoneId.systemDefault(), Instant.ofEpochMilli(now))}", fontSize = 13.gsp, color = Glass.Dim, maxLines = 1)
+        Text("${c.country} · ${hourDifference(zone, ZoneId.systemDefault(), Instant.ofEpochMilli(now))}", fontSize = 15.gsp, color = Glass.Dim, maxLines = 1)
     }
 }
 
@@ -493,7 +493,7 @@ private fun ColumnScope.ClockChooser(first: FocusRequester) {
             }
         }
     }
-    Text("Countries with several time zones ask which city. Saved on this TV.", fontSize = 14.gsp, color = Glass.Faint)
+    Text("Countries with several time zones ask which city. Saved on this TV.", fontSize = 15.gsp, color = Glass.Faint)
 }
 
 /** One country (or city) in the chooser: a tick box, its name and the city it shows. */
@@ -506,7 +506,7 @@ private fun ChooserTile(title: String, detail: String, ticked: Boolean, modifier
             }
             Column {
                 Text(title, fontSize = 16.gsp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(detail, fontSize = 13.gsp, color = Glass.Dim, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(detail, fontSize = 15.gsp, color = Glass.Dim, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
     }

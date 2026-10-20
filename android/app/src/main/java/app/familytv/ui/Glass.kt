@@ -4,6 +4,9 @@ import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.speech.RecognizerIntent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -98,7 +101,10 @@ import kotlinx.coroutines.launch
 object Glass {
     private val p: GlassPalette @Composable @ReadOnlyComposable get() = LocalGlassPalette.current
 
-    /** A panel: white at about 8% over the dark background. */
+    /**
+     * A panel: white at about 10% over the dark background, or a firm white in the light look, so
+     * text always sits on a fixed tint (backlog item 9); there is no blur behind it.
+     */
     val Fill: Color @Composable @ReadOnlyComposable get() = p.fill
     /** Buttons, pills and the search box: a little more white. */
     val Raised: Color @Composable @ReadOnlyComposable get() = p.raised
@@ -163,19 +169,19 @@ class GlassPalette(
 ) {
     companion object {
         val Dark = GlassPalette(
-            fill = Color(0x14FFFFFF), raised = Color(0x1AFFFFFF), raisedAlt = Color(0x1FFFFFFF), focus = Color(0x2EFFFFFF),
-            line = Color(0x33FFFFFF), lineSoft = Color(0x24FFFFFF), panel = Color(0x12FFFFFF), panelLine = Color(0x2EFFFFFF),
+            fill = Color(0x1AFFFFFF), raised = Color(0x1FFFFFFF), raisedAlt = Color(0x24FFFFFF), focus = Color(0x33FFFFFF),
+            line = Color(0x33FFFFFF), lineSoft = Color(0x24FFFFFF), panel = Color(0x17FFFFFF), panelLine = Color(0x2EFFFFFF),
             selected = Color(0xEBFFFFFF), selectedSoft = Color(0x24FFFFFF), onSelected = Color(0xFF0B0F18), ring = Color(0xF2FFFFFF),
-            text = Color(0xFFF5F7FA), soft = Color(0xD9F5F7FA), dim = Color(0xB3F5F7FA), faint = Color(0x99F5F7FA),
+            text = Color(0xFFF5F7FA), soft = Color(0xE6F5F7FA), dim = Color(0xC7F5F7FA), faint = Color(0xB3F5F7FA),
             top = Color(0xFF151B28), middle = Color(0xFF10141D), bottom = Color(0xFF07090F), glow = 0.30f,
         )
 
         /** The mockup's "Light mode" board: frosted white panels and dark text on a pale gradient. */
         val Light = GlassPalette(
-            fill = Color(0x73FFFFFF), raised = Color(0x8CFFFFFF), raisedAlt = Color(0x99FFFFFF), focus = Color(0xE6FFFFFF),
-            line = Color(0xE6FFFFFF), lineSoft = Color(0xB3FFFFFF), panel = Color(0x73FFFFFF), panelLine = Color(0xE6FFFFFF),
-            selected = Color(0xFF0B0F18), selectedSoft = Color(0x1F0B0F18), onSelected = Color(0xFFFFFFFF), ring = Color(0xFF0B0F18),
-            text = Color(0xFF0B0F18), soft = Color(0xD90B0F18), dim = Color(0x9E0B0F18), faint = Color(0x8C0B0F18),
+            fill = Color(0xA6FFFFFF), raised = Color(0xB8FFFFFF), raisedAlt = Color(0xC2FFFFFF), focus = Color(0xF2FFFFFF),
+            line = Color(0xE6FFFFFF), lineSoft = Color(0xB3FFFFFF), panel = Color(0xA6FFFFFF), panelLine = Color(0xE6FFFFFF),
+            selected = Color(0xFF0B0F18), selectedSoft = Color(0x240B0F18), onSelected = Color(0xFFFFFFFF), ring = Color(0xFF0B0F18),
+            text = Color(0xFF0B0F18), soft = Color(0xEB0B0F18), dim = Color(0xC20B0F18), faint = Color(0xAD0B0F18),
             top = Color(0xFFFFFFFF), middle = Color(0xFFE8EDF6), bottom = Color(0xFFCFD8E8), glow = 0.22f,
         )
 
@@ -316,13 +322,15 @@ internal fun GlassHeading(text: String, modifier: Modifier = Modifier) {
 /** A column heading inside a panel ("CATEGORY"). */
 @Composable
 internal fun GlassLabel(text: String, modifier: Modifier = Modifier) {
-    Text(text.uppercase(), fontSize = 13.gsp, fontWeight = FontWeight.SemiBold, color = Glass.Faint, letterSpacing = 1.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = modifier.padding(start = 10.gx, top = 4.gx, bottom = 6.gx))
+    Text(text.uppercase(), fontSize = 14.gsp, fontWeight = FontWeight.SemiBold, color = Glass.Faint, letterSpacing = 1.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = modifier.padding(start = 10.gx, top = 4.gx, bottom = 6.gx))
 }
 
 /**
  * The search box: a glass pill that searches only the page it's on. The D-pad stops on the pill
  * like on any button; OK starts typing and opens the keyboard. While typing, Search goes to the
  * results, an arrow leaves for that side, and Back (once the keyboard is closed) returns to the pill.
+ * Holding OK (or a remote's Search key) asks the TV's speech recogniser instead, and what was said
+ * becomes this page's search (backlog item 20); the focused pill says so when the TV has one.
  */
 @Composable
 internal fun GlassSearchBox(query: String, onQuery: (String) -> Unit, hint: String, modifier: Modifier = Modifier) {
@@ -335,11 +343,37 @@ internal fun GlassSearchBox(query: String, onQuery: (String) -> Unit, hint: Stri
     val field = remember { FocusRequester() }
     LaunchedEffect(typing) { if (typing) { runCatching { field.requestFocus() }; keyboard?.show() } }
     val stopTyping = { keyboard?.hide(); runCatching { pill.requestFocus() }; typing = false }
+    val ctx = LocalContext.current
+    // On Google TV the remote's mic button opens the Assistant, not this app, so the pill offers held OK.
+    val speech = remember { voiceSearch().takeIf { it.resolveActivity(ctx.packageManager) != null } }
+    val spoken = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
+        r.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()?.takeIf { it.isNotBlank() }?.let(onQuery)
+    }
+    val ok = remember { OkHold() }
     val shape = RoundedCornerShape(50)
     Box(
         modifier.width(260.gx).height(42.gx)
             .focusRequester(pill)
             .onFocusChanged { focused = it.hasFocus }
+            .onPreviewKeyEvent { e ->
+                val k = e.nativeKeyEvent
+                when {
+                    speech == null || typing -> false
+                    k.keyCode == android.view.KeyEvent.KEYCODE_SEARCH -> { if (e.type == KeyEventType.KeyUp) runCatching { spoken.launch(speech) }; true }
+                    k.keyCode != android.view.KeyEvent.KEYCODE_DPAD_CENTER && k.keyCode != android.view.KeyEvent.KEYCODE_ENTER -> false
+                    e.type == KeyEventType.KeyDown -> {
+                        if (k.repeatCount == 0) { ok.down = true; ok.held = false }
+                        else if (ok.down && !ok.held) { ok.held = true; runCatching { spoken.launch(speech) } }
+                        true
+                    }
+                    e.type == KeyEventType.KeyUp -> {
+                        if (ok.down && !ok.held) typing = true
+                        ok.down = false; ok.held = false
+                        true
+                    }
+                    else -> false
+                }
+            }
             .clickable(interactionSource = null, indication = null) { typing = true },
     ) {
         BasicTextField(
@@ -378,7 +412,7 @@ internal fun GlassSearchBox(query: String, onQuery: (String) -> Unit, hint: Stri
                     Icon(Icons.Filled.Search, contentDescription = null, tint = Glass.Dim, modifier = Modifier.size(18.gx))
                     Spacer(Modifier.width(10.gx))
                     Box(Modifier.weight(1f)) {
-                        if (query.isEmpty()) Text(hint, fontSize = 15.gsp, color = Glass.Dim, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        if (query.isEmpty()) Text(if (focused && !typing && speech != null) "Hold OK to speak" else hint, fontSize = 15.gsp, color = Glass.Dim, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         inner()
                     }
                 }
@@ -386,6 +420,17 @@ internal fun GlassSearchBox(query: String, onQuery: (String) -> Unit, hint: Stri
         )
     }
 }
+
+/** Where an OK press on the search pill is: [down] seen here, [held] long enough to speak. */
+private class OkHold {
+    var down = false
+    var held = false
+}
+
+/** The system speech recogniser, free-form, asking for one answer. */
+private fun voiceSearch() = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+    .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+    .putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
 
 /** The YouTube and JustWatch buttons on Movies and TV Shows. */
 @Composable
