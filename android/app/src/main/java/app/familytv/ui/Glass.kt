@@ -294,7 +294,7 @@ internal fun GlassHeading(text: String, modifier: Modifier = Modifier) {
     Text(text, fontSize = 17.gsp, fontWeight = FontWeight.SemiBold, color = Glass.Soft, modifier = modifier)
 }
 
-/** A column heading inside a panel ("GENRE"). */
+/** A column heading inside a panel ("CATEGORY"). */
 @Composable
 internal fun GlassLabel(text: String, modifier: Modifier = Modifier) {
     Text(text.uppercase(), fontSize = 13.gsp, fontWeight = FontWeight.SemiBold, color = Glass.Faint, letterSpacing = 1.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = modifier.padding(start = 10.gx, top = 4.gx, bottom = 6.gx))
@@ -399,7 +399,7 @@ internal fun <T> FollowFocus(state: MutableState<T?>, onRest: (T) -> Unit) {
     LaunchedEffect(state.value) { state.value?.let { delay(300); rest(it) } }
 }
 
-/** A tall glass column ("Genre", "Country") of selectable rows. */
+/** A tall glass column ("Category", "Country") of selectable rows. */
 @Composable
 internal fun GlassColumnPanel(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
     Column(modifier.glass(RoundedCornerShape(24.gx), Glass.Panel, Glass.PanelLine).padding(12.gx), verticalArrangement = Arrangement.spacedBy(6.gx)) { content() }

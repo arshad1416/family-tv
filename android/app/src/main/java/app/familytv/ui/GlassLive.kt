@@ -69,10 +69,10 @@ private const val ALL = "All"
 private const val TV_GUIDE = "TV guide"
 
 /**
- * Live TV on the TV: a genre column, that genre's countries (with channel counts), and a preview
- * of the focused channel over the channel list. Genre and country come from the category names
+ * Live TV on the TV: a Category column, its countries (with channel counts), and a preview of the
+ * focused channel over the channel list. Both columns come from the provider's category names
  * ([LiveGenre], [liveCountry]); adult categories show as today, once unlocked. TV guide, at the
- * foot of the genres, opens the classic grid guide. The top bar's search searches channels.
+ * foot of the Category column, opens the classic grid guide. The top bar's search searches channels.
  */
 @Composable
 internal fun LiveTab(vm: MainViewModel, profile: Profile) {
@@ -137,7 +137,7 @@ private fun LiveBrowser(profile: Profile, onGuide: () -> Unit) {
 
     Row(Modifier.fillMaxSize().padding(bottom = 32.gx), horizontalArrangement = Arrangement.spacedBy(18.gx)) {
         GlassColumnPanel(Modifier.width(200.gx).fillMaxHeight()) {
-            GlassLabel("Genre")
+            GlassLabel("Category")
             LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.gx)) {
                 items(genres, key = { it }) { x ->
                     GlassRowItem(x, x == g, { genre = x; country = null }, entryPoint(x == g), onFocus = { hoverGenre.value = x })

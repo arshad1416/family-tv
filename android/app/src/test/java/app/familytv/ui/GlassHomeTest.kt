@@ -85,11 +85,12 @@ class GlassHomeTest {
     }
 
     @Test
-    fun liveTvListsGenresCountriesAndChannels() {
+    fun liveTvListsCategoriesCountriesAndChannels() {
         home()
         waitFor("Live TV")
         rule.onNodeWithText("Live TV").performClick()
         waitFor("Search channels")
+        waitFor("CATEGORY")
         waitFor("News")
         waitFor("UK")
         waitFor("BBC News")
