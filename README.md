@@ -265,6 +265,8 @@ the Trakt section. No database migration is needed; Trakt tokens live on each de
 This app has no Real-Debrid (removed Oct 2026; a separate fork builds it). The portal keeps its
 `/api/device/realdebrid/*` routes and `profile_debrid` table for that fork; nothing here calls them.
 
+Adding a paid add-on (a feature the portal switches on per profile): see [ADDONS.md](ADDONS.md).
+
 ## Develop
 | Where | Command |
 |---|---|
