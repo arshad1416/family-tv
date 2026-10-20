@@ -251,7 +251,13 @@ class GlassHomeTest {
         shadowOf(app.packageManager).addIntentFilterForActivity(recogniser, IntentFilter(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply { addCategory(Intent.CATEGORY_DEFAULT) })
         home()
         waitFor("Search movies")
-        rule.onAllNodes(hasClickAction() and hasAnyDescendant(hasText("Search movies")), useUnmergedTree = true).onFirst().requestFocus()
+        // The page's shelves settle first: their arrival can take focus back from an early request.
+        waitFor("Recently added")
+        val pill = rule.onAllNodes(hasClickAction() and hasAnyDescendant(hasText("Search movies")), useUnmergedTree = true).onFirst()
+        for (attempt in 1..5) {
+            pill.requestFocus()
+            if (runCatching { rule.waitUntilAtLeastOneExists(hasText("Hold OK to speak"), 2_000) }.isSuccess) break
+        }
         waitFor("Hold OK to speak")
         // A short OK still starts typing.
         press(Key.DirectionCenter)
