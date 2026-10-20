@@ -299,7 +299,7 @@ private fun GuideBox(c: ChannelEntity, progs: List<NowNext>, modifier: Modifier)
 
 /**
  * The focused channel: its live [video] once it plays, until then its programme's picture (or its
- * logo); a red LIVE badge on Sports, and a glass label with the name and Now / Next.
+ * logo); a red LIVE badge on Sports while the guide has a game on, and a glass label with the name and Now / Next.
  */
 @Composable
 private fun ChannelPreview(c: ChannelEntity?, progs: List<NowNext>, live: Boolean, video: LivePreview, modifier: Modifier) {
@@ -325,7 +325,9 @@ private fun ChannelPreview(c: ChannelEntity?, progs: List<NowNext>, live: Boolea
                 c?.logo != null -> AsyncImage(c.logo, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.align(Alignment.Center).fillMaxSize(0.42f))
             }
             if (video.active) PreviewVideo(video, Modifier.fillMaxSize().background(Color.Black))
-            if (live && c != null) {
+            // LIVE only while the guide has a programme on that isn't marked as over; event channels keep
+            // their last game's art and name long after it ends.
+            if (live && c != null && progs.onAt(minute)?.title?.contains(OVER) == false) {
                 Text(
                     "LIVE", fontSize = 13.gsp, fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp,
                     modifier = Modifier.padding(16.gx).clip(RoundedCornerShape(50)).background(Glass.Live).padding(horizontal = 12.gx, vertical = 6.gx),
@@ -464,6 +466,9 @@ internal fun SportsTab(profile: Profile) {
 }
 
 private const val HALF_HOUR = 30 * 60_000L
+
+/** Event channels' titles when nothing is live: "ENDED: …", "Full time", "Replay", "Coming up", "Starts at 8 PM". */
+private val OVER = Regex("""(?i)\b(ended|full time|replay|upcoming|coming up|starts at)\b""")
 
 /** The programme on at [t], if any (one that has ended is not "now"). */
 private fun List<NowNext>.onAt(t: Long): NowNext? = firstOrNull { it.start <= t && it.stop > t }

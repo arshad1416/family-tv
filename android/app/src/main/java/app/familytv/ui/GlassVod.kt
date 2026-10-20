@@ -331,6 +331,8 @@ private fun ProvidersShelf(providers: List<Provider>, target: String?, onOpen: (
                     modifier = entryPoint(target == "provider/${p.name}").size(168.gx, 95.gx),
                 ) {
                     Image(painterResource(p.art), contentDescription = p.label, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                    // A faint rim, so white art (Crunchyroll) keeps its edge on the Light panel.
+                    Box(Modifier.matchParentSize().border(1.dp, Glass.Line, RoundedCornerShape(10.gx)))
                 }
             }
         }
