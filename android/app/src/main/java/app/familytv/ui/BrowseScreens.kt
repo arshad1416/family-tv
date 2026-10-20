@@ -338,12 +338,12 @@ internal fun <T> PosterGrid(
     card: @Composable (T, Modifier, String) -> Unit,
 ) {
     val hasEntry = entry != null && items.any { key(it) == entry }
-    // Three posters across a phone, more on wider screens, seven on the TV's glass pages.
+    // Three posters across a phone, more on wider screens, seven on the TV's glass pages (five for a kids viewer).
     val cell = when (LocalFormFactor.current) { FormFactor.Phone -> 100.dp; FormFactor.Tablet -> 130.dp; FormFactor.Tv -> 150.dp }
     val glass = LocalGlass.current
     val gap = when { glass -> 18.gx; LocalFormFactor.current == FormFactor.Phone -> 12.dp; else -> 18.dp }
     LazyVerticalGrid(
-        columns = if (glass) GridCells.Fixed(7) else GridCells.Adaptive(cell),
+        columns = if (glass) GridCells.Fixed(if (LocalBigTiles.current) 5 else 7) else GridCells.Adaptive(cell),
         state = state,
         // Room for a focused poster's zoom, which the grid would otherwise clip.
         contentPadding = PaddingValues(start = FOCUS_ROOM, top = FOCUS_ROOM, bottom = 32.dp, end = FOCUS_ROOM),

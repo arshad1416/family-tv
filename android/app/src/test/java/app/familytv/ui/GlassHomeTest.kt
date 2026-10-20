@@ -385,6 +385,39 @@ class GlassHomeTest {
     }
 
     @Test
+    fun aKidsViewerGetsBiggerPosters() {
+        runBlocking {
+            val dao = app.db.catalog()
+            dao.upsertCategories(listOf(CategoryEntity("s", Kind.MOVIE, "12", "KIDS MOVIES", 3, 0)))
+            dao.upsertMovies(listOf(MovieEntity("s", "1002", "Frozen", null, "12", "7.4", "mp4", null, 3, 0, titleKey = "frozen")))
+            // Half watched, so each shows as a poster in Continue watching.
+            listOf("1000", "1002").forEach { id ->
+                app.userDb.user().upsertProgress(
+                    ProgressEntity(ProgressKey.movie("s", id), ProgressKey.MOVIE, "s", id, positionMs = 3_000_000, durationMs = 6_000_000, percent = 50f, updatedAt = id.toLong()),
+                )
+            }
+        }
+        val profile = Profile(
+            sources = listOf(Source("s", "xtream", "Line")), parentalPin = "1234",
+            viewers = listOf(Viewer("a", "Arshad"), Viewer("k", "Izaan", kids = true)),
+        )
+        rule.setContent { HomeScreen(MainViewModel(app), DeviceConfig(paired = true, profile = profile)) }
+        // The narrowest card naming the film is its poster (a highlight tile is wider).
+        fun poster(title: String): Float {
+            val card = hasClickAction() and hasAnyDescendant(hasText(title))
+            rule.waitUntil(20_000) { rule.onAllNodes(card, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
+            return rule.onAllNodes(card, useUnmergedTree = true).fetchSemanticsNodes().minOf { it.boundsInRoot.width }
+        }
+        val adult = poster("Star Wars")
+        rule.onNode(hasText("Who's watching?") and hasClickAction()).performClick()
+        rule.onNode(hasText("Izaan · Kids") and hasClickAction()).performClick()
+        waitFor("Izaan")
+        rule.waitUntil(10_000) { rule.onAllNodes(hasText("Star Wars")).fetchSemanticsNodes().isEmpty() }
+        val kids = poster("Frozen")
+        assertTrue("kids poster $kids is not bigger than $adult", kids > adult * 1.2f)
+    }
+
+    @Test
     fun topBarButtonsDontOverlapOnMovies() {
         home()
         waitFor("Search movies")

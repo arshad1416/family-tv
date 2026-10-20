@@ -44,7 +44,8 @@ passwords on a remote, and when a TV goes black the portal tells you why.
 - **Viewers and the kids profile:** a profile can list its viewers on the portal (name, and Kids for
   children). The TV's top bar then shows who's watching; OK picks another. A kids viewer sees kids'
   categories only (kids, cartoons, animation, family and the kids' studios), never adult ones, in the
-  bright look, and moving to another viewer asks for the parental PIN, which a kids viewer requires.
+  bright look with bigger posters (five across a grid, not seven), and moving to another viewer asks
+  for the parental PIN, which a kids viewer requires.
 - **Live scores:** on a sports channel whose programme title names both teams of a game today, the
   live info bar shows the score. The TV asks `GET /api/device/scores?league=nhl` (NHL, NBA, WNBA,
   NFL, MLB, MLS, Premier League, Champions League, LaLiga; `portal/src/scores.ts`), which reads ESPN's
