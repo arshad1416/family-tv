@@ -283,6 +283,8 @@ class GlassHomeTest {
         home()
         waitFor("Live TV")
         tab("Live TV").performClick()
+        // The genres show once the channels have loaded.
+        rule.waitUntilAtLeastOneExists(hasText("News") and hasClickAction(), 20_000)
         rule.onNode(hasText("News") and hasClickAction()).performClick()
         waitFor("GUIDE · BBC NEWS")
         waitFor("The latest headlines from around the world.")
