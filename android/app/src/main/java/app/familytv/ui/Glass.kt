@@ -525,7 +525,8 @@ internal fun GlassRowItem(
                 fontWeight = if (selected || focused) FontWeight.SemiBold else FontWeight.Normal,
                 color = when { selected -> Glass.OnSelected; focused -> Glass.Text; else -> Glass.Soft },
             )
-            count?.let { Text("$it", fontSize = 16.gsp, maxLines = 1, color = (if (selected) Glass.OnSelected else Glass.Text).copy(alpha = 0.6f)) }
+            // A gap before the count, so a long label ellipsizes short of it.
+            count?.let { Spacer(Modifier.width(10.gx)); Text("$it", fontSize = 16.gsp, maxLines = 1, color = (if (selected) Glass.OnSelected else Glass.Text).copy(alpha = 0.6f)) }
         }
     }
 }

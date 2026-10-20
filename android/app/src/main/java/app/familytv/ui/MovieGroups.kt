@@ -40,7 +40,7 @@ fun categoryKeys(cats: List<CategoryEntity>): Set<Pair<String, String>> = cats.m
  */
 class MovieGroup(val key: String, val copies: List<MovieEntity>) {
     val first get() = copies.first()
-    val title: String get() = Names.clean(SeriesTitles.parse(first.name).title)
+    val title: String by lazy { Names.clean(SeriesTitles.parse(first.name).title) }
     val poster: String? get() = copies.firstNotNullOfOrNull { it.poster }
     val year: Int? get() = copies.firstNotNullOfOrNull { it.releaseYear }
 
@@ -104,7 +104,8 @@ internal fun MovieCard(
     val nav = LocalSeriesNav.current
     val menus = LocalItemMenus.current
     val scope = rememberCoroutineScope()
-    val shown = remember(g) { pickCopy(ctx, g.copies, emptyMap()) }
+    // Only the Trailer button (touch screens) needs the copy, so the TV never picks one while scrolling.
+    val shown = remember(g) { lazy { pickCopy(ctx, g.copies, emptyMap()) } }
     val badge = remember(g) { SeriesTitles.qualityBadge(g.copies.map { it.name }) }
     val p = g.progressIn(progress)
     PosterCard(
@@ -112,7 +113,7 @@ internal fun MovieCard(
         favourite = g.favourite(favKeys),
         onFavourite = { toggleMovieFavourite(ctx, g, visible, favKeys) },
         watched = p?.watched == true, progress = ProgressRules.bar(p),
-        onTrailer = movieTrailerAction(profile, shown),
+        onTrailer = movieTrailerAction(profile) { shown.value },
         onMenu = { scope.launch { menus.open = movieMenu(ctx, profile, g, ctx.app.db.allCopies(g, visible), favKeys, progress, scope) } },
         onFocus = onFocus,
         badge = badge, caption = if (continuing) ProgressRules.timeLeft(p) else null, fullName = continuing,

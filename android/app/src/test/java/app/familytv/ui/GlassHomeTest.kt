@@ -427,9 +427,11 @@ class GlassHomeTest {
         rule.onNode(hasText("Izaan") and hasClickAction()).performClick()
         rule.onNode(hasText("Arshad") and hasClickAction()).performClick()
         waitFor("Switch to Arshad?")
-        listOf("9", "9", "9", "9", "OK").forEach { rule.onNode(hasText(it) and hasClickAction()).performClick() }
+        val pin = rule.onNode(hasContentDescription("PIN", substring = true))
+        pin.requestFocus()
+        pin.performKeyInput { listOf(Key.Nine, Key.Nine, Key.Nine, Key.Nine).forEach { pressKey(it) } }
         waitFor("Wrong PIN")
-        listOf("1", "2", "3", "4", "OK").forEach { rule.onNode(hasText(it) and hasClickAction()).performClick() }
+        pin.performKeyInput { listOf(Key.One, Key.Two, Key.Three, Key.Four).forEach { pressKey(it) } }
         waitFor("Recently added")
         rule.onNode(hasText("Arshad") and hasClickAction()).assertExists()
     }
@@ -484,8 +486,10 @@ class GlassHomeTest {
     @Test
     fun focusNeverSticksOnSettings() {
         home()
-        waitFor("Search movies")
+        // The shelves first, so the card picked below isn't swapped out while focus is on it (slow CI runners).
+        waitFor("Recently added")
         rule.waitUntilAtLeastOneExists(hasContentDescription("Settings"), 20_000)
+        rule.waitForIdle()
         val movies = hasText("Movies") and hasClickAction()
         // Up from the right-most card goes to the chosen tab, not the Settings button above it.
         val tabs = rule.onNode(movies).fetchSemanticsNode().boundsInRoot

@@ -7,6 +7,7 @@ import app.familytv.iptv.XtreamParser
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -41,11 +42,21 @@ class SeriesTitlesTest {
         assertEquals("The Mandalorian", title("TOP - The Mandalorian"))
         assertEquals("The Bear", title("NEW | The Bear"))
         assertEquals("Shogun", title("VIP: Shogun"))
+        assertEquals("Fighting Mulan", title("AS - Fighting Mulan"))
+        assertEquals("The Office", title("CA EN: The Office"))
+        assertEquals("en", lang("CA EN: The Office"))
+        assertEquals("Star Wars: A New Hope", title("Star Wars: A New Hope"))
         // Otherwise they are part of the name.
         assertEquals("Top - Gun", title("Top - Gun"))
         assertEquals("New - Girl", title("New - Girl"))
         assertEquals("Top Gun", title("Top Gun"))
         assertEquals("Kung Fu Panda HOT", title("Kung Fu Panda HOT"))
+    }
+
+    @Test
+    fun aNameIsParsedOnce() {
+        // Posters re-read their names as a shelf scrolls; the second read is the first one's result.
+        assertSame(SeriesTitles.parse("4K-TOP - Dune"), SeriesTitles.parse("4K-TOP - Dune"))
     }
 
     @Test

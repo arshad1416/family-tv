@@ -89,7 +89,7 @@ val SeriesEntity.groupKey get() = titleKey.ifEmpty { SeriesTitles.parse(name).ke
  */
 class SeriesGroup(val key: String, val copies: List<SeriesEntity>) {
     val first get() = copies.first()
-    val title: String get() = Names.clean(SeriesTitles.parse(first.name).title)
+    val title: String by lazy { Names.clean(SeriesTitles.parse(first.name).title) }
     val poster: String? get() = copies.firstNotNullOfOrNull { it.poster }
     val plot: String? get() = copies.firstNotNullOfOrNull { it.plot }
 }
