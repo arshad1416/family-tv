@@ -359,7 +359,7 @@ private fun ChannelRow(
     onFavourite: () -> Unit,
     onClick: () -> Unit,
 ) {
-    FocusBox(onClick = onClick, onLongClick = onFavourite, onFocus = onFocus, color = Color.Transparent, shape = RoundedCornerShape(14.gx), modifier = modifier.fillMaxWidth()) {
+    FocusBox(onClick = onClick, onLongClick = onFavourite, onFocus = onFocus, lift = Lift.Glow, color = Color.Transparent, shape = RoundedCornerShape(14.gx), modifier = modifier.fillMaxWidth()) {
         Row(Modifier.padding(horizontal = 12.gx, vertical = 8.gx), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.gx)) {
             if (numbers) Text("${c.num}", fontSize = 15.gsp, color = Glass.Dim, maxLines = 1, softWrap = false, modifier = Modifier.width(54.gx))
             Box(Modifier.size(54.gx, 32.gx).clip(RoundedCornerShape(8.gx)).background(Glass.Raised), contentAlignment = Alignment.Center) {

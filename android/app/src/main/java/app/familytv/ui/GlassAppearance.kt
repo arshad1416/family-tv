@@ -3,16 +3,27 @@ package app.familytv.ui
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.RoundRect
@@ -24,8 +35,13 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
 import app.familytv.user.Appearance
 import app.familytv.user.GlassPrefs
 import app.familytv.weather.Forecast
@@ -58,23 +74,51 @@ internal fun rememberLightness(appearance: Appearance, forecast: Forecast?): Flo
 }
 
 /**
- * The sun/moon switch before Settings: Select steps Light, Auto, Dark and round again. The arrows
- * only move focus on, as from any button (stepping with Left trapped focus here). The knob slides in 0.3 s.
+ * The sun/moon switch before Settings. OK opens a small Light / Auto / Dark picker under it (backlog
+ * item 27): Up and Down choose, OK saves, Back closes it unchanged. The arrows never change the
+ * setting, on the switch or off it. The knob slides in 0.3 s.
  */
 @Composable
 internal fun AppearanceSwitch(value: Appearance, onChange: (Appearance) -> Unit, modifier: Modifier = Modifier) {
     val pos by animateFloatAsState(value.ordinal / 2f, tween(300), label = "knob")
-    val steps = Appearance.entries
-    FocusBox(
-        onClick = { onChange(steps[(value.ordinal + 1) % steps.size]) },
-        modifier = modifier
-            .size(96.gx, 44.gx)
-            .semantics { contentDescription = "Appearance: ${value.label}" },
-        color = Color.Transparent,
-        outline = true,
-        shape = RoundedCornerShape(50),
-    ) {
-        Canvas(Modifier.fillMaxSize()) { drawSwitch(pos) }
+    var picking by remember { mutableStateOf(false) }
+    val self = remember { FocusRequester() }
+    Box {
+        FocusBox(
+            onClick = { picking = true },
+            modifier = modifier
+                .size(96.gx, 44.gx)
+                .focusRequester(self)
+                .semantics { contentDescription = "Appearance: ${value.label}" },
+            color = Color.Transparent,
+            outline = true,
+            shape = RoundedCornerShape(50),
+        ) {
+            Canvas(Modifier.fillMaxSize()) { drawSwitch(pos) }
+        }
+        if (picking) {
+            val close = { picking = false; runCatching { self.requestFocus() }; Unit }
+            AppearancePicker(value, onPick = { onChange(it); close() }, onClose = close)
+        }
+    }
+}
+
+/** The picker's three rows, the current one focused first. */
+@Composable
+private fun AppearancePicker(value: Appearance, onPick: (Appearance) -> Unit, onClose: () -> Unit) {
+    val first = remember { FocusRequester() }
+    val below = with(LocalDensity.current) { 52.gx.roundToPx() }
+    Popup(alignment = Alignment.TopEnd, offset = IntOffset(0, below), onDismissRequest = onClose, properties = PopupProperties(focusable = true)) {
+        val shape = RoundedCornerShape(18.gx)
+        LaunchedEffect(Unit) { delay(50); runCatching { first.requestFocus() } }
+        Column(
+            Modifier.width(190.gx).background(LocalGlassPalette.current.middle, shape).border(1.dp, Glass.Line, shape).padding(8.gx),
+            verticalArrangement = Arrangement.spacedBy(4.gx),
+        ) {
+            Appearance.entries.forEach { a ->
+                GlassRowItem(a.label, a == value, { onPick(a) }, if (a == value) Modifier.focusRequester(first) else Modifier)
+            }
+        }
     }
 }
 

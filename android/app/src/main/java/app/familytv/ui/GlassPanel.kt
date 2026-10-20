@@ -28,7 +28,7 @@ import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -138,7 +138,7 @@ internal fun rememberGlassWeather(): GlassWeather {
 internal fun WeatherHint(onOpen: () -> Unit, modifier: Modifier = Modifier) {
     FocusBox(onClick = onOpen, onFocus = onOpen, color = Color.Transparent, shape = RoundedCornerShape(50), modifier = modifier) {
         Row(Modifier.padding(horizontal = 12.gx, vertical = 4.gx), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.gx)) {
-            Icon(Icons.Filled.KeyboardArrowUp, contentDescription = null, tint = Glass.Faint, modifier = Modifier.size(16.gx))
+            Icon(Icons.Filled.KeyboardArrowDown, contentDescription = null, tint = Glass.Faint, modifier = Modifier.size(16.gx))
             Text("Weather and clocks", fontSize = 13.gsp, color = Glass.Faint, maxLines = 1)
         }
     }
@@ -187,7 +187,11 @@ internal fun WeatherPanel(weather: GlassWeather, onClose: () -> Unit, modifier: 
         when (page) {
             PanelPage.Main -> Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(24.gx)) {
                 WeatherCard(weather, Modifier.width(430.gx).fillMaxHeight(), first) { page = PanelPage.Ask }
-                ClocksCard(Modifier.weight(1f).fillMaxHeight()) { page = PanelPage.Clocks }
+                Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(12.gx)) {
+                    ClocksCard(Modifier.fillMaxWidth()) { page = PanelPage.Clocks }
+                    Spacer(Modifier.weight(1f))
+                    Text("Back to close", fontSize = 14.gsp, color = Glass.Faint, modifier = Modifier.align(Alignment.End))
+                }
             }
             PanelPage.Ask -> AskPage(first, onCity = { note = it; page = PanelPage.City }) { page = PanelPage.Main }
             PanelPage.City -> CityPage(first, note) { page = PanelPage.Main }
@@ -256,21 +260,22 @@ private fun ClocksCard(modifier: Modifier, onChoose: () -> Unit) {
     val on by prefs.clocksOn.collectAsState()
     val clocks by prefs.clocks.collectAsState()
     val shape = RoundedCornerShape(24.gx)
+    // Collapsed to its switch and a line until the clocks are on (backlog item 12).
     Column(modifier.background(Glass.Fill, shape).border(1.dp, Glass.LineSoft, shape).padding(horizontal = 24.gx, vertical = 20.gx), verticalArrangement = Arrangement.spacedBy(16.gx)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.gx)) {
             Text("World clocks", fontSize = 18.gsp, fontWeight = FontWeight.SemiBold, maxLines = 1, modifier = Modifier.weight(1f))
             GlassToggle("Show world clocks", on, { prefs.setClocksOn(!on) })
-            GlassPill("Choose countries", onChoose, selected = true, fontSize = 14.gsp, padH = 16.gx, padV = 8.gx)
+            if (on) GlassPill("Choose countries", onChoose, selected = true, fontSize = 14.gsp, padH = 16.gx, padV = 8.gx)
         }
-        if (on && clocks.isNotEmpty()) {
-            val now = rememberMinute()
-            Row(Modifier.fillMaxWidth().weight(1f), horizontalArrangement = Arrangement.SpaceAround, verticalAlignment = Alignment.CenterVertically) {
-                clocks.forEach { c -> ClockFace(c, now) }
+        when {
+            on && clocks.isNotEmpty() -> {
+                val now = rememberMinute()
+                Row(Modifier.fillMaxWidth().height(250.gx), horizontalArrangement = Arrangement.SpaceAround, verticalAlignment = Alignment.CenterVertically) {
+                    clocks.forEach { c -> ClockFace(c, now) }
+                }
             }
-        } else {
-            Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
-                Text(if (on) "Choose up to 4 countries to see their time." else "Switch on Show world clocks to see the time in up to 4 countries.", fontSize = 15.gsp, color = Glass.Dim)
-            }
+            on -> Text("Choose up to 4 countries to see their time.", fontSize = 15.gsp, color = Glass.Dim)
+            else -> Text("Switch on Show world clocks to see the time in up to 4 countries.", fontSize = 15.gsp, color = Glass.Dim)
         }
     }
 }

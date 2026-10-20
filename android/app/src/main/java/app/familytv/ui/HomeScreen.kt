@@ -556,7 +556,7 @@ fun PosterCard(
     val touch = LocalFormFactor.current.touch
     val heart = touch && onFavourite != null
     Column(if (width != null) Modifier.width(width) else Modifier.fillMaxWidth()) {
-        FocusBox(onClick = onClick, onLongClick = onMenu ?: onFavourite, onFocus = onFocus, outline = true, scale = FOCUS_SCALE, color = Tv.Raised, modifier = modifier.fillMaxWidth().aspectRatio(2f / 3f), contentAlignment = Alignment.Center) {
+        FocusBox(onClick = onClick, onLongClick = onMenu ?: onFavourite, onFocus = onFocus, outline = true, scale = FOCUS_SCALE, lift = Lift.Tilt, color = Tv.Raised, modifier = modifier.fillMaxWidth().aspectRatio(2f / 3f), contentAlignment = Alignment.Center) {
             Text(name, Modifier.padding(8.dp), fontSize = 13.sp, maxLines = 4, color = MutedText)
             if (poster != null) {
                 if (logo) AsyncImage(poster, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize().padding(20.dp))

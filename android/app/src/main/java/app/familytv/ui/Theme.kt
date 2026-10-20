@@ -90,6 +90,7 @@ fun FocusBox(
     outline: Boolean = false,
     shape: Shape = Tv.Shape,
     scale: Float = 1f,
+    lift: Lift = Lift.None,
     onFocus: () -> Unit = {},
     contentAlignment: Alignment = Alignment.TopStart,
     content: @Composable BoxScope.(focused: Boolean) -> Unit,
@@ -113,9 +114,22 @@ fun FocusBox(
         outline -> Tv.Accent
         else -> null
     }
+    // Glass only: a glow (pills) or a shadow and a slight tilt (posters) while focused; transforms only, nothing blurred.
+    val lifted = if (glass) lift else Lift.None
+    val glowColor = if (lifted == Lift.Glow) Glass.Ring else Color.Black
     Box(
         modifier
-            .then(if (scale != 1f) Modifier.graphicsLayer { if (focused) { scaleX = scale; scaleY = scale } } else Modifier)
+            .then(
+                if (scale != 1f || lifted != Lift.None) Modifier.graphicsLayer {
+                    if (!focused) return@graphicsLayer
+                    scaleX = scale; scaleY = scale
+                    if (lifted == Lift.None) return@graphicsLayer
+                    this.shape = shape
+                    shadowElevation = (if (lifted == Lift.Glow) 10.dp else 18.dp).toPx()
+                    ambientShadowColor = glowColor; spotShadowColor = glowColor
+                    if (lifted == Lift.Tilt) { rotationX = 3f; cameraDistance = 16 * density }
+                } else Modifier,
+            )
             .onFocusChanged { hasFocus = it.isFocused; if (it.isFocused) onFocus() }
             .clip(shape)
             .background(bg)
@@ -134,6 +148,9 @@ fun FocusBox(
         if (glass && bg == Glass.Selected) CompositionLocalProvider(LocalContentColor provides Glass.OnSelected) { content(focused) } else content(focused)
     }
 }
+
+/** How a glass [FocusBox] stands out while focused, beyond its ring and scale. */
+enum class Lift { None, Glow, Tilt }
 
 /** Where an OK press on a [FocusBox] with a long-press action is: [down] seen here, [held] long enough. */
 private class OkPress {

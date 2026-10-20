@@ -6,6 +6,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -28,6 +29,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -43,8 +46,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.focusRestorer
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -324,10 +329,11 @@ private fun RowScope.HeroCard(title: String, subtitle: String?, art: String?, ti
 @Composable
 private fun ProvidersShelf(providers: List<Provider>, target: String?, onOpen: (Provider) -> Unit) {
     Box(Modifier.padding(horizontal = FOCUS_ROOM).fillMaxWidth().glass(RoundedCornerShape(26.gx))) {
-        LazyRow(Modifier.focusRestorer(), contentPadding = PaddingValues(18.gx), horizontalArrangement = Arrangement.spacedBy(16.gx), verticalAlignment = Alignment.CenterVertically) {
+        val row = rememberLazyListState()
+        LazyRow(Modifier.focusRestorer(), state = row, contentPadding = PaddingValues(18.gx), horizontalArrangement = Arrangement.spacedBy(16.gx), verticalAlignment = Alignment.CenterVertically) {
             items(providers, key = { it.name }) { p ->
                 FocusBox(
-                    onClick = { onOpen(p) }, outline = true, scale = FOCUS_SCALE, color = Color.Black, shape = RoundedCornerShape(10.gx),
+                    onClick = { onOpen(p) }, outline = true, scale = FOCUS_SCALE, lift = Lift.Tilt, color = Color.Black, shape = RoundedCornerShape(10.gx),
                     modifier = entryPoint(target == "provider/${p.name}").size(168.gx, 95.gx),
                 ) {
                     Image(painterResource(p.art), contentDescription = p.label, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
@@ -336,6 +342,7 @@ private fun ProvidersShelf(providers: List<Provider>, target: String?, onOpen: (
                 }
             }
         }
+        MoreChevrons(row)
     }
 }
 
@@ -343,7 +350,11 @@ private fun ProvidersShelf(providers: List<Provider>, target: String?, onOpen: (
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 private fun PillRow(content: androidx.compose.foundation.lazy.LazyListScope.() -> Unit) {
-    LazyRow(Modifier.focusRestorer(), horizontalArrangement = Arrangement.spacedBy(10.gx), contentPadding = PaddingValues(start = FOCUS_ROOM, end = 40.dp, top = 4.dp, bottom = 4.dp), content = content)
+    val row = rememberLazyListState()
+    Box {
+        LazyRow(Modifier.focusRestorer(), state = row, horizontalArrangement = Arrangement.spacedBy(10.gx), contentPadding = PaddingValues(start = FOCUS_ROOM, end = 40.dp, top = 4.dp, bottom = 4.dp), content = content)
+        MoreChevrons(row)
+    }
 }
 
 /** A language, category or Adult Content pill. */
@@ -361,8 +372,24 @@ private fun BigPill(text: String, modifier: Modifier = Modifier, lock: Boolean =
 private fun GlassShelf(title: String, content: androidx.compose.foundation.lazy.LazyListScope.() -> Unit) {
     Column {
         GlassHeading(title, Modifier.padding(start = FOCUS_ROOM))
-        LazyRow(Modifier.focusRestorer(), horizontalArrangement = Arrangement.spacedBy(18.gx), contentPadding = PaddingValues(start = FOCUS_ROOM, end = 40.dp, top = FOCUS_ROOM, bottom = FOCUS_ROOM), content = content)
+        val row = rememberLazyListState()
+        Box {
+            LazyRow(Modifier.focusRestorer(), state = row, horizontalArrangement = Arrangement.spacedBy(18.gx), contentPadding = PaddingValues(start = FOCUS_ROOM, end = 40.dp, top = FOCUS_ROOM, bottom = FOCUS_ROOM), content = content)
+            MoreChevrons(row)
+        }
     }
+}
+
+/** Small left and right chevrons at a row's ends while it continues off screen (backlog item 13). */
+@Composable
+private fun BoxScope.MoreChevrons(row: LazyListState) {
+    @Composable
+    fun chevron(icon: ImageVector, align: Alignment) = Box(
+        Modifier.align(align).size(28.gx).clip(RoundedCornerShape(50)).background(Glass.Raised),
+        contentAlignment = Alignment.Center,
+    ) { Icon(icon, contentDescription = null, tint = Glass.Soft, modifier = Modifier.size(20.gx)) }
+    if (row.canScrollBackward) chevron(Icons.AutoMirrored.Filled.KeyboardArrowLeft, Alignment.CenterStart)
+    if (row.canScrollForward) chevron(Icons.AutoMirrored.Filled.KeyboardArrowRight, Alignment.CenterEnd)
 }
 
 /** A page's own header in place of the top bar: Back, the provider's button art or a title, a detail, the clock. */
