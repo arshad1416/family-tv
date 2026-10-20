@@ -84,6 +84,13 @@ object EpisodeGuide {
         return secs.takeIf { it > 0 }
     }
 
+    /**
+     * The running time in seconds from Xtream's "duration_secs" and "duration", taking the longer:
+     * some providers fill "duration_secs" with a stub (60) or minutes while "duration" is right.
+     */
+    fun durationSecs(secs: String?, duration: String?): Int? =
+        listOfNotNull(secs?.trim()?.toDoubleOrNull()?.toInt()?.takeIf { it > 0 }, seconds(duration)).maxOrNull()
+
     /** "42 min" or "1 h 5 min". */
     fun runtime(secs: Int?): String? {
         val m = ((secs ?: return null) + 30) / 60

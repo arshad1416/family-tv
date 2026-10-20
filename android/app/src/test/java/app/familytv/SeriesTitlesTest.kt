@@ -38,6 +38,7 @@ class SeriesTitlesTest {
         assertEquals("Dune", title("4K-TOP - Dune"))
         assertEquals(listOf("4K"), SeriesTitles.parse("4K-TOP - Dune").tags)
         assertEquals("Oppenheimer", title("NEW-4K - Oppenheimer"))
+        assertEquals("Moana", title("4K-D+ - Moana"))
         // Alone in capitals before a separator they are a tag too.
         assertEquals("The Mandalorian", title("TOP - The Mandalorian"))
         assertEquals("The Bear", title("NEW | The Bear"))
@@ -216,6 +217,9 @@ class SeriesTitlesTest {
         assertEquals("42 min", EpisodeGuide.runtime(2530))
         assertEquals("1 h 5 min", EpisodeGuide.runtime(3900))
         assertNull(EpisodeGuide.runtime(null))
+        assertEquals(6300, EpisodeGuide.durationSecs("60", "01:45:00"))
+        assertEquals(3480, EpisodeGuide.durationSecs("3480", null))
+        assertNull(EpisodeGuide.durationSecs("0", ""))
     }
 
     @Test

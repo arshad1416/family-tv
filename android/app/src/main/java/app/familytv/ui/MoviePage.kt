@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Text
 import app.familytv.app
 import app.familytv.data.Kind
+import app.familytv.iptv.EpisodeGuide
 import app.familytv.iptv.SeriesTitles
 import app.familytv.iptv.XtreamParser
 import app.familytv.iptv.language
@@ -91,8 +92,8 @@ fun MoviePage(profile: Profile, group: MovieGroup, visible: Set<Pair<String, Str
     val cover = m.poster ?: group.poster ?: info?.cover
     val meta = listOfNotNull(
         (m.releaseYear ?: info?.year)?.toString(),
-        (m.rating?.takeIf { it.isNotBlank() && it.toDoubleOrNull() != 0.0 } ?: info?.rating)?.let { "★ $it" },
-        info?.durationSecs?.let(::runtime),
+        ratingText(m.rating?.takeIf { it.isNotBlank() && it.toDoubleOrNull() != 0.0 } ?: info?.rating),
+        EpisodeGuide.runtime(info?.durationSecs),
         SeriesTitles.languageName(m.language).takeIf { copies.size > 1 },
         SeriesTitles.qualityBadge(listOf(m.name)),
     )
@@ -160,10 +161,4 @@ private fun Poster(url: String?, modifier: Modifier) {
     Box(modifier.aspectRatio(2f / 3f).clip(Tv.Shape).background(Tv.Raised)) {
         if (url != null) AsyncImage(url, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
     }
-}
-
-/** "1 h 52 min", or "48 min". */
-internal fun runtime(secs: Int): String {
-    val min = (secs + 30) / 60
-    return if (min >= 60) "${min / 60} h ${min % 60} min" else "$min min"
 }

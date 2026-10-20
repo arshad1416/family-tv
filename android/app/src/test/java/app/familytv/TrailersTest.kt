@@ -63,6 +63,12 @@ class TrailersTest {
     }
 
     @Test
+    fun aStubRunningTimeIsDropped() {
+        assertNull(XtreamParser.vodInfo("""{"info":{"duration_secs":"60"}}""".reader()).durationSecs)
+        assertEquals(6300, XtreamParser.vodInfo("""{"info":{"duration_secs":"60","duration":"01:45:00"}}""".reader()).durationSecs)
+    }
+
+    @Test
     fun tmdbResponses() {
         val season = TmdbParse.season(
             json(

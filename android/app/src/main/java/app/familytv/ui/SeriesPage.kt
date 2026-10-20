@@ -280,7 +280,7 @@ fun SeriesPage(profile: Profile, group: SeriesGroup, visible: List<CategoryEntit
                         Text(title, fontSize = if (phone) 22.sp else 28.sp, fontWeight = FontWeight.Bold, maxLines = 3, overflow = TextOverflow.Ellipsis)
                         val meta = listOfNotNull(
                             v.year?.toString(),
-                            v.rating?.let { "★ $it" },
+                            ratingText(v.rating),
                             seasons.count { it > 0 }.takeIf { it > 0 }?.let { if (it == 1) "1 season" else "$it seasons" },
                             SeriesTitles.languageName(v.lang ?: SeriesTitles.ORIGINAL).takeIf { copies.size > 1 },
                         )
@@ -446,7 +446,7 @@ private fun EpisodeStill(e: XtreamParser.Episode, cover: String?, modifier: Modi
 private fun meta(e: XtreamParser.Episode, long: Boolean): String = listOfNotNull(
     EpisodeGuide.runtime(e.durationSecs),
     e.airDate?.let { if (long) "Aired $it" else it },
-    e.rating?.takeIf { long }?.let { "★ $it" },
+    ratingText(e.rating.takeIf { long }),
 ).joinToString("  ·  ")
 
 @Composable

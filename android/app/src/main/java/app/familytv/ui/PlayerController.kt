@@ -248,8 +248,10 @@ class PlayerController(
         val form = activity.formFactor()
         touch = form.touch
 
-        // Bigger buffer than the default for live IPTV: survives short Wi-Fi dips on sticks.
-        val loadControl = DefaultLoadControl.Builder().setBufferDurationsMs(15_000, 50_000, 2_000, 4_000).build()
+        // Bigger buffer than the default for live IPTV: survives short Wi-Fi dips on sticks. Capped
+        // at 48 MB, so a 4K stream holds about 20 s instead of the default 130 MB on 2-3 GB boxes.
+        val loadControl = DefaultLoadControl.Builder().setBufferDurationsMs(15_000, 50_000, 2_000, 4_000)
+            .setTargetBufferBytes(48 * 1024 * 1024).build()
         val http = OkHttpDataSource.Factory(Http.client).setUserAgent(Http.USER_AGENT).setTransferListener(stats)
         // DefaultDataSource adds file:// for downloaded subtitles; network still goes through OkHttp.
         val dataSource = DefaultDataSource.Factory(activity, http)
@@ -414,6 +416,27 @@ class PlayerController(
             }
             false
         }
+    }
+
+    /**
+     * Movies and episodes on TV: Left and Right seek straight away, by [SeekSteps], whether or not
+     * the controls are showing. PlayerView would spend the first press showing its controls and the
+     * next moving focus to its skip buttons. They pass through only where they move focus: in the
+     * controls with something other than play/pause focused (the seek bar steps itself), our buttons
+     * or a panel.
+     */
+    fun seekKey(e: KeyEvent): Boolean {
+        if (live || touch || panel != null || buttonsActive) return false
+        val right = e.keyCode == KeyEvent.KEYCODE_DPAD_RIGHT
+        if (!right && e.keyCode != KeyEvent.KEYCODE_DPAD_LEFT) return false
+        if (view.isControllerFullyVisible && activity.currentFocus?.id != androidx.media3.ui.R.id.exo_play_pause) return false
+        if (e.action == KeyEvent.ACTION_DOWN) {
+            val step = SeekSteps.stepMs(e.repeatCount)
+            val end = player.duration.takeIf { it != C.TIME_UNSET } ?: Long.MAX_VALUE
+            player.seekTo((player.currentPosition + if (right) step else -step).coerceIn(0, end))
+            view.showController()
+        }
+        return true
     }
 
     /**
