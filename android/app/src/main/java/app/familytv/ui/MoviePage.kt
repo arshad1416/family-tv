@@ -130,7 +130,7 @@ fun MoviePage(profile: Profile, group: MovieGroup, visible: Set<Pair<String, Str
                     item("fav") {
                         TvButton(if (favourite) "♥  In Favourites" else "♡  Add to Favourites", { toggleMovieFavourite(ctx, all, emptySet(), favKeys, m) })
                     }
-                    item("trailer") { TrailerButton(movieTrailerAction(profile, m)) }
+                    item("trailer") { TrailerButton(movieTrailerAction(profile) { m }) }
                 }
             }
             info?.plot?.let { plot -> item("about") { ExpandableText(plot, collapsedLines = if (phone) 5 else 4) } }

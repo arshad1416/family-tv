@@ -1,6 +1,5 @@
 package app.familytv.ui
 
-import android.view.WindowManager
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -19,7 +18,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -168,44 +166,3 @@ private fun Tiles(tiles: List<Tile>) {
         }
     }
 }
-
-/**
- * The parental PIN pad; [onOk] runs once the right PIN is entered. Its first key is the page's
- * entry point unless [firstKey] is given.
- */
-@Composable
-internal fun PinPrompt(profile: Profile, firstKey: Modifier? = null, onOk: () -> Unit) {
-    // No screenshots or casting while the PIN pad is up (backlog item 18).
-    val window = LocalContext.current.findActivity()?.window
-    DisposableEffect(window) {
-        window?.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
-        onDispose { window?.clearFlags(WindowManager.LayoutParams.FLAG_SECURE) }
-    }
-    var pin by remember { mutableStateOf("") }
-    var wrong by remember { mutableStateOf(false) }
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Enter the parental PIN", fontSize = 16.sp, color = MutedText)
-        Text(if (pin.isEmpty()) "PIN" else "•".repeat(pin.length), fontSize = 20.sp)
-        listOf(listOf("1", "2", "3"), listOf("4", "5", "6"), listOf("7", "8", "9"), listOf("C", "0", "OK")).forEachIndexed { r, row ->
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                row.forEachIndexed { c, k ->
-                    FocusBox(
-                        onClick = {
-                            when (k) {
-                                "C" -> pin = ""
-                                "OK" -> if (pinMatches(profile, pin)) onOk() else { wrong = true; pin = "" }
-                                else -> if (pin.length < 8) { pin += k; wrong = false }
-                            }
-                        },
-                        color = Tv.Raised, contentAlignment = Alignment.Center,
-                        modifier = (if (r == 0 && c == 0 && firstKey != null) firstKey else entryPoint(r == 0 && c == 0 && firstKey == null)).width(68.dp).height(48.dp),
-                    ) { Text(k, fontSize = 18.sp) }
-                }
-            }
-        }
-        if (wrong) Text("Wrong PIN", color = Tv.Bad)
-    }
-}
-
-/** True when [pin] is the profile's parental PIN, or the profile has none. */
-fun pinMatches(profile: Profile, pin: String): Boolean = profile.parentalPin.isNullOrEmpty() || profile.parentalPin == pin

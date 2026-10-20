@@ -31,12 +31,12 @@ import kotlinx.coroutines.launch
  * since providers throttle bursts of API calls), then open it or say there is none.
  */
 @Composable
-fun movieTrailerAction(profile: Profile, m: MovieEntity): () -> Unit {
+fun movieTrailerAction(profile: Profile, m: () -> MovieEntity): () -> Unit {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     return {
         scope.launch {
-            val id = ctx.app.extras.movieTrailer(profile, m)
+            val id = ctx.app.extras.movieTrailer(profile, m())
             if (id != null) openTrailer(ctx, id)
             else Toast.makeText(ctx.applicationContext, "No trailer found for this movie", Toast.LENGTH_SHORT).show()
         }

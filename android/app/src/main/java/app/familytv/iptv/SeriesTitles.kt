@@ -138,12 +138,15 @@ object SeriesTitles {
     private val BARE_SUFFIX = Regex("\\s+([\\p{L}\\p{N}+]{2,12})$")
     private val YEAR = Regex("(19|20)\\d{2}")
     private val EDGE = Regex("^[\\s\\-:|▎•►»–—.,]+|[\\s\\-:|▎•►»–—.,]+$")
+    private val TAG_SPLIT = Regex("[\\s\\-/,]+")
+    private val MARKS = Regex("\\p{M}+")
+    private val NOT_WORD = Regex("[^\\p{L}\\p{N}]+")
 
     /** What a tag (prefix, suffix or bracket contents) holds, or null when it is part of the title. */
     private class Tag(val lang: String?, val tags: List<String>)
 
     private fun tag(text: String, allowYear: Boolean, allowLang: Boolean = true, separated: Boolean = true): Tag? {
-        val tokens = text.split(Regex("[\\s\\-/,]+")).filter { it.isNotEmpty() }
+        val tokens = text.split(TAG_SPLIT).filter { it.isNotEmpty() }
         if (tokens.isEmpty()) return null
         var lang: String? = null
         val tags = ArrayList<String>()
@@ -167,7 +170,22 @@ object SeriesTitles {
     private fun isYear(t: String): Boolean =
         YEAR.matches(t) && t.toInt() <= Calendar.getInstance().get(Calendar.YEAR) + 1
 
+    /**
+     * Names already parsed: every poster on a shelf parses its copies' names for its title, badge
+     * and language as it scrolls in, so a name is parsed once instead of on each pass (TV re-test:
+     * scrolling the home was bound by main-thread work).
+     */
+    private val parsed = object : LinkedHashMap<String, Parsed>(256, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Parsed>) = size > PARSED_MAX
+    }
+    private const val PARSED_MAX = 4096
+
     fun parse(raw: String): Parsed {
+        synchronized(parsed) { parsed[raw] }?.let { return it }
+        return parseNow(raw).also { synchronized(parsed) { parsed[raw] = it } }
+    }
+
+    private fun parseNow(raw: String): Parsed {
         var s = raw.trim()
         var lang: String? = null
         val tags = ArrayList<String>()
@@ -217,10 +235,10 @@ object SeriesTitles {
     /** Casefolded, accent-free, punctuation-free form of a title, for grouping. */
     fun key(title: String): String =
         Normalizer.normalize(title, Normalizer.Form.NFD)
-            .replace(Regex("\\p{M}+"), "")
+            .replace(MARKS, "")
             .lowercase(Locale.ROOT)
             .replace("&", " and ")
-            .replace(Regex("[^\\p{L}\\p{N}]+"), " ")
+            .replace(NOT_WORD, " ")
             .trim()
 
     // ---- grouping ----
