@@ -267,7 +267,7 @@ private fun ClocksCard(modifier: Modifier, onChoose: () -> Unit) {
 
 /** The time now, ticking over on each minute. */
 @Composable
-private fun rememberMinute(): Long {
+internal fun rememberMinute(): Long {
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) { while (true) { delay(60_000 - now % 60_000); now = System.currentTimeMillis() } }
     return now

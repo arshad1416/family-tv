@@ -24,6 +24,7 @@ import app.familytv.data.CategoryEntity
 import app.familytv.data.ChannelEntity
 import app.familytv.data.Kind
 import app.familytv.data.MovieEntity
+import app.familytv.data.ProgrammeEntity
 import app.familytv.portal.DeviceConfig
 import app.familytv.portal.Profile
 import app.familytv.user.Appearance
@@ -67,8 +68,18 @@ class GlassHomeTest {
                 cat(Kind.MOVIE, "11", "NETFLIX MOVIES", 2),
             ),
         )
-        fun channel(id: String, name: String, cat: String, num: Int) = ChannelEntity("s", id, name, num, null, cat, null, null, 0, 0)
-        dao.upsertChannels(listOf(channel("100", "BBC News", "1", 101), channel("200", "NHL Network", "2", 201)))
+        fun channel(id: String, name: String, cat: String, num: Int, epg: String? = null) = ChannelEntity("s", id, name, num, null, cat, epg, null, 0, 0)
+        dao.upsertChannels(listOf(channel("100", "BBC News", "1", 101, epg = "bbc.uk"), channel("200", "NHL Network", "2", 201)))
+        val now = System.currentTimeMillis()
+        val hour = 3_600_000L
+        fun show(title: String, start: Long, about: String? = null) = ProgrammeEntity(epgId = "bbc.uk", start = start, stop = start + hour, title = title, description = about)
+        dao.insertProgrammes(
+            listOf(
+                show("Newsday", now - hour / 2, about = "The latest headlines from around the world."),
+                show("World Business Report", now + hour / 2),
+                show("Click", now + hour * 3 / 2),
+            ),
+        )
         fun movie(id: String, name: String, cat: String, added: Long) = MovieEntity("s", id, name, null, cat, "8.1", "mp4", null, added, 0, titleKey = name.lowercase())
         dao.upsertMovies(listOf(movie("1000", "Star Wars", "10", 2), movie("1001", "The Irishman", "11", 1)))
         // A fresh saved forecast, so the panel never asks Open-Meteo during tests.
@@ -100,6 +111,17 @@ class GlassHomeTest {
         waitFor("UK")
         waitFor("BBC News")
         waitFor("TV guide")
+    }
+
+    @Test
+    fun liveTvGuideBoxShowsNowAndNext() {
+        home()
+        waitFor("Live TV")
+        rule.onNodeWithText("Live TV").performClick()
+        waitFor("GUIDE · BBC NEWS")
+        waitFor("The latest headlines from around the world.")
+        waitFor("World Business Report")
+        waitFor("Click")
     }
 
     @Test
