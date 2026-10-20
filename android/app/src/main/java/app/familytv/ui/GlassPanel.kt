@@ -1,6 +1,8 @@
 package app.familytv.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -34,6 +36,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -59,10 +62,12 @@ import app.familytv.core.Http
 import app.familytv.user.GlassPrefs
 import app.familytv.user.WorldClock
 import app.familytv.weather.Forecast
+import app.familytv.weather.HereLocation
 import app.familytv.weather.OpenMeteo
 import app.familytv.weather.PlaceHit
 import app.familytv.weather.WeatherParse
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.text.DateFormat
 import java.time.Instant
 import java.time.ZoneId
@@ -139,7 +144,7 @@ internal fun WeatherHint(onOpen: () -> Unit, modifier: Modifier = Modifier) {
     }
 }
 
-private enum class PanelPage { Main, City, Clocks }
+private enum class PanelPage { Main, Ask, City, Clocks }
 
 /**
  * The slide-up glass panel: the weather (always) and, when switched on, up to four analog world
@@ -147,7 +152,10 @@ private enum class PanelPage { Main, City, Clocks }
  */
 @Composable
 internal fun WeatherPanel(weather: GlassWeather, onClose: () -> Unit, modifier: Modifier = Modifier) {
-    var page by remember { mutableStateOf(PanelPage.Main) }
+    val asked by LocalContext.current.app.glassPrefs.placeAsked.collectAsState()
+    // The first time, ask where the weather is for before showing Toronto's.
+    var page by remember { mutableStateOf(if (asked) PanelPage.Main else PanelPage.Ask) }
+    var note by remember { mutableStateOf<String?>(null) }
     val open = remember { mutableStateOf(true) }
     val first = remember(page) { FocusRequester() }
     val close = { open.value = false; onClose() }
@@ -159,7 +167,7 @@ internal fun WeatherPanel(weather: GlassWeather, onClose: () -> Unit, modifier: 
         modifier
             .padding(horizontal = 32.gx)
             .fillMaxWidth()
-            .height(if (page == PanelPage.Main) 470.gx else 600.gx)
+            .height(if (page == PanelPage.Main || page == PanelPage.Ask) 470.gx else 600.gx)
             // Solid: see-through, busy pages showed through the weather (TV test, Oct 20).
             .background(p.middle, shape)
             .border(1.dp, Glass.Line, shape)
@@ -178,10 +186,11 @@ internal fun WeatherPanel(weather: GlassWeather, onClose: () -> Unit, modifier: 
         Box(Modifier.align(Alignment.CenterHorizontally).size(64.gx, 5.gx).background(Glass.Faint, RoundedCornerShape(50)))
         when (page) {
             PanelPage.Main -> Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(24.gx)) {
-                WeatherCard(weather, Modifier.width(430.gx).fillMaxHeight(), first) { page = PanelPage.City }
+                WeatherCard(weather, Modifier.width(430.gx).fillMaxHeight(), first) { page = PanelPage.Ask }
                 ClocksCard(Modifier.weight(1f).fillMaxHeight()) { page = PanelPage.Clocks }
             }
-            PanelPage.City -> CityPage(first) { page = PanelPage.Main }
+            PanelPage.Ask -> AskPage(first, onCity = { note = it; page = PanelPage.City }) { page = PanelPage.Main }
+            PanelPage.City -> CityPage(first, note) { page = PanelPage.Main }
             PanelPage.Clocks -> ClockChooser(first)
         }
     }
@@ -323,9 +332,46 @@ private fun GlassToggle(label: String, on: Boolean, onToggle: () -> Unit, modifi
     }
 }
 
+/**
+ * "Show weather for where you are?" (first open, and Change city): the TV's approximate location
+ * ([HereLocation]) or a typed city. Asks Android for the permission only when Use my location is pressed;
+ * when it's refused or the TV has no location, says so over the city search.
+ */
+@Composable
+private fun ColumnScope.AskPage(first: FocusRequester, onCity: (note: String?) -> Unit, onDone: () -> Unit) {
+    val ctx = LocalContext.current
+    val prefs = ctx.app.glassPrefs
+    val scope = rememberCoroutineScope()
+    var finding by remember { mutableStateOf(false) }
+    val locate = {
+        finding = true
+        scope.launch {
+            val here = HereLocation.find(ctx)
+            finding = false
+            prefs.setPlaceAsked()
+            if (here != null) { prefs.setPlace(here); onDone() } else onCity(NO_LOCATION)
+        }
+    }
+    val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) locate() else { prefs.setPlaceAsked(); onCity(NO_LOCATION) }
+    }
+    Text("Show weather for where you are?", fontSize = 26.gsp, fontWeight = FontWeight.Bold)
+    Text("Only the TV's rough position (about 1 km) goes to the weather service, never an address.", fontSize = 15.gsp, color = Glass.Dim)
+    Row(horizontalArrangement = Arrangement.spacedBy(16.gx)) {
+        GlassPill(
+            "Use my location", { if (!finding) { if (HereLocation.allowed(ctx)) locate() else permission.launch(HereLocation.PERMISSION) } },
+            Modifier.focusRequester(first), fill = Glass.Raised, border = true, fontSize = 16.gsp, padH = 24.gx, padV = 10.gx,
+        )
+        GlassPill("Enter a city", { prefs.setPlaceAsked(); onCity(null) }, fill = Glass.Raised, border = true, fontSize = 16.gsp, padH = 24.gx, padV = 10.gx)
+    }
+    if (finding) Text("Finding this TV's location…", fontSize = 15.gsp, color = Glass.Dim)
+}
+
+private const val NO_LOCATION = "This TV can't find its location. Search for your city instead."
+
 /** "Change city": Open-Meteo's place search; only the chosen place's coordinates go into the forecast. */
 @Composable
-private fun ColumnScope.CityPage(first: FocusRequester, onDone: () -> Unit) {
+private fun ColumnScope.CityPage(first: FocusRequester, note: String?, onDone: () -> Unit) {
     val prefs = LocalContext.current.app.glassPrefs
     var query by remember { mutableStateOf("") }
     var hits by remember { mutableStateOf<List<PlaceHit>?>(emptyList()) }
@@ -337,6 +383,7 @@ private fun ColumnScope.CityPage(first: FocusRequester, onDone: () -> Unit) {
         hits = runCatching { api.search(q) }.getOrNull()
     }
     Text("Change city", fontSize = 26.gsp, fontWeight = FontWeight.Bold)
+    note?.let { Text(it, fontSize = 15.gsp, color = Glass.Dim) }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.gx)) {
         GlassSearchBox(query, { query = it }, "Search a city", Modifier.focusRequester(first))
         GlassPill("Toronto", { prefs.setPlace(GlassPrefs.TORONTO); onDone() }, fill = Glass.Raised, border = true, fontSize = 14.gsp)

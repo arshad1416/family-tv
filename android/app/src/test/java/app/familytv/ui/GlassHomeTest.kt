@@ -1,6 +1,8 @@
 package app.familytv.ui
 
 import android.content.Context
+import androidx.activity.OnBackPressedDispatcher
+import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsNotFocused
@@ -215,6 +217,26 @@ class GlassHomeTest {
     }
 
     @Test
+    fun backOnTheTabsAsksBeforeLeaving() {
+        var back: OnBackPressedDispatcher? = null
+        rule.setContent {
+            back = LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
+            HomeScreen(MainViewModel(app), DeviceConfig(paired = true, profile = Profile()))
+        }
+        fun pressBack() = rule.runOnUiThread { back!!.onBackPressed() }
+        waitFor("Search movies")
+        rule.onNode(hasText("Movies") and hasClickAction()).requestFocus()
+        rule.waitForIdle()
+        pressBack()
+        waitFor("Exit Family TV?")
+        rule.waitUntilAtLeastOneExists(isFocused() and hasText("Stay"), 10_000)
+        // Back again stays.
+        pressBack()
+        rule.waitForIdle()
+        rule.onNodeWithText("Exit Family TV?").assertDoesNotExist()
+    }
+
+    @Test
     fun appearanceSwitchStepsAndIsSaved() {
         home()
         waitFor("Search movies")
@@ -238,7 +260,20 @@ class GlassHomeTest {
     }
 
     @Test
+    fun weatherPanelAsksWhereFirst() {
+        home()
+        waitFor("Weather and clocks")
+        rule.onNodeWithText("Weather and clocks").performClick()
+        waitFor("Show weather for where you are?")
+        waitFor("Use my location")
+        rule.onNodeWithText("Enter a city").performClick()
+        waitFor("Search a city")
+        assertTrue(app.glassPrefs.placeAsked.value)
+    }
+
+    @Test
     fun weatherPanelShowsTheWeatherAndOptionalClocks() {
+        app.glassPrefs.setPlaceAsked()
         home()
         waitFor("Weather and clocks")
         rule.onNodeWithText("Weather and clocks").performClick()
