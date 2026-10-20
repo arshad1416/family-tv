@@ -486,8 +486,10 @@ class GlassHomeTest {
     @Test
     fun focusNeverSticksOnSettings() {
         home()
-        waitFor("Search movies")
+        // The shelves first, so the card picked below isn't swapped out while focus is on it (slow CI runners).
+        waitFor("Recently added")
         rule.waitUntilAtLeastOneExists(hasContentDescription("Settings"), 20_000)
+        rule.waitForIdle()
         val movies = hasText("Movies") and hasClickAction()
         // Up from the right-most card goes to the chosen tab, not the Settings button above it.
         val tabs = rule.onNode(movies).fetchSemanticsNode().boundsInRoot
