@@ -50,6 +50,12 @@ internal class LivePreview(private val context: Context) {
     var active by mutableStateOf(false)
         private set
 
+    companion object {
+        /** Whether any preview box is showing video, so the screensaver waits. */
+        var anyActive by mutableStateOf(false)
+            internal set
+    }
+
     /** Bumped when the app comes back, so the focused channel starts again. */
     var resumed by mutableIntStateOf(0)
         private set
@@ -76,6 +82,7 @@ internal class LivePreview(private val context: Context) {
         val url = Streams(context.app.db, profile).live(channel) ?: return
         val p = ensure()
         active = true
+        anyActive = true
         p.setMediaItem(MediaItem.fromUri(url))
         p.prepare()
         p.playWhenReady = true
@@ -84,6 +91,7 @@ internal class LivePreview(private val context: Context) {
     /** Stops the stream, freeing the line's connection. */
     fun stop() {
         active = false
+        anyActive = false
         player?.run { stop(); clearMediaItems() }
     }
 
