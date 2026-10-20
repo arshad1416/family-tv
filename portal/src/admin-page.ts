@@ -18,7 +18,7 @@ nav button.on{color:var(--ink);background:var(--bg)}
 main{max-width:1000px;margin:0 auto;padding:16px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:12px}
 .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
-.dot{width:10px;height:10px;border-radius:50%;display:inline-block;background:var(--muted)}
+.dot{flex:none;width:10px;height:10px;margin-right:2px;border-radius:50%;display:inline-block;background:var(--muted)}
 .dot.on{background:var(--ok)}.dot.warn{background:var(--warn)}.dot.bad{background:var(--bad)}
 .muted{color:var(--muted)}.small{font-size:13px}
 button.b{font:inherit;padding:7px 12px;border-radius:7px;border:1px solid var(--line);background:var(--card);color:var(--ink);cursor:pointer}
@@ -86,12 +86,12 @@ async function renderDevices() {
   if (!devices.length) html += '<div class="card muted">No TVs yet.</div>';
   for (const d of devices) {
     const online = d.last_seen && Date.now() - d.last_seen < 3 * 60 * 1000;
-    const v = d.last_verdict ? verdicts[d.last_verdict] : null;
+    const v = currentCheck(d);
     const cls = v ? (v.severity >= 3 ? "bad" : v.severity >= 1 ? "warn" : "on") : online ? "on" : "";
     const playing = d.status && d.status.playing ? "Watching " + esc(d.status.playing.title) : "";
     const err = d.status && d.status.lastError ? '<span class="err">Last error: ' + esc(d.status.lastError) + "</span>" : "";
     html += '<div class="card"><div class="row"><span class="dot ' + cls + '"></span><strong>' + esc(d.nickname) + '</strong><span class="muted small">' +
-      esc(d.manufacturer) + " " + esc(d.model) + " · app " + esc(d.app_version) + " · " + esc(d.profile_name) + " · seen " + ago(d.last_seen) +
+      esc(d.manufacturer) + " " + esc(d.model) + " · " + appName(d) + " " + esc(d.app_version) + " · " + esc(d.profile_name) + " · seen " + ago(d.last_seen) +
       '</span><span style="margin-left:auto"><button class="b" data-open="' + esc(d.id) + '">Details</button></span></div>' +
       (playing || err ? '<div class="small" style="margin-top:6px">' + playing + " " + err + "</div>" : "") + guideLine(d.status && d.status.guide) +
       (v ? '<div class="small" style="margin-top:6px">Last check: <strong>' + esc(v.label) + "</strong> (" + ago(d.last_verdict_at) + ")</div>" : "") +
@@ -110,21 +110,43 @@ async function renderDevices() {
   document.querySelectorAll("[data-open]").forEach((b) => (b.onclick = () => openDevice(b.dataset.open, devices.find((x) => x.id === b.dataset.open))));
 }
 
+// Which app the TV runs, so two TVs with one name (the Kotlin and Rust apps) are told apart.
+// TVs say so themselves; older builds are known by their version line.
+function appName(d) {
+  const app = d.status && typeof d.status.app === "string" ? d.status.app.toLowerCase() : "";
+  if (app === "kotlin" || app === "rust" || app === "apple") return app[0].toUpperCase() + app.slice(1);
+  if (d.status && d.status.platform) return "Apple";
+  const ver = String(d.app_version || "");
+  return ver.startsWith("0.2.") ? "Kotlin" : ver.startsWith("0.1.") ? "Rust" : "app";
+}
+
+// The TV's last check, while it still says something: not after 6 hours, and not once the TV is
+// playing again after a check that found a problem.
+function currentCheck(d) {
+  const v = d.last_verdict ? verdicts[d.last_verdict] : null;
+  if (!v || !d.last_verdict_at || Date.now() - d.last_verdict_at > 6 * 3600 * 1000) return null;
+  if (v.severity > 0 && d.status && d.status.playing) return null;
+  return v;
+}
+
 // How the TV's last refresh used the extra guides; unmatched thin channels are candidates for a pin.
 function guideLine(g) {
   if (!g) return "";
   // Stored telemetry predates validation too: never treat device-supplied counts as markup.
   const count = (v) => typeof v === "number" && Number.isSafeInteger(v) && v >= 0 ? Math.min(v, 1000000000) : 0;
   const linked = Object.values(g.linked || {}).reduce((a, b) => Math.min(a + count(b), 1000000000), 0);
+  const textList = (v) => Array.isArray(v) ? v.filter((s) => typeof s === "string").slice(0, 100).map((s) => s.slice(0, 1000)) : [];
+  const errors = textList(g.errors);
+  const why = errors.length ? '<details class="muted"><summary>Why</summary>' + esc(errors.join("; ")) + "</details>" : "";
+  // No extra guide loaded: every channel would read as "no match", which says nothing.
+  if (errors.length && !linked && !count(g.switched)) return '<div class="small muted" style="margin-top:6px">Extra guide unavailable' + why + "</div>";
   const unmatchedCount = count(g.unmatchedCount);
   let html = '<div class="small" style="margin-top:6px">Guide: ' + count(g.switched) + " of " + count(g.thin) + " thin channels now use an extra guide; " +
     linked + " channels linked in all";
-  const textList = (v) => Array.isArray(v) ? v.filter((s) => typeof s === "string").slice(0, 100).map((s) => s.slice(0, 1000)) : [];
   const unmatched = textList(g.unmatched);
   if (unmatchedCount) html += '<details><summary>' + unmatchedCount + " thin channels with no match (pin them in the profile)</summary>" + esc(unmatched.join(", ")) +
     (unmatchedCount > unmatched.length ? " …" : "") + "</details>";
-  const errors = textList(g.errors);
-  if (errors.length) html += '<span class="err">' + esc(errors.join("; ")) + "</span>";
+  if (errors.length) html += '<div class="muted">Some extra guides did not load' + why + "</div>";
   return html + "</div>";
 }
 

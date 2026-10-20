@@ -35,6 +35,8 @@ object PlaybackStatus {
     fun error(e: String) { lastError = e; lastErrorAt = System.currentTimeMillis() }
 
     fun snapshot(): Map<String, Any?> = mapOf(
+        // Which app this is, so the portal tells it apart from the Rust app on the same TV.
+        "app" to "kotlin",
         "playing" to title?.let { mapOf("title" to it, "since" to startedAt, "buffering" to bufferingEvents, "kbps" to bitrateKbps, "dropped" to droppedFrames) },
         "lastError" to lastError?.takeIf { System.currentTimeMillis() - lastErrorAt < 6 * 3600_000 },
         "lastRefresh" to lastRefresh,

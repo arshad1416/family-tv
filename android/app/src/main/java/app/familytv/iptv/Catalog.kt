@@ -17,6 +17,7 @@ import app.familytv.portal.Profile
 import app.familytv.portal.Source
 import app.familytv.sync.PlaybackStatus
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import okhttp3.Request
@@ -269,7 +270,7 @@ class Catalog(private val db: AppDb) {
             val guideChannels = ArrayList<XmltvChannel>()
             val wanted = HashSet<String>()
             try {
-                open(url).use { res ->
+                openGuide(url).use { res ->
                     val input = res.body!!.byteStream().let { if (isGzip(url, res)) GZIPInputStream(it, 64 * 1024) else it }
                     val parser = Xml.newPullParser().apply { setInput(input, null) }
                     val pending = ArrayList<ProgrammeEntity>(BATCH)
@@ -384,6 +385,18 @@ class Catalog(private val db: AppDb) {
         if (buf.isNotEmpty()) { write(buf); n += buf.size; progress(n) }
     }
 
+    /**
+     * An extra guide, tried once more after a pause when it fails: its host rewrites the files
+     * often, and a TV that gives up on one answer goes without the guide until its next refresh.
+     */
+    private suspend fun openGuide(url: String): Response =
+        try {
+            open(url)
+        } catch (e: IOException) {
+            delay(GUIDE_RETRY_MS)
+            open(url)
+        }
+
     private fun open(url: String): Response {
         val res = Http.client.newCall(Request.Builder().url(url).build()).execute()
         if (!res.isSuccessful) { res.close(); throw IOException("HTTP ${res.code}") }
@@ -405,6 +418,7 @@ class Catalog(private val db: AppDb) {
         const val HOUR = 3_600_000L
         const val GUIDE_HOURS = 48L
         const val MAX_EXTRA_GUIDES = 4
+        const val GUIDE_RETRY_MS = 20_000L
         /** Thin channels with no extra guide, listed for the admin (the portal keeps a few KB of status). */
         const val MAX_REPORTED = 30
     }
