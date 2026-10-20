@@ -265,7 +265,7 @@ This app has no Real-Debrid (removed Oct 2026; a separate fork builds it). The p
 | Where | Command |
 |---|---|
 | `portal/` | `npm run dev`, `npm run typecheck`, `npm test` |
-| `android/` | `./gradlew testDebugUnitTest assembleDebug` (the debug build talks to `http://10.0.2.2:8787`, the emulator's view of a local `wrangler dev`) |
+| `android/` | `./gradlew testDebugUnitTest assembleDebug` (the debug build and the unit tests talk to `http://10.0.2.2:8787`, the emulator's view of a local `wrangler dev`, never the release portal; `-PdebugPortalUrl=...` points a debug install elsewhere) |
 
 ## Not in v1
 Catch-up and recordings, multiple user profiles per TV, iOS/Apple TV, and an FFmpeg audio decoder for

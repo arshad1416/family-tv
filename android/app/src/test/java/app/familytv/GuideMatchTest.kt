@@ -39,6 +39,23 @@ class GuideMatchTest {
     }
 
     @Test
+    fun countryAndLanguagePrefixesComeOffAndTheCountryIsTheFirstWord() {
+        assertEquals("ctvnewschannel", GuideMatch.key("CA EN: CTV NEWS CHANNEL HD"))
+        assertEquals("ca", GuideMatch.countryOfName("CA EN: CTV NEWS CHANNEL HD"))
+        assertEquals("us", GuideMatch.countryOfName("US EN| CNN"))
+        val news = GuideMatch.Index(listOf("CTV.News.Channel.HD.ca2", "CTV.News.Channel.us2").map(::ch))
+        assertEquals("CTV.News.Channel.HD.ca2", link("CA EN: CTV NEWS CHANNEL HD", index = news)?.guideId)
+    }
+
+    @Test
+    fun globalNewsFeedsLinkToTheGuidesGlobalNames() {
+        val global = GuideMatch.Index(listOf("Global.BC.ca2", "Global.Toronto.HD.ca2").map(::ch))
+        assertEquals("Global.BC.ca2", link("CA| GLOBAL NEWS BC HD", index = global)?.guideId)
+        assertEquals("Global.Toronto.HD.ca2", link("CA EN: Global News Toronto", index = global)?.guideId)
+        assertNull(link("US| GLOBAL NEWS BC", index = global))
+    }
+
+    @Test
     fun countriesFromIdsNamesAndCategories() {
         assertEquals("ca", GuideMatch.countryOfId("CTV.Toronto.HD.ca2"))
         assertEquals("us", GuideMatch.countryOfId("cnn.us"))

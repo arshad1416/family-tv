@@ -7,6 +7,9 @@ plugins {
 
 // Portal URL is baked in at build time: ./gradlew assembleRelease -PportalUrl=https://family-tv-portal.<you>.workers.dev
 val portalUrl: String = (findProperty("portalUrl") as String?) ?: "http://10.0.2.2:8787"
+// Debug builds (and so the unit tests) never take portalUrl, so a release run's tests can't register
+// "robolectric" devices on the real portal; -PdebugPortalUrl points a debug install somewhere on purpose.
+val debugPortalUrl: String = (findProperty("debugPortalUrl") as String?) ?: "http://10.0.2.2:8787"
 
 android {
     namespace = "app.familytv"
@@ -19,12 +22,15 @@ android {
         // CI passes -PversionCode/-PversionName for each published build.
         versionCode = (project.findProperty("versionCode") as String?)?.toInt() ?: 1
         versionName = (project.findProperty("versionName") as String?) ?: "0.1.0"
-        buildConfigField("String", "PORTAL_URL", "\"$portalUrl\"")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     buildTypes {
+        debug {
+            buildConfigField("String", "PORTAL_URL", "\"$debugPortalUrl\"")
+        }
         release {
+            buildConfigField("String", "PORTAL_URL", "\"$portalUrl\"")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
@@ -60,6 +66,8 @@ android {
         unitTests.all { test ->
             test.systemProperty("robolectric.offline", "true")
             test.systemProperty("robolectric.dependency.dir", robolectricJars.singleFile.parent)
+            // CI keeps no reports, so a failure's message and stack go to the log.
+            test.testLogging { exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL }
         }
     }
 }

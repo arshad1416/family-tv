@@ -183,7 +183,7 @@ private fun LiveBrowser(profile: Profile, onGuide: () -> Unit) {
                     }
                 }
             }
-            ChannelBrowser(channels, favKeys, Modifier.weight(1f), side = false, header = null, loading = loaded == null && g != FAVOURITES, arrival = toChannels, leftTo = toCountry)
+            ChannelBrowser(channels, favKeys, Modifier.weight(1f), side = false, header = null, loading = loaded == null && g != FAVOURITES, arrival = toChannels, leftTo = toCountry, backTo = profile)
         }
     }
 }
@@ -249,15 +249,30 @@ private fun ChannelBrowser(
     entry: Boolean = false,
     arrival: PageEntry? = null,
     leftTo: PageEntry? = null,
+    backTo: Profile? = null,
     onPick: (Int) -> Unit = {},
 ) {
     val ctx = LocalContext.current
     var focused by remember { mutableStateOf<ChannelEntity?>(null) }
+    val rows = rememberLazyListState()
+    // Back from full screen lands here (with [backTo], Live TV): focus moves to the channel last
+    // playing, which may be one zapped to with Up and Down, and the preview picks it up.
+    var away by remember { mutableStateOf(false) }
     var inList by remember { mutableStateOf(false) }
     val shown = focused?.takeIf { f -> channels.any { it.sourceId == f.sourceId && it.streamId == f.streamId } } ?: channels.firstOrNull()
     // Only a channel focus is resting on plays, never the first one shown while focus is in the columns.
     val video = rememberLivePreview()
     PreviewFollows(video, shown.takeIf { inList && focused != null })
+    LaunchedEffect(video.resumed) {
+        val profile = backTo?.takeIf { away } ?: return@LaunchedEffect
+        away = false
+        val last = ctx.app.lastChannels.recent(profile).firstOrNull() ?: return@LaunchedEffect
+        val i = channels.indexOfFirst { it.sourceId == last.sourceId && it.streamId == last.streamId }
+        if (i < 0 || arrival == null) return@LaunchedEffect
+        focused = channels[i]
+        rows.scrollToItem(i)
+        repeat(20) { delay(50); if (arrival.attached > 0) return@LaunchedEffect arrival.focus() }
+    }
     // A start that moves every half hour, not with focus, so moving down the list doesn't re-read the guide.
     val minute = rememberMinute()
     val from = remember(channels, minute / HALF_HOUR) { System.currentTimeMillis() }
@@ -270,7 +285,7 @@ private fun ChannelBrowser(
             when {
                 loading -> Text("Finding the channels…", fontSize = 15.gsp, color = Glass.Dim, modifier = Modifier.padding(12.gx))
                 channels.isEmpty() -> Text("No channels here.", fontSize = 15.gsp, color = Glass.Dim, modifier = Modifier.padding(12.gx))
-                else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(6.gx), contentPadding = PaddingValues(vertical = 2.dp)) {
+                else -> LazyColumn(state = rows, verticalArrangement = Arrangement.spacedBy(6.gx), contentPadding = PaddingValues(vertical = 2.dp)) {
                     itemsIndexed(channels, key = { _, ch -> "${ch.sourceId}/${ch.streamId}" }) { i, ch ->
                         ChannelRow(
                             ch, ch.epgId?.let { progs[it] }.orEmpty(), minute, numbers = !side,
@@ -282,6 +297,7 @@ private fun ChannelBrowser(
                             onFavourite = { toggleFavourite(ctx, Kind.LIVE, ch.sourceId, ch.streamId, ch.name) },
                         ) {
                             onPick(i)
+                            away = backTo != null
                             // The line's one connection goes to full screen.
                             video.stop()
                             playLive(ctx, ch.sourceId, ch.categoryId, 0, ch.streamId)
