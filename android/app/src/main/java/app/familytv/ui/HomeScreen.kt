@@ -52,6 +52,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
@@ -82,6 +83,7 @@ import app.familytv.data.Names
 import app.familytv.data.NowNext
 import app.familytv.data.displayName
 import app.familytv.iptv.Streams
+import app.familytv.perf.Perf
 import app.familytv.portal.DeviceConfig
 import app.familytv.portal.Profile
 import app.familytv.sync.NewEpisodes
@@ -421,6 +423,8 @@ private fun HomePage(vm: MainViewModel, profile: Profile, onNavigate: (Page) -> 
     val seriesCat = seriesCats.firstOrNull()
     val seriesRows by remember(seriesCat) { seriesCat?.let { dao.series(it.sourceId, it.categoryId) } ?: flowOf(emptyList()) }.collectAsState(initial = emptyList())
     val series = remember(seriesRows) { groupSeries(seriesRows) }
+    // The first frame with rows on it ends a cold start (see Perf).
+    if (channels.isNotEmpty() || recent.isNotEmpty() || series.isNotEmpty()) LaunchedEffect(Unit) { withFrameNanos { }; Perf.firstScreen() }
 
     // Favourites of every kind, newest first, as one row.
     val favs = rememberFavourites()
