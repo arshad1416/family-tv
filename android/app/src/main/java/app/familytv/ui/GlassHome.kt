@@ -154,8 +154,8 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
         LocalContentColor provides palette.text,
     ) {
         GlassBackground(shown) {
-            // Inside the TV's overscan safe zone (48 dp across, 27 dp down).
-            Column(Modifier.fillMaxSize().padding(start = 48.dp, end = 48.dp, top = 27.dp).onFocusChanged { anyFocused = it.hasFocus }) {
+            // Inside the TV's overscan safe zone (48 dp across, 27 dp at the top and bottom).
+            Column(Modifier.fillMaxSize().padding(start = 48.dp, end = 48.dp, top = 27.dp, bottom = 18.dp).onFocusChanged { anyFocused = it.hasFocus }) {
                 if (!barHidden.value) {
                     GlassTopBar(
                         tab, settings, tabFocus, settingsFocus,
@@ -166,7 +166,7 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
                         appearance = appearance,
                         onAppearance = prefs::setAppearance,
                     )
-                    Spacer(Modifier.height(22.gx))
+                    Spacer(Modifier.height(16.gx))
                 }
                 Box(Modifier.weight(1f).fillMaxWidth().focusRequester(pageFocus).restoresFocus(entry)) {
                     pages.SaveableStateProvider(if (settings) "settings" else tab.name) {
@@ -187,9 +187,12 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
                         }
                     }
                 }
-            }
-            if (!panel && !settings && !barHidden.value && darkPages.intValue == 0) {
-                WeatherHint({ panel = true }, Modifier.align(Alignment.BottomCenter).padding(bottom = 4.gx))
+                // Its own strip under the page, so it never covers the bottom row; the strip stays while the panel is open.
+                if (!settings && !barHidden.value && darkPages.intValue == 0) {
+                    Box(Modifier.fillMaxWidth().height(30.gx), contentAlignment = Alignment.BottomCenter) {
+                        if (!panel) WeatherHint({ panel = true })
+                    }
+                }
             }
             AnimatedVisibility(
                 panel, Modifier.align(Alignment.BottomCenter),
@@ -203,8 +206,9 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
 }
 
 /**
- * The tabs, this tab's search, the clock, the Appearance switch and Settings. Focus resting on a tab opens it. Movies and
- * TV Shows put the title above the tabs, to make room for the YouTube and JustWatch buttons.
+ * The title with the clock, YouTube and JustWatch (Movies and TV Shows), the Appearance switch and
+ * Settings on its right; below it the tabs and this tab's search. Every tab uses this one layout,
+ * so the tabs never move and nothing on the right is squeezed. OK opens a tab; focus alone doesn't.
  */
 @Composable
 private fun GlassTopBar(
@@ -220,41 +224,27 @@ private fun GlassTopBar(
     onAppearance: (Appearance) -> Unit,
 ) {
     val apps = !settings && (tab == GlassTab.Movies || tab == GlassTab.Series)
-    val hovered = remember { mutableStateOf<GlassTab?>(null) }
-    FollowFocus(hovered) { if (it != tab || settings) onTab(it) }
-    val tabs: @Composable () -> Unit = {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.gx), verticalAlignment = Alignment.CenterVertically) {
-            GlassTab.entries.forEach { t ->
-                GlassPill(t.label, { onTab(t) }, Modifier.focusRequester(tabFocus.getValue(t)), selected = t == tab && !settings, onFocus = { hovered.value = t })
+    Column(Modifier.fillMaxWidth().onFocusChanged { onFocused(it.hasFocus) }, verticalArrangement = Arrangement.spacedBy(12.gx)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(if (settings) "Settings" else tab.label, fontSize = 40.gsp, fontWeight = FontWeight.Bold, maxLines = 1)
+            Spacer(Modifier.weight(1f))
+            Row(horizontalArrangement = Arrangement.spacedBy(12.gx), verticalAlignment = Alignment.CenterVertically) {
+                if (apps) AppButtons()
+                Box(Modifier.padding(horizontal = 6.gx)) { GlassClock() }
+                AppearanceSwitch(appearance, onAppearance)
+                SettingsButton(settings, settingsFocus, onSettings)
             }
         }
-    }
-    val search: @Composable () -> Unit = {
-        if (query != null) GlassSearchBox(query.value, { query.value = it }, tab.searchHint, Modifier.onFocusChanged { if (it.isFocused) hovered.value = null })
-    }
-    val h1: @Composable () -> Unit = { Text(if (settings) "Settings" else tab.label, fontSize = 44.gsp, fontWeight = FontWeight.Bold, maxLines = 1) }
-    Row(
-        Modifier.fillMaxWidth().onFocusChanged { onFocused(it.hasFocus); if (!it.hasFocus) hovered.value = null },
-        verticalAlignment = if (apps) Alignment.Top else Alignment.CenterVertically,
-    ) {
-        if (apps) {
-            Column(verticalArrangement = Arrangement.spacedBy(14.gx)) {
-                h1()
-                Row(verticalAlignment = Alignment.CenterVertically) { tabs(); Spacer(Modifier.width(18.gx)); search() }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.gx), verticalAlignment = Alignment.CenterVertically) {
+                GlassTab.entries.forEach { t ->
+                    GlassPill(t.label, { onTab(t) }, Modifier.focusRequester(tabFocus.getValue(t)), selected = t == tab && !settings)
+                }
             }
-        } else {
-            h1()
-            Spacer(Modifier.width(22.gx))
-            tabs()
-            Spacer(Modifier.width(22.gx))
-            search()
-        }
-        Spacer(Modifier.weight(1f))
-        Row(horizontalArrangement = Arrangement.spacedBy(12.gx), verticalAlignment = Alignment.CenterVertically) {
-            if (apps) AppButtons()
-            Box(Modifier.padding(start = 6.gx)) { GlassClock() }
-            AppearanceSwitch(appearance, onAppearance, Modifier.onFocusChanged { if (it.isFocused) hovered.value = null })
-            SettingsButton(settings, settingsFocus, onSettings)
+            if (query != null) {
+                Spacer(Modifier.width(18.gx))
+                GlassSearchBox(query.value, { query.value = it }, tab.searchHint)
+            }
         }
     }
 }
