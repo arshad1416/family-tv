@@ -27,6 +27,8 @@ export const USAGE_WORDS = [
   "network", "decoder", "timeout", "source", "other",
   // error: the app moved to a backup server
   "server_switch",
+  // setting_change and player_menu open: the player's sleep timer
+  "sleep_timer",
 ] as const;
 
 export const USAGE_BATCH_MAX = 500;

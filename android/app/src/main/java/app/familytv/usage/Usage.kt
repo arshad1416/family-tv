@@ -30,6 +30,7 @@ object Usage {
         LIVE, MOVIE, EPISODE,
         NETWORK, DECODER, TIMEOUT, SOURCE, OTHER,
         SERVER_SWITCH,
+        SLEEP_TIMER,
     }
 
     /** As the portal takes it: [value] is a number, one [Word] in lower case, or null. */

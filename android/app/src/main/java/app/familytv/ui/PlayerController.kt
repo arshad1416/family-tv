@@ -53,6 +53,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.extractor.DefaultExtractorsFactory
 import androidx.media3.ui.AspectRatioFrameLayout
+import androidx.media3.ui.DefaultTimeBar
 import androidx.media3.ui.PlayerView
 import app.familytv.BuildConfig
 import app.familytv.app
@@ -216,6 +217,9 @@ class PlayerController(
     val backCallbacks: List<OnBackPressedCallback> get() = listOf(guideBack, closeGuideOnBack, panelBack)
     /** Docked controls' play/pause button. */
     private var paused by mutableStateOf(false)
+    /** The sleep timer, when one is set ([setSleep]). */
+    private var sleep by mutableStateOf<SleepTimer?>(null)
+    private var sleepJob: Job? = null
 
     // For the instrumented tests (main thread only).
     internal val playbackPosition: Long get() = player.currentPosition
@@ -312,6 +316,7 @@ class PlayerController(
             playItem = PlayItem.from(intent)
             online = onlineSubtitles()
             view.useController = true
+            stepSeeking()
             view.setControllerVisibilityListener(PlayerView.ControllerVisibilityListener { vodControls = it == View.VISIBLE })
             start(vodUrl, title)
             Usage.log(Usage.Action.PLAY_START, if (playItem?.kind == ProgressKey.MOVIE) Usage.Word.MOVIE else Usage.Word.EPISODE)
@@ -369,7 +374,7 @@ class PlayerController(
                         onPick = ::pickFromBigGuide, onWindow = ::onGuideWindow,
                     )
                 }
-                if (bigGuide == GuideMode.Off) LiveOverlay(channels, playing, banner, guideOpen, programmes, onTune = ::tuneFromGuide, onFocusChannel = { if (guideOpen) banner = it }, touch = touchUi)
+                if (bigGuide == GuideMode.Off) LiveOverlay(channels, playing, banner, guideOpen, programmes, onTune = ::tuneFromGuide, onFocusChannel = { if (guideOpen) banner = it }, touch = touchUi, sleep = sleep)
             } else if ((vodControls || buttonsActive) && panel == null) {
                 if (touch && host.canDock) RoundIcon(ExitFullScreenIcon, "Leave full screen", Modifier.align(Alignment.TopStart).safeDrawingPadding().padding(24.dp), host::leaveFullScreen)
                 PlayerButtons(
@@ -384,9 +389,64 @@ class PlayerController(
                     repeat(5) { withFrameNanos { }; if (runCatching { buttonsFocus.requestFocus() }.isSuccess) return@LaunchedEffect }
                 }
             }
-            if (!host.docked) PlayerPanels(panel, tracks, online, live, touch, aspect.value, onAspect = ::pickAspect, stats = ::snapshot, onOpen = ::openPanel, onClose = ::closePanel)
+            if (!host.docked) PlayerPanels(panel, tracks, online, live, touch, aspect.value, onAspect = ::pickAspect, stats = ::snapshot, onOpen = ::openPanel, onClose = ::closePanel, sleep = sleep, onSleep = ::setSleep)
         }
     }
+
+    /**
+     * The seek bar (backlog item 24): Left and Right move 10 s a press, and further the longer one
+     * is held (30 s, then a minute a step). The bar itself is drawn larger on TVs (values-television).
+     */
+    private fun stepSeeking() {
+        val bar = view.findViewById<DefaultTimeBar>(androidx.media3.ui.R.id.exo_progress) ?: return
+        bar.setKeyTimeIncrement(SeekSteps.stepMs(0))
+        bar.setOnKeyListener { _, keyCode, e ->
+            if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT || keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
+                bar.setKeyTimeIncrement(SeekSteps.stepMs(if (e.action == KeyEvent.ACTION_DOWN) e.repeatCount else 0))
+            }
+            false
+        }
+    }
+
+    /**
+     * Starts the sleep timer from now ([c] null turns it off). When it runs out, playback stops and
+     * the player closes; a minute before, it says so. End of programme follows a paused video.
+     */
+    private fun setSleep(c: SleepTimer.Choice?) {
+        sleepJob?.cancel()
+        Usage.log(Usage.Action.SETTING_CHANGE, Usage.Word.SLEEP_TIMER)
+        if (c == null) {
+            sleep = null
+            return show("Sleep timer off", 2_000)
+        }
+        val now = System.currentTimeMillis()
+        val at = SleepTimer.at(c, now, programmeEnd(now)) ?: return show("This programme has no end time in the guide.", 3_000)
+        sleep = SleepTimer(c, at)
+        show("Sleep timer: ${sleepSummary(sleep).replaceFirstChar { it.lowercase() }}", 2_500)
+        sleepJob = scope.launch {
+            var warned = false
+            while (true) {
+                delay(5_000)
+                val t = System.currentTimeMillis()
+                var s = sleep ?: return@launch
+                if (s.choice == SleepTimer.Choice.END && !live) {
+                    SleepTimer.videoEnd(t, player.currentPosition, player.duration.takeIf { it != C.TIME_UNSET } ?: 0)?.let { s = s.copy(at = it); sleep = s }
+                }
+                val left = s.at - t
+                if (left <= 0) {
+                    sleep = null
+                    player.pause()
+                    return@launch host.close()
+                }
+                if (left <= SleepTimer.WARN_MS && !warned) { warned = true; show("Sleep timer: stopping in a minute", 5_000) }
+            }
+        }
+    }
+
+    /** When what's playing ends: the playing channel's programme on now, or the video. */
+    private fun programmeEnd(now: Long): Long? =
+        if (live) channels.getOrNull(index)?.epgId?.let { programmes[it] }.nowAndNext(now).first?.stop
+        else SleepTimer.videoEnd(now, player.currentPosition, player.duration.takeIf { it != C.TIME_UNSET } ?: 0)
 
     private fun pickAspect(a: Aspect) {
         Usage.log(Usage.Action.SETTING_CHANGE, Usage.Word.PICTURE_SIZE)
@@ -483,6 +543,8 @@ class PlayerController(
 
     private fun openPanel(p: PlayerPanel) {
         if (guideOpen && p != PlayerPanel.Info) closeGuide()
+        // End of programme needs the guide's times for the playing channel.
+        if (p == PlayerPanel.Sleep && live) refreshProgrammes()
         hideControls()
         buttonsActive = false
         panel = p
@@ -998,6 +1060,7 @@ class PlayerController(
         PlayerPanel.Captions -> Usage.Word.SUBTITLES
         PlayerPanel.Tracks -> Usage.Word.AUDIO_TRACK
         PlayerPanel.Info -> Usage.Word.INFO
+        PlayerPanel.Sleep -> Usage.Word.SLEEP_TIMER
     }
 
     companion object {
