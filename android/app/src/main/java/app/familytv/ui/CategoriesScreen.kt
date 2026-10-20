@@ -137,7 +137,7 @@ fun CategoriesScreen(vm: MainViewModel, profile: Profile) {
 private const val SPORTS_LABEL = "Sports"
 
 /** The live channels of the sports categories among [categories] (already filtered and ordered), by sport. */
-private suspend fun sportsChannels(dao: CatalogDao, categories: List<CategoryEntity>): Map<Sport, List<ChannelEntity>> {
+internal suspend fun sportsChannels(dao: CatalogDao, categories: List<CategoryEntity>): Map<Sport, List<ChannelEntity>> {
     val picked = categories.filter { Sport.isSportsCategory(it.name) }
     val channels = picked.groupBy { it.sourceId }.flatMap { (src, cats) ->
         cats.map { it.categoryId }.distinct().chunked(500).flatMap { dao.channelsIn(src, it) }

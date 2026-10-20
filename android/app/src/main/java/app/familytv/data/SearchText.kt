@@ -20,6 +20,14 @@ object SearchText {
     fun words(text: String): List<String> =
         MARKS.replace(Normalizer.normalize(Names.clean(text), Normalizer.Form.NFD), "").lowercase().split(SEPARATORS).filter { it.isNotEmpty() }
 
+    /** True when every word of [q] starts a word of [name], the rule above, for a list already loaded. */
+    fun matches(name: String, q: String): Boolean {
+        val want = words(q).take(MAX_WORDS)
+        if (want.isEmpty()) return true
+        val have = words(name)
+        return want.all { w -> have.any { it.startsWith(w) } }
+    }
+
     /** The stored form, a space before every word (" pokemon the movie"), so `LIKE '% poke%'` is a word-prefix match. */
     fun index(name: String): String = words(name).joinToString("") { " $it" }
 

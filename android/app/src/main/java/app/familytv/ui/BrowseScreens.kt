@@ -192,7 +192,7 @@ internal fun CategoryPosters(profile: Profile, cat: CategoryEntity, nav: SeriesN
  * added, favourites and top rated, from the categories this profile shows.
  */
 @Composable
-private fun rememberMovieShelves(visible: List<CategoryEntity>, favMovies: List<MovieEntity>, progress: Map<String, ProgressEntity>): List<Pair<String, List<MovieGroup>>> {
+internal fun rememberMovieShelves(visible: List<CategoryEntity>, favMovies: List<MovieEntity>, progress: Map<String, ProgressEntity>): List<Pair<String, List<MovieGroup>>> {
     val dao = LocalContext.current.app.db.catalog()
     var watching by remember { mutableStateOf(emptyList<MovieGroup>()) }
     var recent by remember { mutableStateOf(emptyList<MovieGroup>()) }
@@ -274,7 +274,7 @@ fun SeriesScreen(vm: MainViewModel, profile: Profile) {
  * There's no Recently added: the catalog keeps no date for a show.
  */
 @Composable
-private fun rememberSeriesShelves(
+internal fun rememberSeriesShelves(
     visible: List<CategoryEntity>,
     newShows: List<SeriesGroup>,
     favSeries: List<SeriesEntity>,
@@ -296,7 +296,7 @@ private fun rememberSeriesShelves(
     }
 }
 
-private const val CONTINUE_WATCHING = "Continue watching"
+internal const val CONTINUE_WATCHING = "Continue watching"
 
 private const val SHELF_SIZE = 30
 
@@ -338,11 +338,12 @@ internal fun <T> PosterGrid(
     card: @Composable (T, Modifier, String) -> Unit,
 ) {
     val hasEntry = entry != null && items.any { key(it) == entry }
-    // Three posters across a phone, more on wider screens.
+    // Three posters across a phone, more on wider screens, seven on the TV's glass pages.
     val cell = when (LocalFormFactor.current) { FormFactor.Phone -> 100.dp; FormFactor.Tablet -> 130.dp; FormFactor.Tv -> 150.dp }
-    val gap = if (LocalFormFactor.current == FormFactor.Phone) 12.dp else 18.dp
+    val glass = LocalGlass.current
+    val gap = when { glass -> 18.gx; LocalFormFactor.current == FormFactor.Phone -> 12.dp; else -> 18.dp }
     LazyVerticalGrid(
-        columns = GridCells.Adaptive(cell),
+        columns = if (glass) GridCells.Fixed(7) else GridCells.Adaptive(cell),
         state = state,
         // Room for a focused poster's zoom, which the grid would otherwise clip.
         contentPadding = PaddingValues(start = FOCUS_ROOM, top = FOCUS_ROOM, bottom = 32.dp, end = FOCUS_ROOM),

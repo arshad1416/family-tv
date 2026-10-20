@@ -188,6 +188,8 @@ interface CatalogDao {
     suspend fun topSeries(min: Double, limit: Int): List<SeriesEntity>
     @Query("SELECT * FROM movies WHERE categoryId = :categoryId AND sourceId = :sourceId ORDER BY added DESC") fun movies(sourceId: String, categoryId: String): Flow<List<MovieEntity>>
     @Query("SELECT * FROM series WHERE categoryId = :categoryId AND sourceId = :sourceId ORDER BY name") fun series(sourceId: String, categoryId: String): Flow<List<SeriesEntity>>
+    @Query("SELECT * FROM movies WHERE sourceId = :sourceId AND categoryId IN (:categoryIds)") suspend fun moviesIn(sourceId: String, categoryIds: List<String>): List<MovieEntity>
+    @Query("SELECT * FROM series WHERE sourceId = :sourceId AND categoryId IN (:categoryIds)") suspend fun seriesIn(sourceId: String, categoryIds: List<String>): List<SeriesEntity>
 
     @Query(
         """SELECT epgId, title, start, stop FROM programmes
