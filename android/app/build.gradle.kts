@@ -57,6 +57,8 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+        // The external source connector's contract (src/main/aidl, docs/CONNECTOR.md).
+        aidl = true
     }
     packaging { resources.excludes += "/META-INF/{AL2.0,LGPL2.1}" }
     testOptions {
