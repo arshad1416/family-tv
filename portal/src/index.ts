@@ -1,5 +1,5 @@
 import { openJson, pairCode, randomId, sealJson, sha256Hex, timingSafeEqual } from "./crypto";
-import { assertHttpUrl, CATEGORY_KINDS, cleanNames, forDevice, MASK, maskSecrets, mergeSecrets, profileHosts, validateProfile, VERDICTS, type ProfileData, type Source } from "./model";
+import { assertHttpUrl, CATEGORY_KINDS, cleanNames, DEFAULT_LOCK_MESSAGE, forDevice, MASK, maskSecrets, mergeSecrets, profileHosts, validateProfile, VERDICTS, type ProfileData, type Source } from "./model";
 import { probe } from "./reachability";
 import { ADMIN_PAGE } from "./admin-page";
 import { preferServer, suggestions } from "./advice";
@@ -40,7 +40,7 @@ const RUST_LATEST_KEY = "family-tv-rust-latest.json";
 const LATEST_KEY = "latest.json";
 
 const PAIR_TTL_MS = 30 * 60 * 1000;
-const COMMAND_TYPES = new Set(["refresh", "diagnose", "clear_cache", "restart", "message", "update"]);
+const COMMAND_TYPES = new Set(["refresh", "diagnose", "clear_cache", "restart", "message", "update", "uninstall"]);
 const MAX_BODY = 256 * 1024;
 
 class HttpError extends Error {
@@ -88,7 +88,12 @@ interface DeviceRow {
   last_seen: number | null;
   status_json: string | null;
   created_at: number;
+  /** Missing on a portal deployed before migration 0010: unlocked. */
+  lock_message?: string | null;
 }
+
+/** The lock a TV is under, as its config and heartbeat report it; null when unlocked. */
+const deviceLock = (d: DeviceRow) => (d.lock_message ? { message: d.lock_message } : null);
 
 async function requireDevice(req: Request, env: Env): Promise<DeviceRow> {
   const t = bearer(req);
@@ -212,6 +217,7 @@ async function deviceConfig(req: Request, env: Env) {
   return json({
     paired: true,
     nickname: d.nickname,
+    lock: deviceLock(d),
     profile: profile && forDevice(await withSorterLinks(env, profile)),
     commands: await takeCommands(env, d.id, now),
     latestApp: await latestApp(env, req),
@@ -255,6 +261,7 @@ async function deviceHeartbeat(req: Request, env: Env) {
     .run();
   return json({
     paired: !!d.profile_id,
+    lock: d.profile_id ? deviceLock(d) : null,
     commands: d.profile_id ? await takeCommands(env, d.id, now) : [],
     latestApp: d.profile_id ? await latestApp(env, req) : null,
     // Another TV marked or paused something when this is past the seq this TV last pulled.
@@ -799,7 +806,7 @@ async function usagePush(req: Request, env: Env) {
 async function adminDevices(env: Env) {
   const { results } = await env.DB.prepare(
     `SELECT d.id, d.nickname, d.profile_id, p.name AS profile_name, d.manufacturer, d.model, d.sdk, d.app_version, d.country,
-            d.last_seen, d.status_json, d.created_at,
+            d.last_seen, d.status_json, d.created_at, d.lock_message,
             (SELECT verdict FROM diagnostics x WHERE x.device_id = d.id ORDER BY created_at DESC LIMIT 1) AS last_verdict,
             (SELECT created_at FROM diagnostics x WHERE x.device_id = d.id ORDER BY created_at DESC LIMIT 1) AS last_verdict_at
        FROM devices d LEFT JOIN profiles p ON p.id = d.profile_id
@@ -824,10 +831,14 @@ async function adminPair(req: Request, env: Env) {
 }
 
 async function adminUpdateDevice(req: Request, env: Env, id: string) {
-  const b = await body<{ nickname?: string; profileId?: string }>(req);
+  const b = await body<{ nickname?: string; profileId?: string; locked?: boolean; lockMessage?: string }>(req);
   if (b.profileId) {
     const p = await env.DB.prepare("SELECT id FROM profiles WHERE id = ?").bind(b.profileId).first();
     if (!p) throw new HttpError(404, "profile not found");
+  }
+  if (typeof b.locked === "boolean") {
+    const message = b.locked ? (b.lockMessage ?? "").trim().slice(0, 300) || DEFAULT_LOCK_MESSAGE : null;
+    await env.DB.prepare("UPDATE devices SET lock_message = ? WHERE id = ?").bind(message, id).run();
   }
   await env.DB.prepare("UPDATE devices SET nickname = COALESCE(?, nickname), profile_id = COALESCE(?, profile_id) WHERE id = ?")
     .bind(b.nickname?.trim().slice(0, 60) ?? null, b.profileId ?? null, id)

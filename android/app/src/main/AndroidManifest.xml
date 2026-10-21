@@ -11,6 +11,8 @@
     <!-- Self-updates: installs new builds from the portal, silently on Android 12+ once the app installed itself. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
+    <!-- "Uninstall" on the portal's Devices page opens Android's own uninstall prompt for this app. -->
+    <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
     <!-- "Open when the TV turns on" (portal profile setting, the Airbnb guest TV): see start/OpenOnStart.kt. -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />

@@ -2,6 +2,7 @@ package app.familytv.sync
 
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import app.familytv.app
 import app.familytv.portal.Command
 import app.familytv.portal.Profile
@@ -74,6 +75,12 @@ class CommandRunner(private val context: Context) {
                 if (!Updater.available(latest)) return mapOf("upToDate" to true)
                 mapOf("result" to Updater.check(context, latest, visible = true, force = true))
             }
+            "uninstall" -> {
+                // Android asks the viewer to confirm; it only shows over the app while it's on screen.
+                if (!app.visible) return mapOf("error" to "Family TV isn't open on the TV; send it again while it's on screen")
+                context.startActivity(uninstallIntent(context.packageName))
+                mapOf("shown" to true)
+            }
             else -> mapOf("error" to "unknown command ${c.type}")
         }
     }
@@ -90,6 +97,12 @@ class CommandRunner(private val context: Context) {
             PlaybackStatus.lastRefreshError = e.message
             throw e
         }
+    }
+
+    companion object {
+        /** Android's own "Uninstall this app?" prompt for Family TV. */
+        fun uninstallIntent(packageName: String): Intent =
+            Intent(Intent.ACTION_DELETE, Uri.parse("package:$packageName")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     }
 
     private fun restart() {

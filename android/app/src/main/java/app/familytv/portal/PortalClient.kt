@@ -6,6 +6,7 @@ import app.familytv.BuildConfig
 import app.familytv.core.Http
 import app.familytv.scores.ScoreBoard
 import app.familytv.start.OpenOnStart
+import app.familytv.sync.TvLock
 import app.familytv.usage.Usage
 import app.familytv.user.SharedProgressPage
 import app.familytv.user.SharedProgressRow
@@ -74,6 +75,7 @@ class PortalClient(context: Context, private val baseUrl: String = BuildConfig.P
                     cachedConfig = it
                     OpenOnStart.sync(appContext, it.profile?.openOnStart == true)
                     Usage.enabled = it.profile?.usageStats == true
+                    TvLock.apply(it.lock)
                 }
             }
         } catch (e: PortalException) {
@@ -95,7 +97,10 @@ class PortalClient(context: Context, private val baseUrl: String = BuildConfig.P
 
     suspend fun heartbeat(status: Map<String, Any?>): HeartbeatResponse =
         post("/api/device/heartbeat", mapOf("appVersion" to BuildConfig.VERSION_NAME, "status" to status), HeartbeatResponse::class.java).also {
-            if (it.paired) prefs.edit().putLong("contactAt", System.currentTimeMillis()).apply()
+            if (it.paired) {
+                prefs.edit().putLong("contactAt", System.currentTimeMillis()).apply()
+                TvLock.apply(it.lock)
+            }
         }
 
     suspend fun ack(commandId: String, result: Any?) {

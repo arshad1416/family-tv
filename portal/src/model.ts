@@ -79,6 +79,9 @@ export function cleanNames(v: unknown): string[] {
 
 export const MASK = "••••••";
 
+/** What a locked TV shows when the admin page gives no message of its own. */
+export const DEFAULT_LOCK_MESSAGE = "This TV is paused. Contact Arshad.";
+
 /** Hosts a device on this profile legitimately talks to (used to scope the reachability check). */
 export function profileHosts(p: ProfileData): Set<string> {
   const hosts = new Set<string>();

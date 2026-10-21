@@ -44,6 +44,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.tv.material3.Icon
+import app.familytv.sync.TvLock
 import app.familytv.usage.Usage
 
 /**
@@ -76,6 +77,7 @@ class DockedPlayer(private val activity: ComponentActivity) : PlayerHost {
     }
 
     fun play(intent: Intent) {
+        if (TvLock.locked) return
         // Lines allow one connection: the old stream stops before the new one starts.
         controller?.let(::release)
         holdDocked = false
