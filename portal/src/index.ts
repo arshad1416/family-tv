@@ -1382,6 +1382,7 @@ export async function handle(req: Request, env: Env): Promise<Response> {
     return new Response(ADMIN_PAGE, {
       headers: {
         "content-type": "text/html; charset=utf-8",
+        "cache-control": "no-store",
         "content-security-policy": "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'self'",
         "x-frame-options": "DENY",
       },
