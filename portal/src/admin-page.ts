@@ -43,6 +43,10 @@ pre{white-space:pre-wrap;word-break:break-word;font-size:12px;background:var(--b
 table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:7px 6px;border-top:1px solid var(--line);vertical-align:middle}th{font-size:13px;color:var(--muted);font-weight:500;border-top:0}
 .ok{color:var(--ok)}.warn{color:var(--warn)}
 .grip{cursor:grab;touch-action:none;user-select:none;padding:2px 8px;color:var(--muted);font-size:18px;line-height:1}
+.lrow{padding:10px 0;border-top:1px solid var(--line)}
+.lacts{margin-left:auto;display:flex;gap:8px}
+.lfields{margin-top:6px}
+.addline{margin-top:4px;padding-top:12px;border-top:1px solid var(--line)}
 .cat.dragging{opacity:.85;background:var(--bg);position:relative;z-index:1}
 @media (max-width:700px){.wide{display:none}}
 </style>
@@ -228,19 +232,24 @@ function commandState(c) {
   return c.type === "uninstall" ? "Uninstall prompt shown" : "done";
 }
 
-// What the panel last said about a line, shown on its source card.
+// What the panel last said about a line, for its row in the profile's Lines card.
 function lineFacts(l) {
-  if (!l) return "";
+  if (!l) return [];
   const bits = [l.expire ? "expires " + esc(l.expire) + " (" + leftText(l) + ")" : leftText(l)];
   if (l.enabled === false) bits.push('<span class="err">disabled on the panel</span>');
   if (l.maxConnections) bits.push(plural(l.maxConnections, "screen"));
   if (l.note) bits.push(esc(l.note));
-  return '<p class="small" style="margin:0 0 8px">8K line: ' + bits.join(" · ") + "</p>";
+  return bits;
 }
 
-function sourceForm(s, i, line) {
+// One of the profile's lines: a compact row, with its login and addresses only once Edit opens it.
+function sourceRow(s, i, line, open) {
   const urls = (s.serverUrls || []).join("\\n");
-  return '<div class="card" data-src="' + i + '">' + lineFacts(line) + '<div class="grid">' +
+  const facts = [...lineFacts(line), s.type === "m3u" ? "M3U link" : "Xtream login"];
+  if (s.copyOf) facts.push('<span class="muted">added from your lines; saved when you click Save</span>');
+  return '<div class="lrow" data-src="' + i + '"><div class="row"><strong>' + esc(s.name || "Unnamed line") + '</strong><span class="muted small">' + facts.join(" · ") + "</span>" +
+    '<span class="lacts"><button class="b" data-editsrc aria-expanded="' + open + '">' + (open ? "Close" : "Edit") + '</button><button class="b" data-rm>Remove</button></span></div>' +
+    '<div class="lfields"' + (open ? "" : " hidden") + '><div class="grid">' +
     '<div><label>Name</label><input name="name" value="' + esc(s.name) + '"></div>' +
     '<div><label>Type</label><select name="type"><option value="xtream"' + (s.type === "xtream" ? " selected" : "") + '>Xtream login</option><option value="m3u"' + (s.type === "m3u" ? " selected" : "") + ">M3U link</option></select></div>" +
     '<div><label>Username</label><input name="username" value="' + esc(s.username) + '"></div>' +
@@ -248,41 +257,47 @@ function sourceForm(s, i, line) {
     '<label>Server URLs (Xtream, one per line, backups after the main one)</label><textarea name="serverUrls" rows="2">' + esc(urls) + "</textarea>" +
     '<label>M3U playlist URL</label><input name="m3uUrl" value="' + esc(s.m3uUrl) + '">' +
     '<label>Guide (XMLTV) URL, optional</label><input name="epgUrl" value="' + esc(s.epgUrl) + '">' +
-    '<p class="muted small">Package sorter link: set it for this line on the Lines page.</p><input type="hidden" name="sorterUrl" value="' + esc(s.sorterUrl) + '">' +
-    '<input type="hidden" name="id" value="' + esc(s.id) + '"><input type="hidden" name="copyOf" value="' + esc(s.copyOf) + '">' +
-    '<p><button class="b" data-rm>Remove source</button>' + (s.copyOf ? ' <span class="muted small">Added from your lines; saved when you click Save.</span>' : "") + "</p></div>";
+    '<p class="muted small" style="margin-bottom:0">Package sorter link: set it for this line on the Lines page.</p><input type="hidden" name="sorterUrl" value="' + esc(s.sorterUrl) + '">' +
+    '<input type="hidden" name="id" value="' + esc(s.id) + '"><input type="hidden" name="copyOf" value="' + esc(s.copyOf) + '"></div></div>';
 }
 
 // Who uses a line, for pickers and the Lines page.
 const usedByText = (l) => l.profiles.length ? "in " + l.profiles.map((x) => x.name).join(", ") : "not on a profile";
 
-// Add a line to the profile: one from the Lines page, or a new one.
-function addLineCard(draft, lines, panel) {
-  if (!lines) return '<div class="card muted small">Loading your lines…</div>';
-  const mine = new Set(draft.data.sources.map((s) => (s.username || "").toLowerCase()));
-  const active = [], other = [];
-  for (const l of lines.lines || []) {
-    if (mine.has(l.username.toLowerCase())) continue;
-    const opt = '<option value="' + esc(l.username) + '">' + esc(l.name + " · " + l.username + " · " + (l.daysLeft == null ? "status unknown" : l.daysLeft < 0 ? "expired" : plural(l.daysLeft, "day") + " left") + " · " + usedByText(l)) + "</option>";
-    (l.enabled === false || (l.daysLeft != null && l.daysLeft < 0) ? other : active).push(opt);
-  }
-  let html = '<div class="card"><h3 style="margin-top:0">Add a line</h3>';
-  if (active.length || other.length) {
-    html += '<div class="row"><select id="pickline" style="flex:1">' + active.join("") + (other.length ? '<optgroup label="Expired or disabled">' + other.join("") + "</optgroup>" : "") + "</select>" +
-      '<button class="b" id="useline">Add to this profile</button></div>' +
-      '<p class="muted small">Copies that line here with its login and details; nothing changes until you click Save. A line used by two profiles shares its screens.</p>';
-  } else html += '<p class="muted small">No other lines yet. Add the lines you have on the Lines page.</p>';
-  if (lines.configured && panel && !panel.error) {
+// The profile's lines, then a footer to add one: a line from the Lines page, or a new one from the panel.
+function linesCard(draft, lines, panel, lineOf, open, addTab) {
+  let html = '<div class="card"><div class="row" style="margin-bottom:10px"><h3 style="margin:0">Lines</h3><button class="b" id="adds" style="margin-left:auto">Enter a line by hand</button></div>';
+  html += draft.data.sources.length ? draft.data.sources.map((s, i) => sourceRow(s, i, lineOf(s), open.has(s.id))).join("") : '<p class="muted small">No lines on this profile yet. Add one below.</p>';
+  html += '<div class="addline"><h4 style="margin:0 0 8px">Add a line</h4>';
+  if (!lines) return html + '<p class="muted small">Loading your lines…</p></div></div>';
+  const canCreate = lines.configured && panel && !panel.error;
+  if (canCreate) html += '<div class="row" role="tablist" style="gap:8px;margin-bottom:10px">' + [["existing", "Use an existing line"], ["new", "Create a new line"]].map(([k, label]) =>
+    '<button class="b' + (k === addTab ? " p" : "") + '" role="tab" aria-selected="' + (k === addTab) + '" data-addtab="' + k + '">' + label + "</button>").join("") + "</div>";
+  if (!canCreate || addTab === "existing") {
+    const mine = new Set(draft.data.sources.map((s) => (s.username || "").toLowerCase()));
+    const active = [], other = [];
+    for (const l of lines.lines || []) {
+      if (mine.has(l.username.toLowerCase())) continue;
+      const opt = '<option value="' + esc(l.username) + '">' + esc(l.name + " · " + l.username + " · " + (l.daysLeft == null ? "status unknown" : l.daysLeft < 0 ? "expired" : plural(l.daysLeft, "day") + " left") + " · " + usedByText(l)) + "</option>";
+      (l.enabled === false || (l.daysLeft != null && l.daysLeft < 0) ? other : active).push(opt);
+    }
+    if (active.length || other.length) {
+      html += '<div class="row"><select id="pickline" aria-label="Line" style="flex:1 1 220px;width:auto;min-width:0">' + active.join("") + (other.length ? '<optgroup label="Expired or disabled">' + other.join("") + "</optgroup>" : "") + "</select>" +
+        '<button class="b" id="useline">Add to this profile</button></div>' +
+        '<p class="muted small">Copies that line here with its login and details; nothing changes until you click Save. A line used by two profiles shares its screens.</p>';
+    } else html += '<p class="muted small">No other lines yet. Add the lines you have on the Lines page.</p>';
+  } else {
     const months = (panel.months || [1, 3, 6, 12]).map((m) => '<option value="' + m + '">' + plural(m, "month") + "</option>").join("");
     const pkgs = (panel.packages || []).map((x) => '<option value="' + esc(x.id) + '">' + esc(x.name) + "</option>").join("");
-    html += '<h4 style="margin:14px 0 4px">Or create a new line</h4>' + (draft.id ?
+    html += draft.id ?
       '<div class="grid"><div><label>Package</label><select id="pnpkg">' + (pkgs || '<option value="">No packages from the panel</option>') + "</select></div>" +
       '<div><label>Length</label><select id="pnmon">' + months + "</select></div>" +
       '<div><label>Name in the profile</label><input id="pnname" value="8K line"></div></div>' +
       '<p><button class="b" id="pncreate">Create line</button> <span class="muted small">' + esc(panel.reseller.credits) + " credits left. Uses credits; the line is added to this profile right away.</span></p>"
-      : '<p class="muted small">Save the profile first, then you can create a new line for it here.</p>');
-  } else if (panel && panel.error) html += '<p class="small err">Panel: ' + esc(panel.error) + "</p>";
-  return html + '<div id="plmsg" class="small"></div></div>';
+      : '<p class="muted small">Save the profile first, then you can create a new line for it here.</p>';
+  }
+  if (panel && panel.error) html += '<p class="small err">Panel: ' + esc(panel.error) + "</p>";
+  return html + '<div id="plmsg" class="small"></div></div></div>';
 }
 
 async function renderProfiles(editId) {
@@ -401,7 +416,9 @@ function categoriesCard(draft, reported) {
 
 function editProfile(p) {
   const draft = JSON.parse(JSON.stringify(p));
-  let reported = {}, lines = null, panel = null;
+  let reported = {}, lines = null, panel = null, addTab = "existing";
+  // Lines whose details are open (by source id); the rest show as one row each.
+  const open = new Set();
   if (draft.id) api("/api/admin/profiles/" + draft.id + "/categories").then((r) => { reported = r.reported; collect(); paint(); }).catch(() => {});
   api("/api/admin/lines").then(async (l) => {
     if (l.configured) panel = await api("/api/admin/panel").catch((e) => ({ error: e.message }));
@@ -448,11 +465,25 @@ function editProfile(p) {
       '<option value="the-nook"' + (draft.data.splash === "the-nook" ? " selected" : "") + '>The Nook (Airbnb guests)</option></select>' +
       '<label><input type="checkbox" style="width:auto" id="popen"' + (draft.data.openOnStart ? " checked" : "") + '> Open when the TV turns on (each TV needs the Display over other apps permission once; its Settings page shows how)</label>' +
       '<label><input type="checkbox" style="width:auto" id="pusage"' + (draft.data.usageStats ? " checked" : "") + '> Usage stats (anonymous): the TVs report which screens and buttons get used, never what is watched or searched. Kept 30 days</label></div>' +
-      draft.data.sources.map((s, i) => sourceForm(s, i, lineOf(s))).join("") + addLineCard(draft, lines, panel) + guidesCard(draft.data) + debridCard(draft) + (draft.id ? '<div class="card" id="rd-api-key"></div>' : '<div class="card muted small">Save the profile to add a Real-Debrid API key.</div>') + categoriesCard(draft, reported) +
-      '<div class="row"><button class="b" id="adds">Add source</button><button class="b p" id="save">Save</button>' +
+      linesCard(draft, lines, panel, lineOf, open, addTab) + guidesCard(draft.data) + debridCard(draft) + (draft.id ? '<div class="card" id="rd-api-key"></div>' : '<div class="card muted small">Save the profile to add a Real-Debrid API key.</div>') + categoriesCard(draft, reported) +
+      '<div class="row"><button class="b p" id="save">Save</button>' +
       (draft.id ? '<button class="b" id="delp">Delete profile</button>' : "") + '<button class="b" id="back">Back</button><span id="perr" class="err"></span></div>';
     if (draft.id) mountRdApiKey(draft, $("#rd-api-key"));
-    $("#adds").onclick = () => { collect(); draft.data.sources.push({ id: crypto.randomUUID(), type: "xtream", name: "Line " + (draft.data.sources.length + 1) }); paint(); };
+    $("#adds").onclick = () => {
+      collect();
+      const id = crypto.randomUUID();
+      draft.data.sources.push({ id, type: "xtream", name: "Line " + (draft.data.sources.length + 1) });
+      open.add(id);
+      paint();
+    };
+    document.querySelectorAll("[data-editsrc]").forEach((b) => (b.onclick = () => {
+      const row = b.closest("[data-src]"), fields = row.querySelector(".lfields"), id = row.querySelector('[name="id"]').value;
+      fields.hidden = !fields.hidden;
+      if (fields.hidden) open.delete(id); else open.add(id);
+      b.textContent = fields.hidden ? "Edit" : "Close";
+      b.setAttribute("aria-expanded", String(!fields.hidden));
+    }));
+    document.querySelectorAll("[data-addtab]").forEach((b) => (b.onclick = () => { collect(); addTab = b.dataset.addtab; paint(); }));
     document.querySelectorAll("[data-rm]").forEach((b) => (b.onclick = () => { collect(); draft.data.sources.splice(+b.closest("[data-src]").dataset.src, 1); paint(); }));
     $("#back").onclick = () => renderProfiles();
     if ($("#rdoff")) $("#rdoff").onclick = async () => {
