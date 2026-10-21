@@ -59,7 +59,12 @@ data class DeviceConfig(
     val addons: List<AddonInfo>? = null,
     /** When the profile's membership ends (ms); null means no end. Past it, owned add-ons pause. */
     val membershipUntil: Long? = null,
+    /** Set while the portal has this TV locked; see [app.familytv.sync.TvLock]. */
+    val lock: DeviceLock? = null,
 )
+
+/** "Lock this TV": the message the TV shows full screen while it plays nothing. */
+data class DeviceLock(val message: String? = null)
 
 /** An add-on as the portal reports it: state is active, paused, available or not_offered. */
 data class AddonInfo(val id: String? = null, val name: String? = null, val state: String? = null)
@@ -76,6 +81,8 @@ data class HeartbeatResponse(
     val latestApp: LatestApp? = null,
     /** The profile's latest shared-progress change; past this TV's, another TV marked or paused something. */
     val progressSeq: Long? = null,
+    /** Same as [DeviceConfig.lock]; null means unlocked. */
+    val lock: DeviceLock? = null,
 )
 
 data class ReachResult(val url: String, val ok: Boolean, val status: Int?, val ms: Long?, val error: String?)

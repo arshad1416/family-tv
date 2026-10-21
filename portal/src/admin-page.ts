@@ -1,5 +1,5 @@
 // Single-file admin UI, served by the Worker. No build step, no external requests.
-import { DEFAULT_EXTRA_GUIDES, MASK } from "./model";
+import { DEFAULT_EXTRA_GUIDES, DEFAULT_LOCK_MESSAGE, MASK } from "./model";
 
 export const ADMIN_PAGE = /* html */ `<!doctype html>
 <html lang="en">
@@ -29,6 +29,7 @@ main{max-width:1000px;margin:0 auto;padding:16px}
 .acts select{flex:1 1 120px;width:auto;min-width:0}
 .danger-row{display:flex;justify-content:flex-end;margin-top:12px;padding-top:12px;border-top:1px solid var(--line)}
 button.b.danger{color:var(--bad);border-color:var(--bad)}
+.badge{padding:1px 8px;border:1px solid var(--bad);border-radius:999px;font-size:12px;font-weight:600;color:var(--bad)}
 button.b:disabled{opacity:.5;cursor:default}
 button.b{font:inherit;padding:7px 12px;border-radius:7px;border:1px solid var(--line);background:var(--card);color:var(--ink);cursor:pointer}
 button.p{background:var(--accent);border-color:var(--accent);color:#fff}
@@ -57,6 +58,7 @@ try { token = localStorage.getItem("ftv_admin"); } catch {}
 let tab = "devices", verdicts = {}, profiles = [];
 const DEFAULT_GUIDES = ${JSON.stringify(DEFAULT_EXTRA_GUIDES)};
 const MASK = ${JSON.stringify(MASK)};
+const DEFAULT_LOCK = ${JSON.stringify(DEFAULT_LOCK_MESSAGE)};
 
 async function api(path, opts = {}) {
   const res = await fetch(path, { ...opts, headers: { "content-type": "application/json", authorization: "Bearer " + token, ...(opts.headers || {}) } });
@@ -99,7 +101,7 @@ async function renderDevices() {
     const cls = v ? (v.severity >= 3 ? "bad" : v.severity >= 1 ? "warn" : "on") : online ? "on" : "";
     const playing = d.status && d.status.playing ? "Watching " + esc(d.status.playing.title) : "";
     const err = d.status && d.status.lastError ? '<span class="err">Last error: ' + esc(d.status.lastError) + "</span>" : "";
-    html += '<div class="card"><div class="row"><strong class="name' + (cls ? " s-" + cls : "") + '">' + esc(d.nickname) + '</strong><span class="muted small">' +
+    html += '<div class="card"><div class="row"><strong class="name' + (cls ? " s-" + cls : "") + '">' + esc(d.nickname) + "</strong>" + (d.lock_message ? '<span class="badge" title="' + esc(d.lock_message) + '">Locked</span>' : "") + '<span class="muted small">' +
       esc(d.manufacturer) + " " + esc(d.model) + " · " + appName(d) + " " + esc(d.app_version) + " · " + esc(d.profile_name) + " · seen " + ago(d.last_seen) +
       '</span><span style="margin-left:auto"><button class="b" data-open="' + esc(d.id) + '">Details</button></span></div>' +
       (playing || err ? '<div class="small" style="margin-top:6px">' + playing + " " + err + "</div>" : "") + guideLine(d.status && d.status.guide) +
@@ -167,7 +169,8 @@ async function openDevice(id, dev) {
   let html = '<div class="acts">' +
     '<fieldset><legend>Troubleshoot</legend><button class="b p" data-cmd="diagnose">Run check</button><button class="b" data-cmd="refresh">Reload channels</button>' +
     '<button class="b" data-cmd="clear_cache">Clear cache</button><button class="b" data-cmd="restart">Restart app</button></fieldset>' +
-    '<fieldset><legend>Manage</legend><button class="b" data-cmd="update">Update app</button><button class="b" data-cmd="message">Show a message</button></fieldset>' +
+    '<fieldset><legend>Manage</legend><button class="b" data-cmd="update">Update app</button><button class="b" data-cmd="message">Show a message</button>' +
+    '<button class="b" data-lock>' + (dev.lock_message ? "Unlock this TV" : "Lock this TV") + '</button><button class="b" data-cmd="uninstall">Uninstall</button></fieldset>' +
     '<fieldset><legend>Profile</legend><select id="mv-' + esc(id) + '" aria-label="Profile">' + popts + '</select><button class="b" data-move disabled>Change profile</button></fieldset></div>' +
     '<div class="small muted" id="cm-' + esc(id) + '"></div>' +
     '<div class="danger-row"><button class="b danger" data-del>Remove TV</button></div>';
@@ -183,12 +186,13 @@ async function openDevice(id, dev) {
       "<details><summary class=\\"small\\">Full report</summary><pre>" + esc(JSON.stringify(r.report, null, 2)) + "</pre></details></div>";
   }
   html += "<h4>Recent actions</h4>" + (commands.length ? commands.map((c) => '<div class="small">' + esc(c.type) + " · sent " + ago(c.created_at) + " · " +
-    (c.acked_at ? "done" : c.delivered_at ? "delivered" : "waiting for TV") + "</div>").join("") : '<p class="muted small">None.</p>');
+    esc(commandState(c)) + "</div>").join("") : '<p class="muted small">None.</p>');
   box.innerHTML = html;
   box.querySelectorAll("[data-cmd]").forEach((b) => (b.onclick = async () => {
     let payload = null;
     if (b.dataset.cmd === "message") { const t = prompt("Message to show on the TV"); if (!t) return; payload = { text: t }; }
     if (b.dataset.cmd === "restart" && !confirm("Restart the app on this TV?")) return;
+    if (b.dataset.cmd === "uninstall" && !confirm("Show the uninstall prompt on this TV? Someone at the TV has to press OK, and Family TV must be open on it.")) return;
     try { await api("/api/admin/devices/" + id + "/commands", { method: "POST", body: JSON.stringify({ type: b.dataset.cmd, payload }) });
       $("#cm-" + id).textContent = "Sent. The TV picks it up within a minute if it is on."; } catch (e) { $("#cm-" + id).textContent = e.message; }
   }));
@@ -199,10 +203,29 @@ async function openDevice(id, dev) {
       b.replaceWith(Object.assign(document.createElement("span"), { className: "small ok", textContent: "Done. The TVs reload within a minute." })); }
     catch (e) { $("#cm-" + id).textContent = e.message; }
   }));
+  box.querySelector("[data-lock]").onclick = async () => {
+    let body = { locked: false };
+    if (!dev.lock_message) {
+      const t = prompt("Lock this TV: it stops playing and shows this message until you unlock it.", DEFAULT_LOCK);
+      if (t === null) return;
+      body = { locked: true, lockMessage: t };
+    } else if (!confirm("Unlock this TV? It can play again within a minute.")) return;
+    try { await api("/api/admin/devices/" + id, { method: "PATCH", body: JSON.stringify(body) }); render(); }
+    catch (e) { $("#cm-" + id).textContent = e.message; }
+  };
   const move = box.querySelector("[data-move]");
   $("#mv-" + id).onchange = (e) => { move.disabled = e.target.value === dev.profile_id; };
   move.onclick = async () => { await api("/api/admin/devices/" + id, { method: "PATCH", body: JSON.stringify({ profileId: $("#mv-" + id).value }) }); render(); };
   box.querySelector("[data-del]").onclick = async () => { if (confirm("Remove this TV? It will show a new pairing code.")) { await api("/api/admin/devices/" + id, { method: "DELETE" }); render(); } };
+}
+
+// A queued action's progress under Recent actions, with what the TV answered when it matters.
+function commandState(c) {
+  if (!c.acked_at) return c.delivered_at ? "delivered" : "waiting for TV";
+  let r = null;
+  try { r = JSON.parse(c.result); } catch {}
+  if (r && r.error) return "failed: " + r.error;
+  return c.type === "uninstall" ? "Uninstall prompt shown" : "done";
 }
 
 // What the panel last said about a line, shown on its source card.

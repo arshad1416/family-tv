@@ -46,12 +46,17 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.tv.material3.Surface
 import androidx.tv.material3.SurfaceDefaults
+import androidx.tv.material3.Icon
 import androidx.tv.material3.Text
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.ui.text.style.TextAlign
 import app.familytv.BuildConfig
 import app.familytv.app
 import app.familytv.perf.Perf
 import app.familytv.start.OpenOnStart
 import app.familytv.sync.CommandRunner
+import app.familytv.sync.TvLock
 import kotlinx.coroutines.launch
 import java.util.Calendar
 
@@ -108,7 +113,12 @@ class MainActivity : ComponentActivity() {
                         val screen by vm.screen.collectAsState()
                         val browsing = screen is Screen.Ready && splash == null && dock.mode != "full"
                         SideEffect { Perf.browsing = browsing }
-                        when (val s = screen) {
+                        val lock = TvLock.message.collectAsState().value
+                        // Locked from the portal: nothing plays, and the home screen (with its previews) goes away.
+                        if (lock != null) {
+                            LockScreen(lock)
+                            LaunchedEffect(Unit) { dock.close() }
+                        } else when (val s = screen) {
                             Screen.Loading -> Box(Modifier.fillMaxSize()) // The startup video covers it; no text to flash.
                             is Screen.Pairing -> PairingScreen(s.code, s.unpaired)
                             is Screen.Syncing -> SyncingScreen(s)
@@ -167,6 +177,15 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         dock.close()
         super.onDestroy()
+    }
+}
+
+/** What a TV locked from the portal shows instead of everything else; see [TvLock]. */
+@Composable
+private fun LockScreen(message: String) = Centered {
+    Column(Modifier.widthIn(max = 720.dp).padding(48.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(20.dp)) {
+        Icon(Icons.Filled.Lock, contentDescription = null, Modifier.size(64.dp), tint = Tv.Muted)
+        Text(message, fontSize = 28.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
     }
 }
 

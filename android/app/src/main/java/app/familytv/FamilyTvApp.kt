@@ -21,6 +21,7 @@ import app.familytv.sync.CommandRunner
 import app.familytv.sync.NewEpisodes
 import app.familytv.sync.PlaybackStatus
 import app.familytv.sync.SyncWorker
+import app.familytv.sync.TvLock
 import app.familytv.trailer.MediaExtras
 import app.familytv.trakt.Trakt
 import app.familytv.usage.Usage
@@ -85,6 +86,7 @@ class FamilyTvApp : Application(), ImageLoaderFactory {
         CrashLog.last(this)?.let { (trace, at) -> PlaybackStatus.lastCrash = trace; PlaybackStatus.lastCrashAt = at }
         Usage.enabled = portal.cachedConfig?.profile?.usageStats == true
         ServerSwitch.init(this)
+        TvLock.init(this)
         registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
             override fun onActivityStarted(a: Activity) { started++; visits++ }
             override fun onActivityStopped(a: Activity) {
