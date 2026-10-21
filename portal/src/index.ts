@@ -824,7 +824,8 @@ async function adminPair(req: Request, env: Env) {
   if (!profile) throw new HttpError(404, "profile not found");
   const dev = await env.DB.prepare("SELECT id, pair_expires FROM devices WHERE pair_code = ?").bind(code).first<{ id: string; pair_expires: number }>();
   if (!dev || dev.pair_expires < Date.now()) throw new HttpError(404, "code not found or expired; check the TV screen");
-  await env.DB.prepare("UPDATE devices SET profile_id = ?, nickname = ?, pair_code = NULL, pair_expires = NULL WHERE id = ?")
+  // A TV left locked when its profile was deleted starts unlocked once it's paired again.
+  await env.DB.prepare("UPDATE devices SET profile_id = ?, nickname = ?, pair_code = NULL, pair_expires = NULL, lock_message = NULL WHERE id = ?")
     .bind(b.profileId, b.nickname.trim().slice(0, 60), dev.id)
     .run();
   return json({ deviceId: dev.id });

@@ -58,3 +58,19 @@ describe("Lock this TV", () => {
     expect(hb.commands.map((c) => c.type)).toEqual(["uninstall"]);
   });
 });
+
+describe("a re-paired TV", () => {
+  it("starts unlocked after its profile was deleted while it was locked", async () => {
+    const env = await setup();
+    await call(env, "admin", "PATCH", "/api/admin/devices/abc1", { locked: true });
+    await call(env, "admin", "DELETE", "/api/admin/profiles/aa");
+    const unpaired = await (await call(env, "tv-token", "GET", "/api/device/config")).json<{ paired: boolean; pairCode: string; lock?: unknown }>();
+    expect(unpaired.paired).toBe(false);
+    expect(unpaired.lock).toBeUndefined();
+    expect((await (await call(env, "tv-token", "POST", "/api/device/heartbeat", {})).json<{ lock: unknown }>()).lock).toBeNull();
+
+    await env.DB.prepare("INSERT INTO profiles (id, name, data_enc, created_at, updated_at) VALUES ('bb', 'bb', ?, 0, 0)").bind(await sealJson(KEY, { sources: [] })).run();
+    expect((await call(env, "admin", "POST", "/api/admin/pair", { code: unpaired.pairCode, profileId: "bb", nickname: "Lounge" })).status).toBe(200);
+    expect(await lockOf(env)).toEqual({ config: null, heartbeat: null });
+  });
+});
