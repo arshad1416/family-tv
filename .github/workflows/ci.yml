@@ -39,3 +39,5 @@ jobs:
         with:
           name: family-tv-apk
           path: android/app/build/outputs/apk/release/*.apk
+          # A check build only; releases publish their own APK. 90 days of these filled Actions storage.
+          retention-days: 3
