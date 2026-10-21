@@ -18,8 +18,9 @@ nav button.on{color:var(--ink);background:var(--bg)}
 main{max-width:1000px;margin:0 auto;padding:16px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:12px}
 .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
-.dot{flex:none;width:10px;height:10px;margin-right:2px;border-radius:50%;display:inline-block;background:var(--muted)}
-.dot.on{background:var(--ok)}.dot.warn{background:var(--warn)}.dot.bad{background:var(--bad)}
+.name{display:inline-flex;align-items:center;white-space:nowrap}
+.name::before{content:"";flex:0 0 10px;width:10px;height:10px;margin-right:8px;border-radius:50%;background:var(--muted)}
+.name.s-on::before{background:var(--ok)}.name.s-warn::before{background:var(--warn)}.name.s-bad::before{background:var(--bad)}
 .muted{color:var(--muted)}.small{font-size:13px}
 button.b{font:inherit;padding:7px 12px;border-radius:7px;border:1px solid var(--line);background:var(--card);color:var(--ink);cursor:pointer}
 button.p{background:var(--accent);border-color:var(--accent);color:#fff}
@@ -90,7 +91,7 @@ async function renderDevices() {
     const cls = v ? (v.severity >= 3 ? "bad" : v.severity >= 1 ? "warn" : "on") : online ? "on" : "";
     const playing = d.status && d.status.playing ? "Watching " + esc(d.status.playing.title) : "";
     const err = d.status && d.status.lastError ? '<span class="err">Last error: ' + esc(d.status.lastError) + "</span>" : "";
-    html += '<div class="card"><div class="row"><span class="dot ' + cls + '"></span><strong>' + esc(d.nickname) + '</strong><span class="muted small">' +
+    html += '<div class="card"><div class="row"><strong class="name' + (cls ? " s-" + cls : "") + '">' + esc(d.nickname) + '</strong><span class="muted small">' +
       esc(d.manufacturer) + " " + esc(d.model) + " · " + appName(d) + " " + esc(d.app_version) + " · " + esc(d.profile_name) + " · seen " + ago(d.last_seen) +
       '</span><span style="margin-left:auto"><button class="b" data-open="' + esc(d.id) + '">Details</button></span></div>' +
       (playing || err ? '<div class="small" style="margin-top:6px">' + playing + " " + err + "</div>" : "") + guideLine(d.status && d.status.guide) +
