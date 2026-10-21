@@ -54,7 +54,10 @@ class PortalClient(context: Context, private val baseUrl: String = BuildConfig.P
     }
 
     /** Forget this device (portal removed it); the next call registers again and shows a new code. */
-    fun reset() = prefs.edit().clear().apply()
+    fun reset() {
+        prefs.edit().clear().apply()
+        TvLock.apply(null)
+    }
 
     /**
      * The portal dropped this TV after it was set up (its token was rejected, or it was unpaired),
@@ -70,6 +73,8 @@ class PortalClient(context: Context, private val baseUrl: String = BuildConfig.P
             get("/api/device/config", DeviceConfig::class.java).also {
                 if (!it.paired) {
                     if (cachedConfig != null) unpaired = true
+                    // A lock belongs to the pairing: never cover the pairing code with it.
+                    TvLock.apply(null)
                 } else {
                     unpaired = false
                     cachedConfig = it
@@ -96,11 +101,16 @@ class PortalClient(context: Context, private val baseUrl: String = BuildConfig.P
     }
 
     suspend fun heartbeat(status: Map<String, Any?>): HeartbeatResponse =
-        post("/api/device/heartbeat", mapOf("appVersion" to BuildConfig.VERSION_NAME, "status" to status), HeartbeatResponse::class.java).also {
-            if (it.paired) {
-                prefs.edit().putLong("contactAt", System.currentTimeMillis()).apply()
-                TvLock.apply(it.lock)
+        try {
+            post("/api/device/heartbeat", mapOf("appVersion" to BuildConfig.VERSION_NAME, "status" to status), HeartbeatResponse::class.java).also {
+                if (it.paired) prefs.edit().putLong("contactAt", System.currentTimeMillis()).apply()
+                // Unpaired (paired false) unlocks as well.
+                TvLock.apply(if (it.paired) it.lock else null)
             }
+        } catch (e: PortalException) {
+            // 401: the portal removed this TV, and its lock with it.
+            if (e.code == 401) TvLock.apply(null)
+            throw e
         }
 
     suspend fun ack(commandId: String, result: Any?) {
