@@ -22,6 +22,14 @@ main{max-width:1000px;margin:0 auto;padding:16px}
 .name::before{content:"";flex:0 0 10px;width:10px;height:10px;margin-right:8px;border-radius:50%;background:var(--muted)}
 .name.s-on::before{background:var(--ok)}.name.s-warn::before{background:var(--warn)}.name.s-bad::before{background:var(--bad)}
 .muted{color:var(--muted)}.small{font-size:13px}
+.acts{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;margin-top:12px}
+.acts fieldset{margin:0;min-width:0;padding:6px 12px 12px;border:1px solid var(--line);border-radius:8px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;align-content:flex-start}
+.acts legend{padding:0 4px;font-size:13px;color:var(--muted)}
+.acts .b,.acts select,.danger-row .b{height:36px;padding-top:0;padding-bottom:0}
+.acts select{flex:1 1 120px;width:auto;min-width:0}
+.danger-row{display:flex;justify-content:flex-end;margin-top:12px;padding-top:12px;border-top:1px solid var(--line)}
+button.b.danger{color:var(--bad);border-color:var(--bad)}
+button.b:disabled{opacity:.5;cursor:default}
 button.b{font:inherit;padding:7px 12px;border-radius:7px;border:1px solid var(--line);background:var(--card);color:var(--ink);cursor:pointer}
 button.p{background:var(--accent);border-color:var(--accent);color:#fff}
 input,select,textarea{font:inherit;padding:7px 9px;border:1px solid var(--line);border-radius:7px;background:var(--bg);color:var(--ink);width:100%}
@@ -156,12 +164,13 @@ async function openDevice(id, dev) {
   if (box.innerHTML) { box.innerHTML = ""; return; }
   const { diagnostics, commands, suggestions } = await api("/api/admin/devices/" + id);
   const popts = profiles.map((x) => '<option value="' + esc(x.id) + '"' + (x.id === dev.profile_id ? " selected" : "") + ">" + esc(x.name) + "</option>").join("");
-  let html = '<div class="row" style="margin-top:10px">' +
-    '<button class="b p" data-cmd="diagnose">Run check</button><button class="b" data-cmd="refresh">Reload channels</button>' +
-    '<button class="b" data-cmd="clear_cache">Clear cache</button><button class="b" data-cmd="restart">Restart app</button>' +
-    '<button class="b" data-cmd="message">Show a message</button><button class="b" data-cmd="update">Update app</button>' +
-    '<select id="mv-' + esc(id) + '" style="width:auto">' + popts + '</select><button class="b" data-move>Change profile</button>' +
-    '<button class="b" data-del style="margin-left:auto">Remove TV</button></div><div class="small muted" id="cm-' + esc(id) + '"></div>';
+  let html = '<div class="acts">' +
+    '<fieldset><legend>Troubleshoot</legend><button class="b p" data-cmd="diagnose">Run check</button><button class="b" data-cmd="refresh">Reload channels</button>' +
+    '<button class="b" data-cmd="clear_cache">Clear cache</button><button class="b" data-cmd="restart">Restart app</button></fieldset>' +
+    '<fieldset><legend>Manage</legend><button class="b" data-cmd="update">Update app</button><button class="b" data-cmd="message">Show a message</button></fieldset>' +
+    '<fieldset><legend>Profile</legend><select id="mv-' + esc(id) + '" aria-label="Profile">' + popts + '</select><button class="b" data-move disabled>Change profile</button></fieldset></div>' +
+    '<div class="small muted" id="cm-' + esc(id) + '"></div>' +
+    '<div class="danger-row"><button class="b danger" data-del>Remove TV</button></div>';
   if (suggestions && suggestions.length) {
     html += "<h4>Suggestions from the last check</h4>" + suggestions.map((s, i) => '<div class="verdict s' + s.severity + '"><strong>' + esc(s.title) + "</strong><div>" + esc(s.detail) + "</div>" +
       (s.action ? '<p style="margin:6px 0 0"><button class="b" data-fix="' + i + '">' + esc(s.action.label) + "</button></p>" : "") + "</div>").join("");
@@ -190,7 +199,9 @@ async function openDevice(id, dev) {
       b.replaceWith(Object.assign(document.createElement("span"), { className: "small ok", textContent: "Done. The TVs reload within a minute." })); }
     catch (e) { $("#cm-" + id).textContent = e.message; }
   }));
-  box.querySelector("[data-move]").onclick = async () => { await api("/api/admin/devices/" + id, { method: "PATCH", body: JSON.stringify({ profileId: $("#mv-" + id).value }) }); render(); };
+  const move = box.querySelector("[data-move]");
+  $("#mv-" + id).onchange = (e) => { move.disabled = e.target.value === dev.profile_id; };
+  move.onclick = async () => { await api("/api/admin/devices/" + id, { method: "PATCH", body: JSON.stringify({ profileId: $("#mv-" + id).value }) }); render(); };
   box.querySelector("[data-del]").onclick = async () => { if (confirm("Remove this TV? It will show a new pairing code.")) { await api("/api/admin/devices/" + id, { method: "DELETE" }); render(); } };
 }
 
