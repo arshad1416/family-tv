@@ -76,13 +76,13 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
 private const val FAVOURITES = "Favourites"
-private const val ALL = "All"
+private const val ALL = "All Countries"
 private const val TV_GUIDE = "TV guide"
 
 /**
  * Live TV on the TV: a Category column, its countries (with channel counts), the channel list, and
  * at the right the focused channel's live preview over its guide ([GuideBox]). Both columns come from the provider's category names
- * ([LiveGenre], [liveCountry]); All, first, has every non-adult channel by country, so none is out of reach
+ * ([LiveGenre], [liveCountry]); All Countries, first, has every non-adult channel by country, so none is out of reach
  * whatever its category is called. Adult categories show only once the PIN is entered. TV guide, at the
  * foot of the Category column, opens the classic grid guide. Above them, "Recently watched" ([RecentStrip]).
  * The top bar's search searches channels.
@@ -119,7 +119,7 @@ private fun LiveBrowser(profile: Profile, onGuide: () -> Unit) {
     val favKeys = rememberFavouriteKeys(favs)
     val favChannels = rememberFavouriteChannels(favs, cats)
     val byGenre = remember(cats) { cats.groupBy { LiveGenre.of(it.name, isAdult(it)) } }
-    // All: every channel on the line by country, whatever its category says; adult ones keep their own genre.
+    // All Countries: every channel on the line by country, whatever its category says; adult ones keep their own genre.
     val allCats = remember(cats) { cats.filterNot(::isAdult) }
     val genres = buildList {
         if (allCats.isNotEmpty()) add(ALL)
@@ -167,7 +167,7 @@ private fun LiveBrowser(profile: Profile, onGuide: () -> Unit) {
             GlassColumnPanel(Modifier.width(200.gx).fillMaxHeight()) {
                 GlassLabel("Category")
                 // Leaving the column before the 300 ms rest cancels the pending pick, so the list never changes under focus.
-                LazyColumn(Modifier.weight(1f).onFocusChanged { if (!it.hasFocus) hoverGenre.value = null }, verticalArrangement = Arrangement.spacedBy(6.gx)) {
+                LazyColumn(Modifier.weight(1f).onFocusChanged { if (!it.hasFocus) hoverGenre.value = null }, verticalArrangement = Arrangement.spacedBy(6.gx), contentPadding = BUBBLE_ROOM) {
                     items(genres, key = { it }) { x ->
                         // Right goes to the chosen country, not whichever sits level with this genre.
                         GlassRowItem(x, x == g, { genre = x; country = null }, entryPoint(x == g).focusProperties { right = toCountry.orNearest }, onFocus = { hoverGenre.value = x })
@@ -176,8 +176,8 @@ private fun LiveBrowser(profile: Profile, onGuide: () -> Unit) {
                 }
             }
             GlassColumnPanel(Modifier.width(200.gx).fillMaxHeight()) {
-                GlassLabel("$g · Country")
-                LazyColumn(Modifier.weight(1f).onFocusChanged { if (!it.hasFocus) hoverCountry.value = null }, verticalArrangement = Arrangement.spacedBy(6.gx)) {
+                GlassLabel(if (g == ALL) "Country" else "$g · Country")
+                LazyColumn(Modifier.weight(1f).onFocusChanged { if (!it.hasFocus) hoverCountry.value = null }, verticalArrangement = Arrangement.spacedBy(6.gx), contentPadding = BUBBLE_ROOM) {
                     items(countries, key = { it }) { x ->
                         GlassRowItem(
                             x, x == c, { country = x; if (byCountry[x].orEmpty().isNotEmpty()) intoList++ },
@@ -287,25 +287,28 @@ private fun ChannelBrowser(
     val list: @Composable (Modifier) -> Unit = { m ->
         Column(m.glass(RoundedCornerShape(24.gx), Glass.Panel, Glass.PanelLine).onFocusChanged { inList = it.hasFocus }.padding(10.gx)) {
             header?.let { GlassLabel(it) }
-            when {
-                loading -> Text("Finding the channels…", fontSize = 15.gsp, color = Glass.Dim, modifier = Modifier.padding(12.gx))
-                channels.isEmpty() -> Text("No channels here.", fontSize = 15.gsp, color = Glass.Dim, modifier = Modifier.padding(12.gx))
-                else -> LazyColumn(state = rows, verticalArrangement = Arrangement.spacedBy(6.gx), contentPadding = PaddingValues(vertical = 2.dp)) {
-                    itemsIndexed(channels, key = { _, ch -> "${ch.sourceId}/${ch.streamId}" }) { i, ch ->
-                        ChannelRow(
-                            ch, ch.epgId?.let { progs[it] }.orEmpty(), minute, numbers = !side,
-                            favourite = Favourites.key(Kind.LIVE, ch.sourceId, ch.streamId) in favKeys,
-                            modifier = entryPoint(entry && i == 0)
-                                .then(if (arrival != null) landing(arrival, ch == shown) else Modifier)
-                                .then(if (leftTo != null) Modifier.focusProperties { left = leftTo.orNearest } else Modifier),
-                            onFocus = { focused = ch },
-                            onFavourite = { toggleFavourite(ctx, Kind.LIVE, ch.sourceId, ch.streamId, ch.name) },
-                        ) {
-                            onPick(i)
-                            away = backTo != null
-                            // The line's one connection goes to full screen.
-                            video.stop()
-                            playLive(ctx, ch.sourceId, ch.categoryId, 0, ch.streamId)
+            // A new category or country fades its channels in.
+            Box(Modifier.arriveFade(channels)) {
+                when {
+                    loading -> Text("Finding the channels…", fontSize = 15.gsp, color = Glass.Dim, modifier = Modifier.padding(12.gx))
+                    channels.isEmpty() -> Text("No channels here.", fontSize = 15.gsp, color = Glass.Dim, modifier = Modifier.padding(12.gx))
+                    else -> LazyColumn(state = rows, verticalArrangement = Arrangement.spacedBy(6.gx), contentPadding = BUBBLE_ROOM) {
+                        itemsIndexed(channels, key = { _, ch -> "${ch.sourceId}/${ch.streamId}" }) { i, ch ->
+                            ChannelRow(
+                                ch, ch.epgId?.let { progs[it] }.orEmpty(), minute, numbers = !side,
+                                favourite = Favourites.key(Kind.LIVE, ch.sourceId, ch.streamId) in favKeys,
+                                modifier = entryPoint(entry && i == 0)
+                                    .then(if (arrival != null) landing(arrival, ch == shown) else Modifier)
+                                    .then(if (leftTo != null) Modifier.focusProperties { left = leftTo.orNearest } else Modifier),
+                                onFocus = { focused = ch },
+                                onFavourite = { toggleFavourite(ctx, Kind.LIVE, ch.sourceId, ch.streamId, ch.name) },
+                            ) {
+                                onPick(i)
+                                away = backTo != null
+                                // The line's one connection goes to full screen.
+                                video.stop()
+                                playLive(ctx, ch.sourceId, ch.categoryId, 0, ch.streamId)
+                            }
                         }
                     }
                 }
@@ -322,7 +325,7 @@ private fun ChannelBrowser(
             list(Modifier.weight(1f).fillMaxHeight())
             Column(Modifier.width(400.gx).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(14.gx)) {
                 preview(Modifier.fillMaxWidth().height(225.gx))
-                if (shown != null) GuideBox(shown, shown.epgId?.let { progs[it] }.orEmpty(), Modifier.fillMaxWidth().weight(1f))
+                if (shown != null) GuideBox(shown, shown.epgId?.let { progs[it] }.orEmpty(), Modifier.fillMaxWidth().weight(1f).arriveFade(shown, from = 0.35f, rise = false))
             }
         }
     }
@@ -436,7 +439,7 @@ private fun ChannelRow(
     onFavourite: () -> Unit,
     onClick: () -> Unit,
 ) {
-    FocusBox(onClick = onClick, onLongClick = onFavourite, onFocus = onFocus, lift = Lift.Glow, color = Color.Transparent, shape = RoundedCornerShape(14.gx), modifier = modifier.fillMaxWidth()) {
+    FocusBox(onClick = onClick, onLongClick = onFavourite, onFocus = onFocus, lift = Lift.Glow, scale = BUBBLE_SCALE, color = Color.Transparent, shape = RoundedCornerShape(14.gx), modifier = modifier.fillMaxWidth()) {
         Row(Modifier.padding(horizontal = 12.gx, vertical = 8.gx), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.gx)) {
             if (numbers) Text("${c.num}", fontSize = 15.gsp, color = Glass.Dim, maxLines = 1, softWrap = false, modifier = Modifier.width(54.gx))
             Box(Modifier.size(54.gx, 32.gx).clip(RoundedCornerShape(8.gx)).background(Glass.Raised), contentAlignment = Alignment.Center) {
