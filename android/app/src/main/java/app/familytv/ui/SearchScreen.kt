@@ -94,6 +94,7 @@ fun SearchScreen(vm: MainViewModel, profile: Profile) {
     val favs = rememberFavourites()
     val favKeys = rememberFavouriteKeys(favs)
     val showFavs = ShowFavourites(rememberFavouriteShowRows(favs))
+    val openShowMenu = rememberShowMenu(profile)
     val shows = remember(results.series) { groupSeries(results.series) }
     val films = remember(results.movies) { groupMovies(results.movies) }
     val progress = rememberProgress()
@@ -156,7 +157,7 @@ fun SearchScreen(vm: MainViewModel, profile: Profile) {
                             PosterCard(
                                 g.title, g.poster, entryPoint(nav.back == g.key),
                                 favourite = on,
-                                onFavourite = { toggleShowFavourite(ctx, g, on) },
+                                onFavourite = { toggleShowFavourite(ctx, g, on) }, onMenu = { openShowMenu(g, on) },
                             ) { Usage.log(Usage.Action.SEARCH_PICK, i); nav.open = g }
                         }
                     }

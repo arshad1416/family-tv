@@ -138,9 +138,10 @@ internal fun VodCard(item: VodItem, marks: VodMarks, modifier: Modifier, width: 
             val g = item.g
             val on = marks.showFavs.has(g)
             val badge = remember(g) { SeriesTitles.qualityBadge(g.copies.map { it.name }) }
+            val menu = rememberShowMenu(marks.profile)
             PosterCard(
                 g.title, g.poster, modifier, width = width,
-                favourite = on, onFavourite = { toggleShowFavourite(ctx, g, on) },
+                favourite = on, onFavourite = { toggleShowFavourite(ctx, g, on) }, onMenu = { menu(g, on) },
                 progress = bar, newBadge = g.hasNew(marks.newKeys), newCount = g.newCount(marks.newKeys),
                 badge = badge, caption = caption, fullName = continuing,
             ) { onOpen(); nav?.open = g }

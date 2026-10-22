@@ -354,6 +354,7 @@ private fun HomePage(vm: MainViewModel, profile: Profile, onNavigate: (Page) -> 
     val favMovies = rememberFavouriteMovies(favs, movieCats)
     val favSeries = rememberFavouriteSeries(favs, seriesCats)
     val showFavs = ShowFavourites(rememberFavouriteShowRows(favs))
+    val openShowMenu = rememberShowMenu(profile)
     val favRow: List<Pair<String, Any>> = remember(favs, favChannels, favMovies, favSeries) {
         val byKey = HashMap<String, Pair<String, Any>>()
         favChannels.forEach { val k = Favourites.key(Kind.LIVE, it.sourceId, it.streamId); byKey[k] = k to it }
@@ -419,7 +420,7 @@ private fun HomePage(vm: MainViewModel, profile: Profile, onNavigate: (Page) -> 
                                 )
                                 is SeriesGroup -> PosterCard(
                                     x.title, x.poster, entryPoint(entry), favourite = true, newBadge = x.hasNew(newKeys), newCount = x.newCount(newKeys),
-                                    onFavourite = { toggleShowFavourite(ctx, x, true) },
+                                    onFavourite = { toggleShowFavourite(ctx, x, true) }, onMenu = { openShowMenu(x, true) },
                                     onFocus = { hero.value = Hero(x.title, "Favourite series", x.plot) },
                                 ) { openedFromFavourites = true; nav.open = x }
                             }
@@ -457,7 +458,7 @@ private fun HomePage(vm: MainViewModel, profile: Profile, onNavigate: (Page) -> 
                             PosterCard(
                                 s.title, s.poster, entryPoint(if (firstRow < 0) !openedFromFavourites && nav.back == s.key else firstRow == 2 && i == 0),
                                 favourite = on,
-                                onFavourite = { toggleShowFavourite(ctx, s, on) },
+                                onFavourite = { toggleShowFavourite(ctx, s, on) }, onMenu = { openShowMenu(s, on) },
                                 onFocus = { hero.value = Hero(s.title, "Series", s.plot) },
                             ) { openedFromFavourites = false; nav.open = s }
                         }

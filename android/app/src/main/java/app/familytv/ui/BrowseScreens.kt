@@ -174,11 +174,12 @@ internal fun CategoryPosters(profile: Profile, cat: CategoryEntity, nav: SeriesN
             val newKeys = rememberNewEpisodeKeys()
             val rows by remember(cat) { dao.series(cat.sourceId, cat.categoryId) }.collectAsState(initial = emptyList())
             val series = remember(rows) { groupSeries(rows) }
+            val menu = rememberShowMenu(profile)
             PosterGrid(series, SeriesGroup::key, nav.back ?: lastCard) { g, mod, k ->
                 val on = showFavs.has(g)
                 PosterCard(
                     g.title, g.poster, mod, width = null,
-                    favourite = on, onFavourite = { toggleShowFavourite(ctx, g, on) },
+                    favourite = on, onFavourite = { toggleShowFavourite(ctx, g, on) }, onMenu = { menu(g, on) },
                     newBadge = g.hasNew(newKeys), newCount = g.newCount(newKeys),
                     onFocus = { lastCard = k },
                 ) { nav.open = g }
@@ -243,11 +244,12 @@ fun SeriesScreen(vm: MainViewModel, profile: Profile) {
     // One poster per show, however many languages the provider lists it in.
     val series = remember(showingFavourites, favSeries, inCategory) { groupSeries(if (showingFavourites) favSeries else inCategory) }
     if (cats.isEmpty()) return EmptyState("No series on this line.")
+    val menu = rememberShowMenu(profile)
     val card: @Composable (SeriesGroup, Modifier, String, Dp?) -> Unit = { g, modifier, key, width ->
         val on = showFavs.has(g)
         PosterCard(
             g.title, g.poster, modifier, width = width,
-            favourite = on, onFavourite = { toggleShowFavourite(ctx, g, on) },
+            favourite = on, onFavourite = { toggleShowFavourite(ctx, g, on) }, onMenu = { menu(g, on) },
             progress = if (key.startsWith("$CONTINUE_WATCHING/")) g.copies.firstNotNullOfOrNull { watchingBars[it.sourceId to it.seriesId] } ?: 0f else 0f,
             newBadge = g.hasNew(newKeys), newCount = g.newCount(newKeys),
             onFocus = { lastCard = key; focused = g },
