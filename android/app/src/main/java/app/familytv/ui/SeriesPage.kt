@@ -61,6 +61,7 @@ import app.familytv.data.Kind
 import app.familytv.data.Names
 import app.familytv.data.SeriesEntity
 import app.familytv.iptv.EpisodeGuide
+import app.familytv.iptv.QualityPref
 import app.familytv.iptv.SeriesTitles
 import app.familytv.iptv.Streams
 import app.familytv.iptv.XtreamParser
@@ -184,12 +185,7 @@ fun SeriesPage(profile: Profile, group: SeriesGroup, visible: List<CategoryEntit
     var chosenKey by rememberSaveable(group.key) { mutableStateOf<String?>(null) }
     val progress = rememberProgress()
     val quality by app.quality.flow(Kind.SERIES).collectAsState()
-    // The copy already being watched, else the family's language nearest Settings' Stream quality.
-    val defaultIndex = remember(copies, progress, quality) {
-        val watching = progress.values.filter { it.kind == ProgressKey.EPISODE }.sortedByDescending { it.updatedAt }
-            .firstNotNullOfOrNull { p -> copies.indexOfFirst { it.sourceId == p.sourceId && it.seriesId == p.itemId }.takeIf { it >= 0 } }
-        watching ?: languages.choose(copies, quality).coerceAtLeast(0)
-    }
+    val defaultIndex = remember(copies, progress, quality) { defaultCopy(copies, progress, languages, quality) }
     val v = copies.firstOrNull { it.key == chosenKey } ?: copies.getOrNull(defaultIndex) ?: group.first
     val labels = remember(copies) {
         SeriesTitles.variantLabels(copies.map { (it.lang ?: SeriesTitles.ORIGINAL) to SeriesTitles.parse(it.name).tags })
@@ -224,11 +220,7 @@ fun SeriesPage(profile: Profile, group: SeriesGroup, visible: List<CategoryEntit
     val providerSeason = info?.seasons?.firstOrNull { it.number == season }
     val seasonOverview = providerSeason?.overview ?: extras?.overview
     val seasonTrailer = providerSeason?.trailer ?: extras?.trailer
-    // The episode last left part-watched (where Continue watching leads), else the next one up.
-    val next = remember(episodes, progress) {
-        episodes.filter { ProgressRules.started(progressOf(it)) }.maxByOrNull { progressOf(it)?.updatedAt ?: 0 }
-            ?: EpisodeGuide.nextUp(episodes, { progressOf(it)?.watched == true }, { ProgressRules.started(progressOf(it)) })
-    }
+    val next = remember(episodes, progress) { nextEpisode(episodes, ::progressOf) }
     val seasonWatched = inSeason.isNotEmpty() && inSeason.all { progressOf(it)?.watched == true }
     val menus = LocalItemMenus.current
     fun mark(eps: List<XtreamParser.Episode>, watched: Boolean, what: String) {
@@ -379,7 +371,19 @@ fun SeriesPage(profile: Profile, group: SeriesGroup, visible: List<CategoryEntit
     }
 }
 
-private fun playEpisode(scope: CoroutineScope, ctx: android.content.Context, profile: Profile, v: SeriesEntity, e: XtreamParser.Episode) {
+/** The copy already being watched, else the family's language nearest Settings' Stream quality. */
+internal fun defaultCopy(copies: List<SeriesEntity>, progress: Map<String, ProgressEntity>, languages: SeriesLanguages, quality: QualityPref): Int {
+    val watching = progress.values.filter { it.kind == ProgressKey.EPISODE }.sortedByDescending { it.updatedAt }
+        .firstNotNullOfOrNull { p -> copies.indexOfFirst { it.sourceId == p.sourceId && it.seriesId == p.itemId }.takeIf { it >= 0 } }
+    return watching ?: languages.choose(copies, quality).coerceAtLeast(0)
+}
+
+/** The episode last left part-watched (where Continue watching leads), else the next one up. */
+internal fun nextEpisode(episodes: List<XtreamParser.Episode>, progressOf: (XtreamParser.Episode) -> ProgressEntity?): XtreamParser.Episode? =
+    episodes.filter { ProgressRules.started(progressOf(it)) }.maxByOrNull { progressOf(it)?.updatedAt ?: 0 }
+        ?: EpisodeGuide.nextUp(episodes, { progressOf(it)?.watched == true }, { ProgressRules.started(progressOf(it)) })
+
+internal fun playEpisode(scope: CoroutineScope, ctx: android.content.Context, profile: Profile, v: SeriesEntity, e: XtreamParser.Episode) {
     scope.launch {
         Streams(ctx.app.db, profile).episode(v.sourceId, e)?.let {
             play(ctx, it, "S${e.season} E${e.episode} ${EpisodeGuide.title(e)}", PlayItem.episode(v.sourceId, v.seriesId, v.name, e.season, e.episode))
