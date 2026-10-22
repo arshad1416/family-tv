@@ -300,7 +300,7 @@ internal fun GlassPill(
 @Composable
 internal fun GlassIconButton(icon: ImageVector, label: String, onClick: () -> Unit, modifier: Modifier = Modifier, selected: Boolean = false) {
     FocusBox(
-        onClick = onClick, color = if (selected) Glass.Selected else Glass.Raised, shape = CircleShape, scale = 1.06f, contentAlignment = Alignment.Center,
+        onClick = onClick, color = if (selected) Glass.Selected else Glass.Raised, shape = CircleShape, scale = 1.06f, lift = Lift.Glow, contentAlignment = Alignment.Center,
         modifier = modifier.size(48.gx).border(1.dp, Glass.LineSoft, CircleShape),
     ) {
         Icon(icon, contentDescription = label, tint = if (selected) Glass.OnSelected else Glass.Text, modifier = Modifier.size(22.gx))
