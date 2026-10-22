@@ -214,7 +214,8 @@ class GlassHomeTest {
         }
         home()
         tab("Live TV").performClick()
-        waitFor("ALL · COUNTRY")
+        waitFor("All Countries")
+        waitFor("COUNTRY")
         waitFor("Canada")
         waitFor("UK")
         waitFor("XY")

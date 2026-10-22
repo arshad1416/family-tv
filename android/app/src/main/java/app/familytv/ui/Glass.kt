@@ -273,13 +273,13 @@ internal fun GlassPill(
     onFocus: () -> Unit = {},
     slid: Boolean = false,
 ) {
-    // Backlog item 8: the chosen one is the filled pill, without a ring; focus is the ring plus a glow.
+    // Backlog item 8: the chosen one is the filled pill, without a ring; focus raises the glass bubble.
     // [slid]: a pill drawn behind the row (the tabs' slider) is the chosen one's fill instead.
     var focused by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(50)
     FocusBox(
         onClick = onClick, onFocus = onFocus, shape = shape, scale = 1.06f, lift = Lift.Glow, contentAlignment = Alignment.Center,
-        color = when { selected && slid -> Color.Transparent; selected -> Glass.Selected; focused -> Glass.Focus; else -> fill },
+        color = when { selected && slid -> Color.Transparent; selected -> Glass.Selected; else -> fill },
         // Focus on the slid pill keeps the slider showing through: a wash over it hid the label in the light look.
         outline = selected && slid,
         modifier = modifier.onFocusChanged { focused = it.isFocused }.then(if (border && !selected && !focused) Modifier.border(1.dp, Glass.LineSoft, shape) else Modifier),
@@ -300,7 +300,7 @@ internal fun GlassPill(
 @Composable
 internal fun GlassIconButton(icon: ImageVector, label: String, onClick: () -> Unit, modifier: Modifier = Modifier, selected: Boolean = false) {
     FocusBox(
-        onClick = onClick, color = if (selected) Glass.Selected else Glass.Raised, shape = CircleShape, scale = 1.06f, contentAlignment = Alignment.Center,
+        onClick = onClick, color = if (selected) Glass.Selected else Glass.Raised, shape = CircleShape, scale = 1.06f, lift = Lift.Glow, contentAlignment = Alignment.Center,
         modifier = modifier.size(48.gx).border(1.dp, Glass.LineSoft, CircleShape),
     ) {
         Icon(icon, contentDescription = label, tint = if (selected) Glass.OnSelected else Glass.Text, modifier = Modifier.size(22.gx))
@@ -505,7 +505,7 @@ internal fun GlassColumnPanel(modifier: Modifier = Modifier, content: @Composabl
     Column(modifier.glass(RoundedCornerShape(24.gx), Glass.Panel, Glass.PanelLine).padding(12.gx), verticalArrangement = Arrangement.spacedBy(6.gx)) { content() }
 }
 
-/** One selectable row in a [GlassColumnPanel]: white with dark text when chosen; focus is the ring plus a glow. */
+/** One selectable row in a [GlassColumnPanel]: a quiet glass fill and glow when chosen; focus raises the glass bubble. */
 @Composable
 internal fun GlassRowItem(
     text: String,
@@ -516,17 +516,17 @@ internal fun GlassRowItem(
     onFocus: () -> Unit = {},
 ) {
     FocusBox(
-        onClick = onClick, onFocus = onFocus, shape = RoundedCornerShape(14.gx), lift = Lift.Glow,
-        color = if (selected) Glass.Selected else Color.Transparent, modifier = modifier.fillMaxWidth(),
+        onClick = onClick, onFocus = onFocus, shape = RoundedCornerShape(14.gx), lift = Lift.Glow, scale = BUBBLE_SCALE,
+        color = Color.Transparent, selected = selected, modifier = modifier.fillMaxWidth(),
     ) { focused ->
         Row(Modifier.padding(horizontal = 14.gx, vertical = 11.gx), verticalAlignment = Alignment.CenterVertically) {
             Text(
                 text, fontSize = 16.gsp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
                 fontWeight = if (selected || focused) FontWeight.SemiBold else FontWeight.Normal,
-                color = when { selected -> Glass.OnSelected; focused -> Glass.Text; else -> Glass.Soft },
+                color = if (selected || focused) Glass.Text else Glass.Soft,
             )
             // A gap before the count, so a long label ellipsizes short of it.
-            count?.let { Spacer(Modifier.width(10.gx)); Text("$it", fontSize = 16.gsp, maxLines = 1, color = (if (selected) Glass.OnSelected else Glass.Text).copy(alpha = 0.6f)) }
+            count?.let { Spacer(Modifier.width(10.gx)); Text("$it", fontSize = 16.gsp, maxLines = 1, color = Glass.Text.copy(alpha = 0.6f)) }
         }
     }
 }

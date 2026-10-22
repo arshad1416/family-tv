@@ -1,5 +1,10 @@
 package app.familytv.ui
 
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -79,7 +84,7 @@ fun FamilyTvTheme(content: @Composable () -> Unit) {
 
 /**
  * The one focusable building block: D-pad focus paints it blue (or outlines it, for artwork),
- * or on the TV's glass pages ([LocalGlass]) rings it in white; OK clicks it. Lighter than tv-material's Surface, which matters in the guide grid.
+ * or on the TV's glass pages ([LocalGlass]) rings it in white, or raises rows and pills as a glass bubble ([Lift.Glow]); OK clicks it. Lighter than tv-material's Surface, which matters in the guide grid.
  * [onLongClick] runs on holding OK or pressing Menu on a remote, and on a long press on touch.
  */
 @OptIn(ExperimentalFoundationApi::class)
@@ -107,38 +112,56 @@ fun FocusBox(
     val memory = LocalFocusMemory.current
     val me = remember { FocusRequester() }
     val glass = LocalGlass.current
+    // Glass rows and pills take the raised glass bubble ([bubbleFace]) on focus, not a white ring.
+    val bubble = glass && lift == Lift.Glow
+    val still = LocalReducedMotion.current
     val bg = when {
+        bubble -> Glass.fill(color, focused = false, selected = false)
         glass -> Glass.fill(color, focused && !outline, selected)
         focused && !outline -> Tv.Accent
         selected -> Tv.Raised
         else -> color
     }
     val ring = when {
-        !focused -> null
+        !focused || bubble -> null
         glass -> Glass.Ring
         outline -> Tv.Accent
         else -> null
     }
-    // Glass only: a glow (pills) or a shadow and a slight tilt (posters) while focused; transforms only, nothing blurred.
+    // Glass only: a shadow (and the bubble) or a shadow and a slight tilt (posters) while focused. Transforms and
+    // opacity only, nothing blurred; the scale springs in, and none of it moves when the system asks for less motion.
     val lifted = if (glass) lift else Lift.None
-    val glowColor = if (lifted == Lift.Glow) Glass.Ring else Color.Black
+    val look = BubbleLook.current
+    val shade = if (lifted == Lift.Glow) look.shadow else Color.Black
+    val animated = scale != 1f || lifted != Lift.None
+    val lit = if (animated) animateFloatAsState(if (focused) 1f else 0f, if (still) snap() else tween(FOCUS_FADE_MS, easing = FastOutSlowInEasing), label = "lit") else null
+    val grow = if (animated) animateFloatAsState(if (focused && !still) scale else 1f, if (still) snap() else spring(dampingRatio = 0.8f, stiffness = 700f), label = "grow") else null
+    val chosen = if (bubble) animateFloatAsState(if (selected) 1f else 0f, if (still) snap() else tween(CHOSEN_FADE_MS), label = "chosen") else null
+    val accent = LocalGlassShell.current?.glow
     Box(
         modifier
             .then(
-                if (scale != 1f || lifted != Lift.None) Modifier.graphicsLayer {
-                    if (!focused) return@graphicsLayer
-                    scaleX = scale; scaleY = scale
-                    if (lifted == Lift.None) return@graphicsLayer
+                if (lit != null && grow != null) Modifier.graphicsLayer {
+                    scaleX = grow.value; scaleY = grow.value
+                    val l = lit.value
+                    if (lifted == Lift.None || l == 0f) return@graphicsLayer
                     this.shape = shape
-                    shadowElevation = (if (lifted == Lift.Glow) 10.dp else 18.dp).toPx()
-                    ambientShadowColor = glowColor; spotShadowColor = glowColor
-                    if (lifted == Lift.Tilt) { rotationX = 3f; cameraDistance = 16 * density }
+                    shadowElevation = (if (lifted == Lift.Glow) 12.dp else 18.dp).toPx() * l
+                    ambientShadowColor = shade; spotShadowColor = shade
+                    if (lifted == Lift.Tilt) { rotationX = 3f * l; cameraDistance = 16 * density }
                 } else Modifier,
             )
             .onFocusChanged { hasFocus = it.isFocused; if (it.isFocused) { onFocus(); memory?.focused(me) } }
             .then(if (memory != null) Modifier.focusRequester(me) else Modifier)
+            .then(
+                if (lit != null && chosen != null) Modifier.bubbleGlow(shape, { maxOf(BUBBLE_GLOW * lit.value, CHOSEN_GLOW * chosen.value) }, { accent?.value ?: Tv.Accent }) else Modifier,
+            )
             .clip(shape)
             .background(bg)
+            .then(
+                // No lit face over a slider (outline) or a white pill, which it would wash out.
+                if (lit != null && chosen != null) Modifier.bubbleFace(shape, look, face = !outline && bg != Glass.Selected, { lit.value }, { chosen.value }) else Modifier,
+            )
             .then(if (ring != null) Modifier.border(if (outline) 3.dp else 2.dp, ring, shape) else Modifier)
             .then(
                 if (onLongClick == null) {

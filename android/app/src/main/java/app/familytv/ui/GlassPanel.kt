@@ -136,7 +136,7 @@ internal fun rememberGlassWeather(): GlassWeather {
 /** "^ Weather and clocks" at the foot of the home screens; focusing or selecting it opens the panel. */
 @Composable
 internal fun WeatherHint(onOpen: () -> Unit, modifier: Modifier = Modifier) {
-    FocusBox(onClick = onOpen, onFocus = onOpen, color = Color.Transparent, shape = RoundedCornerShape(50), modifier = modifier) {
+    FocusBox(onClick = onOpen, onFocus = onOpen, lift = Lift.Glow, color = Color.Transparent, shape = RoundedCornerShape(50), modifier = modifier) {
         Row(Modifier.padding(horizontal = 12.gx, vertical = 4.gx), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.gx)) {
             Icon(Icons.Filled.KeyboardArrowDown, contentDescription = null, tint = Glass.Faint, modifier = Modifier.size(16.gx))
             Text("Weather and clocks", fontSize = 15.gsp, color = Glass.Faint, maxLines = 1)
@@ -327,7 +327,7 @@ internal fun hourDifference(zone: ZoneId, local: ZoneId, at: Instant): String {
 /** A labelled on/off switch in a pill: green track and white knob when on. */
 @Composable
 private fun GlassToggle(label: String, on: Boolean, onToggle: () -> Unit, modifier: Modifier = Modifier) {
-    FocusBox(onClick = onToggle, color = Color.Transparent, shape = RoundedCornerShape(50), modifier = modifier) {
+    FocusBox(onClick = onToggle, lift = Lift.Glow, color = Color.Transparent, shape = RoundedCornerShape(50), modifier = modifier) {
         Row(Modifier.padding(horizontal = 12.gx, vertical = 6.gx), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.gx)) {
             Text(label, fontSize = 15.gsp, fontWeight = FontWeight.SemiBold, maxLines = 1)
             Box(Modifier.size(48.gx, 28.gx).background(if (on) Color(0xFF3CCF6E) else Glass.Raised, RoundedCornerShape(50)).border(1.dp, Glass.LineSoft, RoundedCornerShape(50)).padding(3.gx)) {
@@ -499,7 +499,7 @@ private fun ColumnScope.ClockChooser(first: FocusRequester) {
 /** One country (or city) in the chooser: a tick box, its name and the city it shows. */
 @Composable
 private fun ChooserTile(title: String, detail: String, ticked: Boolean, modifier: Modifier, onClick: () -> Unit) {
-    FocusBox(onClick = onClick, color = Glass.Fill, shape = RoundedCornerShape(16.gx), modifier = modifier.fillMaxWidth()) {
+    FocusBox(onClick = onClick, lift = Lift.Glow, color = Glass.Fill, shape = RoundedCornerShape(16.gx), modifier = modifier.fillMaxWidth()) {
         Row(Modifier.padding(horizontal = 16.gx, vertical = 12.gx), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.gx)) {
             Box(Modifier.size(26.gx).background(if (ticked) Glass.Selected else Glass.Raised, RoundedCornerShape(8.gx)), contentAlignment = Alignment.Center) {
                 if (ticked) Text("✓", fontSize = 16.gsp, fontWeight = FontWeight.Bold, color = Glass.OnSelected)

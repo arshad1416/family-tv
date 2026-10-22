@@ -7,6 +7,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -66,6 +67,7 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.Icon
@@ -202,15 +204,16 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
         if (runCatching { pageFocus.requestFocus() }.isFailure) entry.focus()
     }
     val pages = rememberSaveableStateHolder()
-    // A new tab or Settings fades in over 200 ms (backlog item 15), opacity only; not when the system asks for less motion.
+    // A new tab or Settings fades in over 200 ms (backlog item 15), rising 10 px as it does; not when the system asks for less motion.
     val still = rememberReducedMotion()
     val pageKey = if (settings) "settings" else tab.name
     val fade = remember { Animatable(1f) }
+    val rise = with(LocalDensity.current) { 10.dp.toPx() }
     var firstPage by remember { mutableStateOf(true) }
     LaunchedEffect(pageKey) {
         if (firstPage || still) { firstPage = false; return@LaunchedEffect }
         fade.snapTo(0f)
-        fade.animateTo(1f, tween(200))
+        fade.animateTo(1f, tween(200, easing = FastOutSlowInEasing))
     }
     // The screensaver (backlog item 16): after 5 minutes without a key, unless a preview is playing.
     // Counted in delays, not read in composition, so a key press never recomposes the home.
@@ -225,6 +228,7 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
     }
     CompositionLocalProvider(
         LocalGlass provides true,
+        LocalReducedMotion provides still,
         LocalGlassScale provides rememberGlassScale(),
         LocalBigTiles provides profile.kidsOnly,
         LocalGlassShell provides shell,
@@ -260,7 +264,7 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
                     )
                     Spacer(Modifier.height(16.gx))
                 }
-                Box(Modifier.weight(1f).fillMaxWidth().focusRequester(pageFocus).restoresFocus(entry).graphicsLayer { alpha = fade.value }) {
+                Box(Modifier.weight(1f).fillMaxWidth().focusRequester(pageFocus).restoresFocus(entry).graphicsLayer { alpha = fade.value; translationY = (1f - fade.value) * rise }) {
                     pages.SaveableStateProvider(if (settings) "settings" else tab.name) {
                         if (settings) {
                             TrackScreen(Usage.Screen.SETTINGS)
