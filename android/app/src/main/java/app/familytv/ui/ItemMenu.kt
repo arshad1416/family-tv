@@ -20,6 +20,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -40,10 +41,14 @@ class ItemMenus {
     fun Host() {
         val menu = open ?: return
         val close = { open = null }
+        // Hold-OK opens the menu while OK is still down: its repeats and its release then reach the menu, and the
+        // release clicked the first option, so the menu shut at once. OK does nothing here until a fresh press.
+        val fresh = remember(menu) { booleanArrayOf(false) }
         Dialog(onDismissRequest = close) {
             // Scrolls, for long lists.
             Column(
-                Modifier.widthIn(min = 280.dp, max = 460.dp).background(Tv.Raised, Tv.Shape).verticalScroll(rememberScrollState()).padding(24.dp),
+                Modifier.onPreviewKeyEvent { e -> heldOk(e.nativeKeyEvent, fresh) }
+                    .widthIn(min = 280.dp, max = 460.dp).background(Tv.Raised, Tv.Shape).verticalScroll(rememberScrollState()).padding(24.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Text(menu.title, fontSize = 18.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -59,6 +64,19 @@ class ItemMenus {
 }
 
 val LocalItemMenus = compositionLocalOf { ItemMenus() }
+
+/**
+ * True (eat it) for an OK key event left over from the press that opened a menu: its repeats and its
+ * release. [fresh] turns true at the first new OK press, which goes through like any other.
+ */
+internal fun heldOk(k: android.view.KeyEvent, fresh: BooleanArray): Boolean {
+    if (fresh[0] || !isOk(k.keyCode)) return false
+    if (k.action == android.view.KeyEvent.ACTION_DOWN && k.repeatCount == 0) { fresh[0] = true; return false }
+    return true
+}
+
+private fun isOk(code: Int) =
+    code == android.view.KeyEvent.KEYCODE_DPAD_CENTER || code == android.view.KeyEvent.KEYCODE_ENTER || code == android.view.KeyEvent.KEYCODE_NUMPAD_ENTER
 
 suspend fun toast(ctx: Context, text: String) = withContext(Dispatchers.Main) {
     Toast.makeText(ctx.applicationContext, text, Toast.LENGTH_SHORT).show()
