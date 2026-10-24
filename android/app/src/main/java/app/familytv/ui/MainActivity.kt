@@ -36,6 +36,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -108,30 +109,34 @@ class MainActivity : ComponentActivity() {
               val menus = remember { ItemMenus() }
               CompositionLocalProvider(LocalFormFactor provides rememberFormFactor(), LocalItemMenus provides menus) {
                 Surface(modifier = Modifier.fillMaxSize(), colors = SurfaceDefaults.colors(containerColor = Tv.Bg, contentColor = Tv.Text)) {
-                    // Android 15 draws edge to edge; the host keeps clear of a phone's status and navigation bars.
-                    dock.Host {
-                        val screen by vm.screen.collectAsState()
-                        val browsing = screen is Screen.Ready && splash == null && dock.mode != "full"
-                        SideEffect { Perf.browsing = browsing }
-                        val lock = TvLock.message.collectAsState().value
-                        // Locked from the portal: nothing plays, and the home screen (with its previews) goes away.
-                        if (lock != null) {
-                            LockScreen(lock)
-                            LaunchedEffect(Unit) { dock.close() }
-                        } else when (val s = screen) {
-                            Screen.Loading -> Box(Modifier.fillMaxSize()) // The startup splash covers it; no text to flash.
-                            is Screen.Pairing -> PairingScreen(s.code, s.unpaired)
-                            is Screen.Syncing -> SyncingScreen(s)
-                            is Screen.Failed -> Centered {
-                                val retry = remember { FocusRequester() }
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Text(s.message, fontSize = 22.sp)
-                                    Spacer(Modifier.height(16.dp))
-                                    TvButton("Try again", { vm.stop(); vm.start() }, Modifier.focusRequester(retry))
-                                    LaunchedEffect(Unit) { runCatching { retry.requestFocus() } }
+                    // While the startup splash covers it, the app lays itself out underneath but draws nothing, so
+                    // the splash has the GPU to itself. Android 15 draws edge to edge; the host keeps clear of a
+                    // phone's status and navigation bars.
+                    Box(Modifier.fillMaxSize().drawWithContent { if (splash == null || splashSkipped) drawContent() }) {
+                        dock.Host {
+                            val screen by vm.screen.collectAsState()
+                            val browsing = screen is Screen.Ready && splash == null && dock.mode != "full"
+                            SideEffect { Perf.browsing = browsing }
+                            val lock = TvLock.message.collectAsState().value
+                            // Locked from the portal: nothing plays, and the home screen (with its previews) goes away.
+                            if (lock != null) {
+                                LockScreen(lock)
+                                LaunchedEffect(Unit) { dock.close() }
+                            } else when (val s = screen) {
+                                Screen.Loading -> Box(Modifier.fillMaxSize()) // The startup splash covers it; no text to flash.
+                                is Screen.Pairing -> PairingScreen(s.code, s.unpaired)
+                                is Screen.Syncing -> SyncingScreen(s)
+                                is Screen.Failed -> Centered {
+                                    val retry = remember { FocusRequester() }
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text(s.message, fontSize = 22.sp)
+                                        Spacer(Modifier.height(16.dp))
+                                        TvButton("Try again", { vm.stop(); vm.start() }, Modifier.focusRequester(retry))
+                                        LaunchedEffect(Unit) { runCatching { retry.requestFocus() } }
+                                    }
                                 }
+                                is Screen.Ready -> HomeScreen(vm, s.config)
                             }
-                            is Screen.Ready -> HomeScreen(vm, s.config)
                         }
                     }
                     menus.Host()

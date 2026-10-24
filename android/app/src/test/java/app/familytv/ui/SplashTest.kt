@@ -38,4 +38,15 @@ class SplashTest {
         assertEquals(R.raw.the_nook_splash_summer, Splash.choice(Splash.NOOK, 7).video)
         assertEquals(R.raw.family_tv_splash_spring, Splash.choice(null, 4).video)
     }
+
+    @Test
+    fun theRiveSplashRendersAt720pAndScalesUp() {
+        assertEquals(1.5f, Splash.riveScale(1920, 1080), 0f)
+        assertEquals(3f, Splash.riveScale(3840, 2160), 0f)
+        assertEquals(1f, Splash.riveScale(1280, 720), 0f)
+        // By the short side, so a phone held upright isn't drawn tiny.
+        assertEquals(1.5f, Splash.riveScale(1080, 2400), 0f)
+        // A smaller screen draws at its own size, never scaled down.
+        assertEquals(1f, Splash.riveScale(854, 480), 0f)
+    }
 }
