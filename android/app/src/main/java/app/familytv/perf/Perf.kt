@@ -40,7 +40,7 @@ object Perf {
     /** The last list refresh where one or more sources loaded: channels, movies and series saved (and searchable), not the extra guides. */
     @Volatile var listLoadMs: Long? = null
     @Volatile private var pssPeakKb = 0L
-    /** The app's own pages are showing (not the startup video, loading, pairing or full-screen video). */
+    /** The app's own pages are showing (not the startup splash, loading, pairing or full-screen video). */
     @Volatile var browsing = false
     internal val frames = FrameWindow()
     private val frameHandler by lazy { Handler(HandlerThread("perf").apply { start() }.looper) }

@@ -255,9 +255,10 @@ class GlassHomeTest {
         // The home's own start and stop, which full screen (another activity) brings.
         val owner = object : LifecycleOwner { override val lifecycle = LifecycleRegistry.createUnsafe(this) }
         val screen = owner.lifecycle.apply { currentState = Lifecycle.State.RESUMED }
+        val vm = MainViewModel(app)
         rule.setContent {
             CompositionLocalProvider(LocalLifecycleOwner provides owner) {
-                HomeScreen(MainViewModel(app), DeviceConfig(paired = true, profile = line))
+                HomeScreen(vm, DeviceConfig(paired = true, profile = line))
             }
         }
         waitFor("Live TV")
@@ -480,10 +481,11 @@ class GlassHomeTest {
 
     @Test
     fun settingsKeepsItsPlaceAfterAChoice() {
+        val vm = MainViewModel(app)
         rule.setContent {
             val menus = remember { ItemMenus() }
             CompositionLocalProvider(LocalItemMenus provides menus) {
-                HomeScreen(MainViewModel(app), DeviceConfig(paired = true, profile = Profile()))
+                HomeScreen(vm, DeviceConfig(paired = true, profile = Profile()))
                 menus.Host()
             }
         }

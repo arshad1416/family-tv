@@ -58,7 +58,16 @@ android {
         compose = true
         buildConfig = true
     }
-    packaging { resources.excludes += "/META-INF/{AL2.0,LGPL2.1}" }
+    // lifecycle 2.9's LiveData lint check (pulled in by Rive) crashes this AGP's lint; the app uses no LiveData.
+    lint { disable += "NullSafeMutableLiveData" }
+    packaging {
+        resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        // Rive ships only for the ARM chips TV boxes and phones use; on x86 (emulators) the drawn
+        // appearance switch and the startup videos stand in (RiveArt).
+        jniLibs.excludes += listOf("x86", "x86_64").flatMap { listOf("lib/$it/librive-android.so", "lib/$it/libc++_shared.so") }
+        // Compressed in the APK (10 MB stored, 3.7 MB compressed); a TV unpacks only its own chip's copy.
+        jniLibs.useLegacyPackaging = true
+    }
     testOptions {
         unitTests.isReturnDefaultValues = true
         unitTests.isIncludeAndroidResources = true
@@ -109,6 +118,8 @@ dependencies {
     implementation("com.google.code.gson:gson:2.11.0")
     implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("com.google.zxing:core:3.5.3")
+    // The appearance switch and startup splash are Rive animations (res/raw/*.riv).
+    implementation("app.rive:rive-android:10.4.5")
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.2")
 
     testImplementation("junit:junit:4.13.2")
