@@ -1,6 +1,7 @@
 package app.familytv.ui
 
 import android.net.Uri
+import android.os.Looper
 import android.view.SurfaceView
 import androidx.annotation.RawRes
 import androidx.compose.animation.core.animateFloatAsState
@@ -16,6 +17,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -49,6 +51,8 @@ object Splash {
     const val NOOK = "the-nook"
     /** The Rive splash draws its short side at most this many pixels and is scaled up to fill: a weak TV GPU keeps up at 720p, not 1080p. */
     const val RIVE_SHORT_SIDE_PX = 720
+    /** How far into the 6.8 s splash video the app starts drawing under it, so it's ready when the video ends: during the logo's hold, before the zoom out. */
+    const val VIDEO_LATE_MS = 4_500L
 
     /** How much the Rive splash is scaled up on a [widthPx] by [heightPx] screen: never down. */
     fun riveScale(widthPx: Int, heightPx: Int): Float = max(1f, min(widthPx, heightPx).toFloat() / RIVE_SHORT_SIDE_PX)
@@ -93,11 +97,11 @@ object Splash {
  * elsewhere the Rive animation, or the video where Rive can't run or the file won't play.
  */
 @Composable
-fun SplashAnimation(choice: Splash.Choice, skipped: Boolean, onSkip: () -> Unit, onDone: () -> Unit) {
+fun SplashAnimation(choice: Splash.Choice, skipped: Boolean, onSkip: () -> Unit, onDone: () -> Unit, onLate: () -> Unit) {
     val ctx = LocalContext.current
     var rive by remember { mutableStateOf(!ctx.isTelevision() && RiveArt.ready(ctx)) }
     if (rive) SplashRive(choice, skipped, onSkip, onDone, onFail = { rive = false })
-    else SplashVideo(choice.video, skipped, onSkip, onDone)
+    else SplashVideo(choice.video, skipped, onSkip, onDone, onLate)
 }
 
 /**
@@ -138,17 +142,21 @@ private fun Modifier.drawnSmall() = layout { measurable, c ->
 /**
  * Plays [video] over the app while it starts underneath, on a surface laid on top of the app's window
  * (a media overlay still sits under it on Fire OS 7): frames reach the screen however busy the app's
- * own thread is, and nothing the app draws can hide them. The surface shows nothing until its first frame, and every video ends on the
- * app's background colour. It doesn't fade with the app's layers, so on a skip it goes at once and
- * the frame's background fades as usual.
+ * own thread is, and nothing the app draws can hide them. The surface shows nothing until its first
+ * frame, and every video ends on the app's background colour. It doesn't fade with the app's layers,
+ * so on a skip it goes at once and the frame's background fades as usual. [onLate] runs at
+ * [Splash.VIDEO_LATE_MS], so the app can draw itself under the frame before the video ends.
  */
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 @Composable
-private fun SplashVideo(@RawRes video: Int, skipped: Boolean, onSkip: () -> Unit, onDone: () -> Unit) {
+private fun SplashVideo(@RawRes video: Int, skipped: Boolean, onSkip: () -> Unit, onDone: () -> Unit, onLate: () -> Unit) {
     val ctx = LocalContext.current
+    val late by rememberUpdatedState(onLate)
     val player = remember {
         ExoPlayer.Builder(ctx).build().apply {
             setMediaItem(MediaItem.fromUri(Uri.parse("android.resource://${ctx.packageName}/$video")))
             volume = 0f
+            createMessage { _, _ -> late() }.setLooper(Looper.getMainLooper()).setPosition(Splash.VIDEO_LATE_MS).send()
             prepare()
             playWhenReady = true
         }

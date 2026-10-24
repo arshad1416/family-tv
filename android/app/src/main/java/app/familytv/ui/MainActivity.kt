@@ -72,6 +72,8 @@ class MainActivity : ComponentActivity() {
     /** For the instrumented tests: keys are swallowed while the startup splash plays. */
     internal val splashing get() = splash != null
     private var splashSkipped by mutableStateOf(false)
+    /** The splash video is near its end, so the app draws itself under it. */
+    private var splashLate by mutableStateOf(false)
 
     // androidx marks this restricted, but overriding the platform method is fine.
     @SuppressLint("RestrictedApi")
@@ -110,9 +112,9 @@ class MainActivity : ComponentActivity() {
               CompositionLocalProvider(LocalFormFactor provides rememberFormFactor(), LocalItemMenus provides menus) {
                 Surface(modifier = Modifier.fillMaxSize(), colors = SurfaceDefaults.colors(containerColor = Tv.Bg, contentColor = Tv.Text)) {
                     // While the startup splash covers it, the app lays itself out underneath but draws nothing, so
-                    // the splash has the GPU to itself. Android 15 draws edge to edge; the host keeps clear of a
-                    // phone's status and navigation bars.
-                    Box(Modifier.fillMaxSize().drawWithContent { if (splash == null || splashSkipped) drawContent() }) {
+                    // the splash has the GPU to itself until near its end. Android 15 draws edge to edge; the host
+                    // keeps clear of a phone's status and navigation bars.
+                    Box(Modifier.fillMaxSize().drawWithContent { if (splash == null || splashSkipped || splashLate) drawContent() }) {
                         dock.Host {
                             val screen by vm.screen.collectAsState()
                             val browsing = screen is Screen.Ready && splash == null && dock.mode != "full"
@@ -154,7 +156,7 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                     }
-                    splash?.let { SplashAnimation(it, splashSkipped, onSkip = { splashSkipped = true }, onDone = { splash = null }) }
+                    splash?.let { SplashAnimation(it, splashSkipped, onSkip = { splashSkipped = true }, onDone = { splash = null }, onLate = { splashLate = true }) }
                 }
               }
             }
