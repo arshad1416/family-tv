@@ -218,7 +218,7 @@ internal fun VodTab(vm: MainViewModel, profile: Profile, kind: String, tab: Glas
         when {
             path.isNotEmpty() -> VodPage(profile, kind, path, movieCats, seriesCats, marks, pages, nav, open) { path = parentOf(path) }
             query.length >= 2 -> VodSearch(profile, kind, query, marks)
-            else -> VodHome(profile, kind, movieCats, seriesCats, marks, opened, home, open)
+            else -> VodHome(profile, kind, movieCats, seriesCats, marks, opened, home, open, carousel = tab == GlassTab.Home)
         }
     }
 }
@@ -235,6 +235,7 @@ private fun VodHome(
     opened: String?,
     list: LazyListState,
     open: (String) -> Unit,
+    carousel: Boolean = false,
 ) {
     val nav = LocalSeriesNav.current
     val movies = kind == Kind.MOVIE
@@ -276,23 +277,27 @@ private fun VodHome(
     // For you comes right after it, for the picked viewer.
     val rows = listOf(CONTINUE_WATCHING, FOR_YOU, "Favourites").mapNotNull { t -> (if (t == FOR_YOU) forYou.ifEmpty { null } else shelves[t])?.let { t to it } }
     val providers = remember(movieCats, seriesCats) { Provider.entries.filter { p -> movieCats.any { p.matches(it.name) } || seriesCats.any { p.matches(it.name) } } }
-    val groups = remember(movieCats, seriesCats) { LanguageGroup.entries.filter { g -> movieCats.any { g.matches(it.name) } || seriesCats.any { g.matches(it.name) } } }
-    val (regions, languages) = groups.partition { it.region }
+    val languages = remember(movieCats, seriesCats) { LanguageGroup.entries.filter { g -> movieCats.any { g.matches(it.name) } || seriesCats.any { g.matches(it.name) } } }
     // The category chip wall starts folded away behind "Show all categories".
     var allCats by rememberSaveable(kind) { mutableStateOf<Boolean?>(null) }
     val ctx = LocalContext.current
     val all by remember(kind) { ctx.app.db.catalog().categories(kind) }.collectAsState(initial = emptyList())
     val mine by ctx.app.myCategoryOrder.order.collectAsState()
     val hasAdult = remember(all, profile, mine) { adultCategories(all, profile, mine[kind].orEmpty()).isNotEmpty() }
+    // Home's carousel (TMDB's top titles the line has, and upcoming events); the highlights row stands in until it loads, or without it.
+    val liveCats = categories(profile, Kind.LIVE)
+    val slides by produceState(emptyList<Slide>(), carousel, movieCats, seriesCats, liveCats) {
+        if (carousel && (movieCats.isNotEmpty() || seriesCats.isNotEmpty())) value = runCatching { Featured.load(ctx.app, movieCats, seriesCats, liveCats) }.getOrDefault(emptyList())
+    }
 
     // Where focus lands: the poster whose page just closed, else the tile that opened the last page, else the first.
     val back = nav?.back
     val homeKeys = buildSet {
-        if (featured != null) add("hero")
+        if (featured != null || slides.isNotEmpty()) add("hero")
         if (shelves[newest] != null) add("newest")
         if (shelves["Top rated"] != null) add("top")
         providers.forEach { add("provider/${it.name}") }
-        groups.forEach { add("language/${it.name}") }
+        languages.forEach { add("language/${it.name}") }
         cats.forEach { add("cat/${it.chipKey}") }
         if (hasAdult) add("adult")
     }
@@ -316,7 +321,8 @@ private fun VodHome(
     LazyColumn(state = list, verticalArrangement = Arrangement.spacedBy(22.gx), contentPadding = PaddingValues(bottom = 40.dp)) {
         // Always the first item, so the highlights loading in after the rest don't land above the scroll position.
         item("hero") {
-            if (featured != null) Row(Modifier.fillMaxWidth().height(190.gx).padding(horizontal = FOCUS_ROOM), horizontalArrangement = Arrangement.spacedBy(20.gx)) {
+            if (slides.isNotEmpty()) HomeCarousel(slides, marks, Modifier.height(250.gx), entry = entryPoint(target == "hero"))
+            else if (featured != null) Row(Modifier.fillMaxWidth().height(190.gx).padding(horizontal = FOCUS_ROOM), horizontalArrangement = Arrangement.spacedBy(20.gx)) {
                 val (item, from) = featured
                 HeroCard(
                     item.title, listOf(if (movies) "Movie" else "TV show", from).joinToString("  ·  "), item.poster, HERO_MAIN, 2.2f, entryPoint(target == "hero"),
@@ -337,15 +343,12 @@ private fun VodHome(
                 ProvidersShelf(providers, target) { open("provider/${it.name}") }
             }
         }
-        // Languages and regions are separate rows (backlog item 26).
-        listOf("Languages" to languages, "Regions" to regions).forEach { (heading, pills) ->
-            if (pills.isNotEmpty()) item(heading) {
-                Column(verticalArrangement = Arrangement.spacedBy(10.gx)) {
-                    GlassHeading(heading, Modifier.padding(start = FOCUS_ROOM))
-                    PillRow {
-                        items(pills, key = { it.name }) { g ->
-                            BigPill(g.label, entryPoint(target == "language/${g.name}")) { open("language/${g.name}") }
-                        }
+        if (languages.isNotEmpty()) item("Languages") {
+            Column(verticalArrangement = Arrangement.spacedBy(10.gx)) {
+                GlassHeading("Languages", Modifier.padding(start = FOCUS_ROOM))
+                PillRow {
+                    items(languages, key = { it.name }) { g ->
+                        BigPill(g.label, entryPoint(target == "language/${g.name}")) { open("language/${g.name}") }
                     }
                 }
             }
