@@ -21,7 +21,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
@@ -32,6 +34,9 @@ import app.rive.runtime.kotlin.RiveAnimationView
 import app.rive.runtime.kotlin.controllers.RiveFileController
 import app.rive.runtime.kotlin.core.Fit
 import app.rive.runtime.kotlin.core.RiveEvent
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 
 /**
@@ -42,6 +47,11 @@ import kotlinx.coroutines.delay
  */
 object Splash {
     const val NOOK = "the-nook"
+    /** The Rive splash draws its short side at most this many pixels and is scaled up to fill: a weak TV GPU keeps up at 720p, not 1080p. */
+    const val RIVE_SHORT_SIDE_PX = 720
+
+    /** How much the Rive splash is scaled up on a [widthPx] by [heightPx] screen: never down. */
+    fun riveScale(widthPx: Int, heightPx: Int): Float = max(1f, min(widthPx, heightPx).toFloat() / RIVE_SHORT_SIDE_PX)
 
     /** In the order of the Rive file's `season` input (0 spring to 3 winter, 4 Halloween). */
     enum class Season { SPRING, SUMMER, FALL, WINTER, HALLOWEEN }
@@ -107,9 +117,18 @@ private fun SplashRive(choice: Splash.Choice, skipped: Boolean, onSkip: () -> Un
                     }.onFailure { post(onFail) }
                 }
             },
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxSize().drawnSmall(),
         )
     }
+}
+
+/** Lays the view out [Splash.riveScale] times smaller than the screen and scales it back up, so it renders fewer pixels. */
+private fun Modifier.drawnSmall() = layout { measurable, c ->
+    val s = Splash.riveScale(c.maxWidth, c.maxHeight)
+    val w = (c.maxWidth / s).roundToInt()
+    val h = (c.maxHeight / s).roundToInt()
+    val p = measurable.measure(Constraints.fixed(w, h))
+    layout(c.maxWidth, c.maxHeight) { p.placeWithLayer((c.maxWidth - w) / 2, (c.maxHeight - h) / 2) { scaleX = s; scaleY = s } }
 }
 
 /** Plays [video] over the app while it starts underneath. Every video ends on the app's background colour. */
