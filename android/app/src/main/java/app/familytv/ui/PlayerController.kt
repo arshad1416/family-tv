@@ -171,6 +171,10 @@ class PlayerController(
 
     // Overlay state, drawn by LiveOverlay / PlayerButtons / PlayerPanels in a ComposeView.
     private var overlayView: ComposeView? = null
+    /** The Rive loader over the video, or null for PlayerView's own spinner. */
+    private var loader: RiveLoader? = null
+    /** The Rive channel-change flash, or null (no Rive, or the system asks for less motion). */
+    private var channelFlash: RiveTransition? = null
     private var playing by mutableIntStateOf(0)
     private var banner by mutableStateOf<Int?>(null)
     private var guideOpen by mutableStateOf(false)
@@ -268,6 +272,7 @@ class PlayerController(
             override fun onPlayerError(error: PlaybackException) = onError(error)
             override fun onPlaybackStateChanged(state: Int) {
                 if (state == Player.STATE_BUFFERING) PlaybackStatus.bufferingEvents++
+                loader?.loading(state == Player.STATE_BUFFERING)
                 if (state == Player.STATE_READY) {
                     overlay.takeIf { it.tag == "error" }?.let { it.visibility = TextView.GONE; it.tag = null }
                     playingSource()?.let { ServerSwitch.played(it.id) }
@@ -320,6 +325,17 @@ class PlayerController(
             }
         }
         root.addView(overlayView, 1, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT)) // under the error text
+        // Rive's loader and channel flash in the video's own overlay frame, so they move with it into the guide's window.
+        view.overlayFrameLayout?.let { frame ->
+            loader = RiveLoader.create(activity)?.also {
+                view.setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER)
+                val w = (LOADER_DP * activity.resources.displayMetrics.density).toInt()
+                frame.addView(it.view, FrameLayout.LayoutParams(w, w * 100 / 160, Gravity.CENTER))
+            }
+            if (!reducedMotion(activity)) {
+                channelFlash = RiveTransition.create(activity)?.also { frame.addView(it.view, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT)) }
+            }
+        }
 
         if (vodUrl != null) {
             title = intent.getStringExtra(EXTRA_TITLE).orEmpty()
@@ -1066,8 +1082,14 @@ class PlayerController(
                 programmesAt = 0
             }
             index = i
+            flashChannel()
             playChannel()
         }
+    }
+
+    /** The channel-change flash over the video, full screen only; the tune never waits for it. */
+    private fun flashChannel() {
+        if (!host.docked) channelFlash?.go(RiveTransition.CHANNEL)
     }
 
     private fun zap(delta: Int) {
@@ -1080,6 +1102,7 @@ class PlayerController(
             index = (index + delta + channels.size) % channels.size
             steps++
         } while (key.isNotEmpty() && steps < channels.size && StreamQuality.channelKey(channels[index].name) == key)
+        flashChannel()
         playChannel(delayMs = 600)
     }
 
@@ -1125,6 +1148,9 @@ class PlayerController(
 
         /** How long the video takes to move into the guide's window and back; the guide's fades match it. */
         const val VIDEO_MOVE_MS = 300L
+
+        /** The Rive loader's width; its art is 160 by 100. */
+        private const val LOADER_DP = 144
 
         private val OK_KEYS = setOf(KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER)
         private val LIVE_KEYS = OK_KEYS + setOf(

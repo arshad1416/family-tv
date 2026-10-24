@@ -47,8 +47,10 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
@@ -61,15 +63,19 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.tv.material3.Icon
 import androidx.tv.material3.LocalContentColor
 import androidx.tv.material3.Text
@@ -165,15 +171,17 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
     var anyFocused by remember { mutableStateOf(false) }
     val focusBar = { runCatching { (if (settings) settingsFocus else tabFocus.getValue(tab)).requestFocus() } }
 
+    // Back changes page at once, never through the wipe below.
+    var instant by remember { mutableStateOf(false) }
     BackHandler(enabled = anyFocused && !barFocused && !barHidden.value) { Usage.log(Usage.Action.BACK); focusBar() }
-    BackHandler(enabled = barFocused && settings) { settings = false }
+    BackHandler(enabled = barFocused && settings) { instant = true; settings = false }
     BackHandler(enabled = barFocused && !settings && queries.getValue(tab).value.isNotEmpty()) { queries.getValue(tab).value = "" }
     // Back on another tab goes to Home; Back on Home asks before leaving (apps never see the Home button, so this is the one place to ask).
     var exitAsk by remember { mutableStateOf(false) }
     val onTabs = (barFocused || !anyFocused) && !settings && !barHidden.value && queries.getValue(tab).value.isEmpty()
     // Home's page keeps its place, so focus goes back to where it was there (else its first row).
     var backHome by remember { mutableIntStateOf(0) }
-    BackHandler(enabled = onTabs && tab != GlassTab.Home) { tab = GlassTab.Home; backHome++ }
+    BackHandler(enabled = onTabs && tab != GlassTab.Home) { instant = true; tab = GlassTab.Home; backHome++ }
     BackHandler(enabled = onTabs && tab == GlassTab.Home) { exitAsk = true }
     LaunchedEffect(Unit) { delay(50); focusBar() }
     LaunchedEffect(settings) { if (!settings && barFocused) { delay(50); focusBar() } }
@@ -204,16 +212,38 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
         if (runCatching { pageFocus.requestFocus() }.isFailure) entry.focus()
     }
     val pages = rememberSaveableStateHolder()
-    // A new tab or Settings fades in over 200 ms (backlog item 15), rising 10 px as it does; not when the system asks for less motion.
+    // A new tab or Settings comes in behind Rive's glass wipe: the tab's pill moves at once and the
+    // page swaps when the wipe covers it. Not on the first page, on Back, on the light look (the
+    // wipe is dark glass) or where Rive can't run: the page fades in over 200 ms there (backlog item
+    // 15), rising 10 px as it does. Neither when the system asks for less motion.
     val still = rememberReducedMotion()
+    val ctx = LocalContext.current
+    val wipe = remember { if (still) null else RiveTransition.create(ctx) }
+    var onPage by remember { mutableStateOf(tab to settings) }
     val pageKey = if (settings) "settings" else tab.name
     val fade = remember { Animatable(1f) }
     val rise = with(LocalDensity.current) { 10.dp.toPx() }
     var firstPage by remember { mutableStateOf(true) }
     LaunchedEffect(pageKey) {
+        val w = wipe?.takeIf { !instant && !firstPage && t < 0.5f }
+        instant = false
+        // While the wipe covers, its swap picks up this page too; once it reveals, a new page swaps at once.
+        if (w != null && w.phase != RiveTransition.Phase.REVEALING) {
+            if (w.phase == RiveTransition.Phase.COVERING || w.go(RiveTransition.PAGE) { onPage = tab to settings }) return@LaunchedEffect
+        }
+        onPage = tab to settings
         if (firstPage || still) { firstPage = false; return@LaunchedEffect }
         fade.snapTo(0f)
         fade.animateTo(1f, tween(200, easing = FastOutSlowInEasing))
+    }
+    // Down from the bar mid-wipe swaps the page now and moves into it, rather than into the page going away.
+    val focusManager = LocalFocusManager.current
+    var downIntoPage by remember { mutableIntStateOf(0) }
+    LaunchedEffect(downIntoPage) {
+        if (downIntoPage == 0) return@LaunchedEffect
+        withFrameNanos { }
+        withFrameNanos { }
+        focusManager.moveFocus(FocusDirection.Down)
     }
     // The screensaver (backlog item 16): after 5 minutes without a key, unless a preview is playing.
     // Counted in delays, not read in composition, so a key press never recomposes the home.
@@ -244,6 +274,11 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
                 when {
                     saver && e.type == KeyEventType.KeyDown -> { saver = false; idle.waking = true; true }
                     idle.waking -> { if (e.type == KeyEventType.KeyUp) idle.waking = false; true }
+                    e.key == Key.DirectionDown && e.type == KeyEventType.KeyDown && barFocused && wipe?.phase == RiveTransition.Phase.COVERING -> {
+                        onPage = tab to settings
+                        downIntoPage++
+                        true
+                    }
                     else -> false
                 }
             },
@@ -264,25 +299,30 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
                     )
                     Spacer(Modifier.height(16.gx))
                 }
-                Box(Modifier.weight(1f).fillMaxWidth().focusRequester(pageFocus).restoresFocus(entry).graphicsLayer { alpha = fade.value; translationY = (1f - fade.value) * rise }) {
-                    pages.SaveableStateProvider(if (settings) "settings" else tab.name) {
-                        if (settings) {
-                            TrackScreen(Usage.Screen.SETTINGS)
-                            GlassGlow(Color(0xFF7A8BA8))
-                            GlassDarkPage()
-                            SettingsScreen(vm, config)
-                        } else {
-                            TrackScreen(tab.usage)
-                            GlassGlow(tab.glow)
-                            when (tab) {
-                                GlassTab.Home -> VodTab(vm, profile, Kind.MOVIE, GlassTab.Home)
-                                GlassTab.Live -> LiveTab(vm, profile)
-                                GlassTab.Movies -> VodTab(vm, profile, Kind.MOVIE)
-                                GlassTab.Series -> VodTab(vm, profile, Kind.SERIES)
-                                GlassTab.Sports -> SportsTab(profile)
+                val (shownTab, shownSettings) = onPage
+                Box(Modifier.weight(1f).fillMaxWidth()) {
+                    Box(Modifier.fillMaxSize().focusRequester(pageFocus).restoresFocus(entry).graphicsLayer { alpha = fade.value; translationY = (1f - fade.value) * rise }) {
+                        pages.SaveableStateProvider(if (shownSettings) "settings" else shownTab.name) {
+                            if (shownSettings) {
+                                TrackScreen(Usage.Screen.SETTINGS)
+                                GlassGlow(Color(0xFF7A8BA8))
+                                GlassDarkPage()
+                                SettingsScreen(vm, config)
+                            } else {
+                                TrackScreen(shownTab.usage)
+                                GlassGlow(shownTab.glow)
+                                when (shownTab) {
+                                    GlassTab.Home -> VodTab(vm, profile, Kind.MOVIE, GlassTab.Home)
+                                    GlassTab.Live -> LiveTab(vm, profile)
+                                    GlassTab.Movies -> VodTab(vm, profile, Kind.MOVIE)
+                                    GlassTab.Series -> VodTab(vm, profile, Kind.SERIES)
+                                    GlassTab.Sports -> SportsTab(profile)
+                                }
                             }
                         }
                     }
+                    // Hidden and unfocusable while idle; TV remotes have no touch for it to take.
+                    if (wipe != null) AndroidView({ wipe.view }, Modifier.matchParentSize().clip(RoundedCornerShape(24.gx)))
                 }
                 // Its own strip under the page, so it never covers the bottom row; the strip stays while the panel is open.
                 if (!settings && !barHidden.value && darkPages.intValue == 0) {

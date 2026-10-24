@@ -1,5 +1,6 @@
 package app.familytv.ui
 
+import android.content.Context
 import android.provider.Settings
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.LinearEasing
@@ -43,10 +44,14 @@ private const val SLIDE_MS = 12_000
  * True when the system asks for less motion (animations off in Accessibility or Developer
  * options): pans and slides are skipped then, fades kept short.
  */
+internal fun reducedMotion(ctx: Context): Boolean =
+    runCatching { Settings.Global.getFloat(ctx.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f }.getOrDefault(false)
+
+/** [reducedMotion], read once for this composable. */
 @Composable
 internal fun rememberReducedMotion(): Boolean {
     val ctx = LocalContext.current
-    return remember { runCatching { Settings.Global.getFloat(ctx.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f }.getOrDefault(false) }
+    return remember { reducedMotion(ctx) }
 }
 
 /**
