@@ -58,11 +58,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.key.Key
@@ -90,7 +86,6 @@ import app.familytv.usage.TrackScreen
 import app.familytv.usage.Usage
 import app.familytv.user.Appearance
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 
 /** The TV's tabs, left to right. Each has its own glow and its own search. */
 enum class GlassTab(val label: String, val glow: Color, val usage: Usage.Screen, val searchHint: String) {
@@ -404,21 +399,24 @@ private fun GlassTopBar(
             }
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
-            // The chosen tab's white pill slides to the next one (backlog item 15): drawn behind the row, so nothing re-lays out.
+            // The chosen tab's white pill and the focus bubble glide to the next tab (backlog item 15): drawn behind the
+            // row, so nothing re-lays out.
             val spots = remember { mutableStateMapOf<GlassTab, Pair<Float, Float>>() }
-            val slider = rememberTabSlider(spots[tab].takeIf { !settings })
+            var focusedTab by remember { mutableStateOf<GlassTab?>(null) }
+            val glide = rememberTabGlide(spots[tab].takeIf { !settings }, focusedTab?.let { spots[it] }, chosenFocused = focusedTab == tab && !settings)
             // Each tab's Rive icon (its artboard is named after the label) plays its move on focus and a squash on OK; text only where Rive
             // can't run or the system asks for less motion.
             val ctx = LocalContext.current
             val icons = remember { RiveArt.ready(ctx) } && !LocalReducedMotion.current
             val light = LocalGlassPalette.current.text.luminance() < 0.5f
             val presses = remember { mutableStateMapOf<GlassTab, Int>() }
-            Row(Modifier.drawBehind(slider), horizontalArrangement = Arrangement.spacedBy(8.gx), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.drawBehind(glide), horizontalArrangement = Arrangement.spacedBy(8.gx), verticalAlignment = Alignment.CenterVertically) {
                 GlassTab.entries.forEach { t ->
                     val chosen = t == tab && !settings
                     GlassPill(
                         t.label, { presses[t] = (presses[t] ?: 0) + 1; onTab(t) },
-                        Modifier.focusRequester(tabFocus.getValue(t)).onPlaced { spots[t] = it.positionInParent().x to it.size.width.toFloat() },
+                        Modifier.focusRequester(tabFocus.getValue(t)).onPlaced { spots[t] = it.positionInParent().x to it.size.width.toFloat() }
+                            .onFocusChanged { if (it.isFocused) focusedTab = t else if (focusedTab == t) focusedTab = null },
                         selected = chosen, slid = true,
                         icon = if (!icons) null else { focused ->
                             // The art has room around the icon for its glow, so it overhangs the icon's box.
@@ -440,26 +438,6 @@ private fun GlassTopBar(
             }
         }
     }
-}
-
-/**
- * Draws the tabs' sliding pill at [spot] (x and width in the row, px), moving there over 200 ms,
- * or at once when the system asks for less motion; none while Settings is open.
- */
-@Composable
-private fun rememberTabSlider(spot: Pair<Float, Float>?): DrawScope.() -> Unit {
-    val color = Glass.Selected
-    val still = rememberReducedMotion()
-    val x = remember { Animatable(spot?.first ?: 0f) }
-    val w = remember { Animatable(spot?.second ?: 0f) }
-    var placed by remember { mutableStateOf(false) }
-    LaunchedEffect(spot) {
-        val (tx, tw) = spot ?: return@LaunchedEffect
-        if (still || !placed) { x.snapTo(tx); w.snapTo(tw); placed = true; return@LaunchedEffect }
-        launch { x.animateTo(tx, tween(200)) }
-        w.animateTo(tw, tween(200))
-    }
-    return { if (spot != null && placed) drawRoundRect(color, Offset(x.value, 0f), Size(w.value, size.height), CornerRadius(size.height / 2)) }
 }
 
 /** "Exit Family TV?" over the dimmed home: Stay (focused) or Exit. Back again stays; focus can't wander off it. */
