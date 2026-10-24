@@ -1,0 +1,63 @@
+name: Test build (TV app)
+
+# A signed build of any branch for sideloading to our own TVs with `adb install -r` (same key as the
+# release, so a TV keeps its pairing). It is kept for a day as a run artifact and never published:
+# TVs only update from release.yml's /tv feed. Give it the versionCode the TVs have now, so the next
+# real release (a higher code) still updates over it. The repo is public, so signed-in GitHub users
+# can download the artifact; it holds nothing the public /tv download doesn't.
+on:
+  workflow_dispatch:
+    inputs:
+      version_code:
+        description: versionCode of the build on the TVs now (0.2.N is 100 + N)
+        required: true
+
+concurrency: test-build
+
+permissions:
+  contents: read
+
+env:
+  PORTAL_URL: https://familytv.arshadkazi.ca
+  BWS_VERSION: 2.0.0
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Install bws
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/bws.zip" "https://github.com/bitwarden/sdk-sm/releases/download/bws-v${BWS_VERSION}/bws-x86_64-unknown-linux-gnu-${BWS_VERSION}.zip"
+          unzip -q "$RUNNER_TEMP/bws.zip" -d "$RUNNER_TEMP/bws"
+          echo "$RUNNER_TEMP/bws" >> "$GITHUB_PATH"
+      - name: Build and sign
+        env:
+          BWS_ACCESS_TOKEN: ${{ secrets.BWS_ACCESS_TOKEN }}
+          CODE: ${{ inputs.version_code }}
+          SHA: ${{ github.sha }}
+        run: |
+          [[ "$CODE" =~ ^[0-9]+$ ]] || { echo "version_code must be a number"; exit 1; }
+          export NAME="0.2.$((CODE - 100))-test.${SHA:0:7}"
+          bws run --server-url https://vault.bitwarden.eu -- bash -euo pipefail -c '
+            echo "::add-mask::$FAMILYTV_KEYSTORE_PASSWORD"
+            echo "$FAMILYTV_KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            export FAMILYTV_KEYSTORE="$RUNNER_TEMP/release.jks"
+            export FAMILYTV_KEY_PASSWORD="$FAMILYTV_KEYSTORE_PASSWORD" FAMILYTV_KEY_ALIAS=familytv
+            (cd android && ./gradlew --no-daemon assembleRelease \
+              -PportalUrl="$PORTAL_URL" -PversionCode="$CODE" -PversionName="$NAME")
+            rm -f "$RUNNER_TEMP/release.jks"
+            apksigner="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)/apksigner"
+            "$apksigner" verify --print-certs android/app/build/outputs/apk/release/app-release.apk | grep "CN=Family TV" > /dev/null
+          '
+          echo "Built $NAME (versionCode $CODE); not published" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: family-tv-test
+          path: android/app/build/outputs/apk/release/app-release.apk
+          retention-days: 1
