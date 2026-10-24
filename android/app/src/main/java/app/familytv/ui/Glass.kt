@@ -269,7 +269,7 @@ internal fun GlassPill(
     fontSize: TextUnit = 16.gsp,
     padH: Dp = 18.gx,
     padV: Dp = 8.gx,
-    icon: (@Composable () -> Unit)? = null,
+    icon: (@Composable (focused: Boolean) -> Unit)? = null,
     onFocus: () -> Unit = {},
     slid: Boolean = false,
 ) {
@@ -285,7 +285,7 @@ internal fun GlassPill(
         modifier = modifier.onFocusChanged { focused = it.isFocused }.then(if (border && !selected && !focused) Modifier.border(1.dp, Glass.LineSoft, shape) else Modifier),
     ) { _ ->
         Row(Modifier.padding(horizontal = padH, vertical = padV), verticalAlignment = Alignment.CenterVertically) {
-            icon?.let { it(); Spacer(Modifier.width(10.gx)) }
+            icon?.let { it(focused); Spacer(Modifier.width(10.gx)) }
             // Labels never wrap: one line, centred in the pill.
             Text(
                 text, fontSize = fontSize, maxLines = 1, softWrap = false, textAlign = TextAlign.Center,

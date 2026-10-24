@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -63,6 +64,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -236,6 +238,8 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
         fade.snapTo(0f)
         fade.animateTo(1f, tween(200, easing = FastOutSlowInEasing))
     }
+    // OK on a big glass card starts the shared press ripple over it (not with less motion).
+    val pressHost = with(LocalDensity.current) { remember { if (still) null else PressHost(120.dp.toPx(), 60.dp.toPx()) } }
     // Down from the bar mid-wipe swaps the page now and moves into it, rather than into the page going away.
     val focusManager = LocalFocusManager.current
     var downIntoPage by remember { mutableIntStateOf(0) }
@@ -265,6 +269,7 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
         LocalPageEntry provides entry,
         LocalGlassPalette provides palette,
         LocalContentColor provides palette.text,
+        LocalPress provides pressHost,
     ) {
         GlassBackground(shown) {
           // Any key resets the idle count; while the screensaver shows, the key that wakes it (down and up) goes no further.
@@ -338,6 +343,7 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
             ) {
                 WeatherPanel(weather, onClose = { panel = false })
             }
+            pressHost?.let { PressRipple(it, Modifier.fillMaxSize()) }
             if (exitAsk) {
                 val activity = LocalContext.current.findActivity()
                 ExitPrompt(onStay = { exitAsk = false; focusBar() }, onLeave = { activity?.finish() })
@@ -401,12 +407,25 @@ private fun GlassTopBar(
             // The chosen tab's white pill slides to the next one (backlog item 15): drawn behind the row, so nothing re-lays out.
             val spots = remember { mutableStateMapOf<GlassTab, Pair<Float, Float>>() }
             val slider = rememberTabSlider(spots[tab].takeIf { !settings })
+            // Each tab's Rive icon (its artboard is named after the label) plays its move on focus and a squash on OK; text only where Rive
+            // can't run or the system asks for less motion.
+            val ctx = LocalContext.current
+            val icons = remember { RiveArt.ready(ctx) } && !LocalReducedMotion.current
+            val light = LocalGlassPalette.current.text.luminance() < 0.5f
+            val presses = remember { mutableStateMapOf<GlassTab, Int>() }
             Row(Modifier.drawBehind(slider), horizontalArrangement = Arrangement.spacedBy(8.gx), verticalAlignment = Alignment.CenterVertically) {
                 GlassTab.entries.forEach { t ->
+                    val chosen = t == tab && !settings
                     GlassPill(
-                        t.label, { onTab(t) },
+                        t.label, { presses[t] = (presses[t] ?: 0) + 1; onTab(t) },
                         Modifier.focusRequester(tabFocus.getValue(t)).onPlaced { spots[t] = it.positionInParent().x to it.size.width.toFloat() },
-                        selected = t == tab && !settings, slid = true,
+                        selected = chosen, slid = true,
+                        icon = if (!icons) null else { focused ->
+                            // The art has room around the icon for its glow, so it overhangs the icon's box.
+                            Box(Modifier.size(22.gx), contentAlignment = Alignment.Center) {
+                                RiveTabIcon(t.label, focused, chosen, light, presses[t] ?: 0, Modifier.requiredSize(36.gx))
+                            }
+                        },
                     )
                 }
             }
@@ -417,7 +436,7 @@ private fun GlassTopBar(
             // Who's watching, when this TV has viewers; OK picks another.
             if (onViewers != null) {
                 Spacer(Modifier.weight(1f))
-                GlassPill(viewer, onViewers, fill = Glass.Raised, border = true, icon = { Icon(Icons.Filled.Person, contentDescription = null, modifier = Modifier.size(18.gx)) })
+                GlassPill(viewer, onViewers, fill = Glass.Raised, border = true, icon = { _ -> Icon(Icons.Filled.Person, contentDescription = null, modifier = Modifier.size(18.gx)) })
             }
         }
     }
