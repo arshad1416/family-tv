@@ -124,7 +124,7 @@ internal class RiveTransition private constructor(val view: RiveAnimationView) {
         }
         this.onCovered = onCovered
         phase = Phase.COVERING
-        view.postDelayed(coverLate, if (style == PAGE) PAGE_COVERED_BY_MS else CHANNEL_COVERED_BY_MS)
+        view.postDelayed(coverLate, if (style == CHANNEL) CHANNEL_COVERED_BY_MS else PAGE_COVERED_BY_MS)
         view.postDelayed(doneLate, DONE_BY_MS)
         return true
     }
@@ -147,10 +147,12 @@ internal class RiveTransition private constructor(val view: RiveAnimationView) {
     }
 
     companion object {
-        /** Style 0: the soft glass wipe, for a new page. */
+        /** Style 0: the soft dark-glass wipe, for a new page on the dark look. */
         const val PAGE = 0
         /** Style 1: the dim, scan-line flash and bloom, for a new channel. */
         const val CHANNEL = 1
+        /** Style 2: the light-glass wipe, for a new page on the light look; timed as [PAGE]. */
+        const val PAGE_LIGHT = 2
 
         /** Null where Rive can't run; the caller swaps straight away then. */
         fun create(ctx: Context): RiveTransition? = riveView(ctx, R.raw.family_tv_transition, TRANSITION, Fit.FILL)?.let(::RiveTransition)
