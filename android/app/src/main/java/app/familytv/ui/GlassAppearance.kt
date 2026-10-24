@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -24,6 +25,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.RoundRect
@@ -35,17 +37,22 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
+import app.familytv.R
 import app.familytv.user.Appearance
 import app.familytv.user.GlassPrefs
 import app.familytv.weather.Forecast
 import app.familytv.weather.Sun
+import app.rive.runtime.kotlin.RiveAnimationView
+import app.rive.runtime.kotlin.core.Fit
 import kotlinx.coroutines.delay
 import java.time.ZoneId
 
@@ -76,25 +83,35 @@ internal fun rememberLightness(appearance: Appearance, forecast: Forecast?): Flo
 /**
  * The sun/moon switch before Settings. OK opens a small Light / Auto / Dark picker under it (backlog
  * item 27): Up and Down choose, OK saves, Back closes it unchanged. The arrows never change the
- * setting, on the switch or off it. The knob slides in 0.3 s.
+ * setting, on the switch or off it. The knob slides in 0.3 s. It is the Rive animation
+ * ([RiveSwitch]) wherever Rive runs and the system doesn't ask for less motion, else drawn here.
  */
 @Composable
 internal fun AppearanceSwitch(value: Appearance, onChange: (Appearance) -> Unit, modifier: Modifier = Modifier) {
-    val pos by animateFloatAsState(value.ordinal / 2f, tween(300), label = "knob")
+    val ctx = LocalContext.current
+    val rive = remember { RiveArt.ready(ctx) } && !LocalReducedMotion.current
     var picking by remember { mutableStateOf(false) }
+    var focused by remember { mutableStateOf(false) }
     val self = remember { FocusRequester() }
-    Box {
+    Box(modifier.size(96.gx, 44.gx), contentAlignment = Alignment.Center) {
+        // The Rive art has room around the switch for its focus glow, so it overhangs the box.
+        if (rive) RiveSwitch(value, focused, Modifier.requiredSize(120.gx, 68.gx))
         FocusBox(
             onClick = { picking = true },
-            modifier = modifier
-                .size(96.gx, 44.gx)
+            modifier = Modifier
+                .fillMaxSize()
                 .focusRequester(self)
+                .onFocusChanged { focused = it.isFocused }
                 .semantics { contentDescription = "Appearance: ${value.label}" },
             color = Color.Transparent,
             outline = true,
             shape = RoundedCornerShape(50),
+            ring = !rive,
         ) {
-            Canvas(Modifier.fillMaxSize()) { drawSwitch(pos) }
+            if (!rive) {
+                val pos by animateFloatAsState(value.ordinal / 2f, tween(300), label = "knob")
+                Canvas(Modifier.fillMaxSize()) { drawSwitch(pos) }
+            }
         }
         if (picking) {
             val close = { picking = false; runCatching { self.requestFocus() }; Unit }
@@ -102,6 +119,38 @@ internal fun AppearanceSwitch(value: Appearance, onChange: (Appearance) -> Unit,
         }
     }
 }
+
+/**
+ * The Rive switch (family_tv_appearance_switch.riv, state machine "Switch": number "mode" 0 Light,
+ * 1 Auto, 2 Dark and boolean "focused"). Its stars and clouds drift for ever, so it runs only while
+ * [focused] and for a moment after a change, then holds its last frame: the home's scrolling never
+ * shares the screen with it.
+ */
+@Composable
+private fun RiveSwitch(value: Appearance, focused: Boolean, modifier: Modifier) {
+    var view by remember { mutableStateOf<RiveAnimationView?>(null) }
+    AndroidView(
+        factory = { c ->
+            RiveAnimationView(c).apply {
+                isFocusable = false
+                setRiveResource(R.raw.family_tv_appearance_switch, stateMachineName = SWITCH, fit = Fit.CONTAIN)
+                view = this
+            }
+        },
+        modifier = modifier,
+    )
+    LaunchedEffect(view, value, focused) {
+        val v = view ?: return@LaunchedEffect
+        v.play(SWITCH, isStateMachine = true)
+        v.setNumberState(SWITCH, "mode", value.ordinal.toFloat())
+        v.setBooleanState(SWITCH, "focused", focused)
+        if (!focused) { delay(SWITCH_SETTLE_MS); v.pause() }
+    }
+}
+
+private const val SWITCH = "Switch"
+/** Long enough for the knob's slide and the focus glow's fade to finish before the switch holds still. */
+private const val SWITCH_SETTLE_MS = 700L
 
 /** The picker's three rows, the current one focused first. */
 @Composable

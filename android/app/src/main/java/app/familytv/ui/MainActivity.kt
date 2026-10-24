@@ -66,16 +66,16 @@ class MainActivity : ComponentActivity() {
     private val exit = HoldBackToExit(this)
     /** Phones and tablets: the player at the top of this screen (TV uses [PlayerActivity]). */
     val dock = DockedPlayer(this)
-    /** The startup video while it shows (see [SplashVideo]). */
-    private var splash by mutableStateOf<Int?>(null)
-    /** For the instrumented tests: keys are swallowed while the startup video plays. */
+    /** The startup splash while it shows (see [SplashAnimation]). */
+    private var splash by mutableStateOf<Splash.Choice?>(null)
+    /** For the instrumented tests: keys are swallowed while the startup splash plays. */
     internal val splashing get() = splash != null
     private var splashSkipped by mutableStateOf(false)
 
     // androidx marks this restricted, but overriding the platform method is fine.
     @SuppressLint("RestrictedApi")
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        // Any key skips the startup video; none reaches the app until the video has gone.
+        // Any key skips the startup splash; none reaches the app until the splash has gone.
         if (splash != null) {
             if (event.action == KeyEvent.ACTION_UP) splashSkipped = true
             return true
@@ -97,7 +97,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         Perf.activityCreated()
         Perf.watchFrames(this)
-        if (savedInstanceState == null) splash = Splash.video(app.portal.cachedConfig?.profile?.splash, Calendar.getInstance().get(Calendar.MONTH) + 1)
+        if (savedInstanceState == null) splash = Splash.choice(app.portal.cachedConfig?.profile?.splash, Calendar.getInstance().get(Calendar.MONTH) + 1)
         lifecycleScope.launch {
             app.commands.events.collect { e ->
                 if (e is CommandRunner.UiEvent.Message) message = e.text
@@ -119,7 +119,7 @@ class MainActivity : ComponentActivity() {
                             LockScreen(lock)
                             LaunchedEffect(Unit) { dock.close() }
                         } else when (val s = screen) {
-                            Screen.Loading -> Box(Modifier.fillMaxSize()) // The startup video covers it; no text to flash.
+                            Screen.Loading -> Box(Modifier.fillMaxSize()) // The startup splash covers it; no text to flash.
                             is Screen.Pairing -> PairingScreen(s.code, s.unpaired)
                             is Screen.Syncing -> SyncingScreen(s)
                             is Screen.Failed -> Centered {
@@ -149,7 +149,7 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                     }
-                    splash?.let { SplashVideo(it, splashSkipped, onSkip = { splashSkipped = true }, onDone = { splash = null }) }
+                    splash?.let { SplashAnimation(it, splashSkipped, onSkip = { splashSkipped = true }, onDone = { splash = null }) }
                 }
               }
             }

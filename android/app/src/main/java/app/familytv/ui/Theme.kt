@@ -86,6 +86,7 @@ fun FamilyTvTheme(content: @Composable () -> Unit) {
  * The one focusable building block: D-pad focus paints it blue (or outlines it, for artwork),
  * or on the TV's glass pages ([LocalGlass]) rings it in white, or raises rows and pills as a glass bubble ([Lift.Glow]); OK clicks it. Lighter than tv-material's Surface, which matters in the guide grid.
  * [onLongClick] runs on holding OK or pressing Menu on a remote, and on a long press on touch.
+ * [ring] false leaves the focus to [content] to show, as the Rive appearance switch's own glow does.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -101,6 +102,7 @@ fun FocusBox(
     lift: Lift = Lift.None,
     onFocus: () -> Unit = {},
     contentAlignment: Alignment = Alignment.TopStart,
+    ring: Boolean = true,
     content: @Composable BoxScope.(focused: Boolean) -> Unit,
 ) {
     var hasFocus by remember { mutableStateOf(false) }
@@ -123,7 +125,7 @@ fun FocusBox(
         else -> color
     }
     val ring = when {
-        !focused || bubble -> null
+        !focused || bubble || !ring -> null
         glass -> Glass.Ring
         outline -> Tv.Accent
         else -> null
