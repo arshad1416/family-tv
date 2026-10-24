@@ -36,14 +36,15 @@ import kotlinx.coroutines.delay
 
 /**
  * The startup splash: The Nook's on the Airbnb guest profile (the portal's profile setting
- * `splash` = "the-nook"), Family TV's on every other, in the season of the TV's month. It plays as
- * a Rive animation ([SplashRive]), or as the matching video where Rive can't run ([SplashVideo]).
+ * `splash` = "the-nook"), Family TV's on every other, in the season of the TV's month (Halloween
+ * all of October). It plays as a Rive animation ([SplashRive]), or as the matching video where
+ * Rive can't run ([SplashVideo]).
  */
 object Splash {
     const val NOOK = "the-nook"
 
-    /** In the order of the Rive file's `season` input (0 spring to 3 winter). */
-    enum class Season { SPRING, SUMMER, FALL, WINTER }
+    /** In the order of the Rive file's `season` input (0 spring to 3 winter, 4 Halloween). */
+    enum class Season { SPRING, SUMMER, FALL, WINTER, HALLOWEEN }
 
     /** Which splash to show: [season] and whether it is [nook]'s. */
     data class Choice(val season: Season, val nook: Boolean) {
@@ -58,7 +59,8 @@ object Splash {
     fun season(month: Int): Season = when (month) {
         3, 4, 5 -> Season.SPRING
         6, 7, 8 -> Season.SUMMER
-        9, 10, 11 -> Season.FALL
+        10 -> Season.HALLOWEEN
+        9, 11 -> Season.FALL
         else -> Season.WINTER
     }
 
@@ -69,7 +71,8 @@ object Splash {
     private fun video(nook: Boolean, season: Season): Int = when (season) {
         Season.SPRING -> if (nook) R.raw.the_nook_splash_spring else R.raw.family_tv_splash_spring
         Season.SUMMER -> if (nook) R.raw.the_nook_splash_summer else R.raw.family_tv_splash_summer
-        Season.FALL -> if (nook) R.raw.the_nook_splash_fall else R.raw.family_tv_splash_fall
+        // There is no Halloween video; October's stand-in is fall's.
+        Season.FALL, Season.HALLOWEEN -> if (nook) R.raw.the_nook_splash_fall else R.raw.family_tv_splash_fall
         Season.WINTER -> if (nook) R.raw.the_nook_splash_winter else R.raw.family_tv_splash_winter
     }
 }
