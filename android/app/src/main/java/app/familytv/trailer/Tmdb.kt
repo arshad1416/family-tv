@@ -16,6 +16,17 @@ data class EpisodeMeta(val still: String?, val overview: String?)
 /** What TMDB says about a movie (the Movies spotlight, the guide header) or a show (the guide header). */
 data class MovieMeta(val overview: String?, val genres: List<String>, val runtimeMin: Int?, val poster: String? = null)
 
+/** A trending or popular film or show from TMDB, for the Home carousel. [tv] tells a show from a film. */
+data class TmdbTitle(
+    val id: String,
+    val tv: Boolean,
+    val title: String,
+    val year: Int?,
+    val backdrop: String?,
+    val genres: List<Int>,
+    val rating: Double?,
+)
+
 /** One season from TMDB: what it is about, its YouTube videos and its episodes' stills and overviews. */
 data class SeasonMeta(val overview: String?, val videos: List<Trailers.Video>, val episodes: Map<Int, EpisodeMeta>)
 
@@ -45,6 +56,17 @@ class Tmdb(private val key: String, private val client: OkHttpClient, private va
     suspend fun searchTv(title: String, year: Int?): String? =
         get("search/tv", listOfNotNull("query" to title, year?.let { "first_air_date_year" to it.toString() }))?.let(TmdbParse::firstId)
 
+    /** This week's top films ([tv] false) or shows, in TMDB's order. */
+    suspend fun trending(tv: Boolean): List<TmdbTitle> = get("trending/${if (tv) "tv" else "movie"}/week", emptyList())?.let { TmdbParse.titles(it, tv) }.orEmpty()
+
+    /** The most popular films or shows right now, for when few trending ones are on the line. */
+    suspend fun popular(tv: Boolean, page: Int): List<TmdbTitle> =
+        get("${if (tv) "tv" else "movie"}/popular", listOf("page" to page.toString()))?.let { TmdbParse.titles(it, tv) }.orEmpty()
+
+    /** The English title logo of a film or show (a transparent image), else one with no text language. */
+    suspend fun logo(tv: Boolean, id: String): String? =
+        get("${if (tv) "tv" else "movie"}/$id/images", listOf("include_image_language" to "en,null"))?.let(TmdbParse::logo)
+
     private fun videoLangs(langs: List<String>) = listOf("include_video_language" to (langs.map { it.substringBefore('-') } + "en" + "null").distinct().joinToString(","))
 
     /** The JSON body, or null when TMDB doesn't have it (404). */
@@ -66,6 +88,8 @@ class Tmdb(private val key: String, private val client: OkHttpClient, private va
         const val BASE_URL = "https://api.themoviedb.org/3"
         const val IMAGE_BASE = "https://image.tmdb.org/t/p/w780"
         const val POSTER_BASE = "https://image.tmdb.org/t/p/w342"
+        const val BACKDROP_BASE = "https://image.tmdb.org/t/p/w1280"
+        const val LOGO_BASE = "https://image.tmdb.org/t/p/w500"
     }
 }
 
@@ -97,6 +121,27 @@ object TmdbParse {
         runtimeMin = o.get("runtime")?.takeIf { it.isJsonPrimitive }?.asInt?.takeIf { it > 0 },
         poster = o.str("poster_path")?.let { Tmdb.POSTER_BASE + it },
     )
+
+    /** A trending or popular list; adult titles and ones without a backdrop are left out. */
+    fun titles(o: JsonObject, tv: Boolean): List<TmdbTitle> = o.array("results").mapNotNull { it.obj() }.mapNotNull { r ->
+        if (r.get("adult")?.takeIf { it.isJsonPrimitive }?.asBoolean == true) return@mapNotNull null
+        TmdbTitle(
+            id = r.get("id")?.takeIf { it.isJsonPrimitive }?.asString ?: return@mapNotNull null,
+            tv = tv,
+            title = r.str(if (tv) "name" else "title") ?: return@mapNotNull null,
+            year = r.str(if (tv) "first_air_date" else "release_date")?.take(4)?.toIntOrNull(),
+            backdrop = r.str("backdrop_path")?.let { Tmdb.BACKDROP_BASE + it } ?: return@mapNotNull null,
+            genres = r.array("genre_ids").mapNotNull { g -> g.takeIf { it.isJsonPrimitive }?.asInt },
+            rating = r.get("vote_average")?.takeIf { it.isJsonPrimitive }?.asDouble?.takeIf { it > 0 },
+        )
+    }
+
+    /** The best-voted English logo, else the best with no text language. */
+    fun logo(o: JsonObject): String? {
+        val logos = o.array("logos").mapNotNull { it.obj() }.filter { it.str("file_path") != null }
+        fun best(lang: String?) = logos.filter { it.str("iso_639_1") == lang }.maxByOrNull { it.get("vote_average")?.takeIf { v -> v.isJsonPrimitive }?.asDouble ?: 0.0 }
+        return (best("en") ?: best(null))?.str("file_path")?.let { Tmdb.LOGO_BASE + it }
+    }
 
     fun firstId(o: JsonObject): String? = o.array("results").firstNotNullOfOrNull { it.obj()?.get("id")?.takeIf { id -> id.isJsonPrimitive }?.asString }
 }

@@ -104,6 +104,10 @@ internal class GlassShell(
     val barHidden: MutableState<Boolean>,
     /** How many pages that keep the dark look (Settings, the guide, a film or show) are open. */
     val darkPages: MutableIntState,
+    /** The Home carousel's slide, drawn full-bleed behind the top bar while Home's carousel is on screen. */
+    val backdrop: MutableState<Slide?>,
+    /** True while the screensaver shows. */
+    val saver: MutableState<Boolean>,
 )
 
 internal val LocalGlassShell = staticCompositionLocalOf<GlassShell?> { null }
@@ -183,7 +187,10 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
     LaunchedEffect(Unit) { delay(50); focusBar() }
     LaunchedEffect(settings) { if (!settings && barFocused) { delay(50); focusBar() } }
 
-    val shell = remember { GlassShell(queries, glow, barHidden, darkPages) }
+    // The screensaver (backlog item 16): after 5 minutes without a key, unless a preview is playing.
+    val saverState = remember { mutableStateOf(false) }
+    var saver by saverState
+    val shell = remember { GlassShell(queries, glow, barHidden, darkPages, mutableStateOf(null), saverState) }
     val shown by animateColorAsState(glow.value, tween(500), label = "glow")
     val lightness = rememberLightness(appearance, weather.forecast)
     // Kids get the bright look.
@@ -244,10 +251,8 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
         withFrameNanos { }
         focusManager.moveFocus(FocusDirection.Down)
     }
-    // The screensaver (backlog item 16): after 5 minutes without a key, unless a preview is playing.
-    // Counted in delays, not read in composition, so a key press never recomposes the home.
+    // The screensaver's idle time is counted in delays, not read in composition, so a key press never recomposes the home.
     val idle = remember { IdleCount() }
-    var saver by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         while (true) {
             delay(IDLE_STEP_MS)
@@ -283,6 +288,8 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
                 }
             },
           ) {
+            val (shownTab, shownSettings) = onPage
+            HomeBackdrop(shell.backdrop.value.takeIf { shownTab == GlassTab.Home && !shownSettings && !barHidden.value && darkPages.intValue == 0 })
             // Inside the TV's overscan safe zone (48 dp across, 27 dp at the top and bottom).
             Column(Modifier.fillMaxSize().padding(start = 48.dp, end = 48.dp, top = 27.dp, bottom = 18.dp).onFocusChanged { anyFocused = it.hasFocus }) {
                 if (!barHidden.value) {
@@ -299,7 +306,6 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
                     )
                     Spacer(Modifier.height(16.gx))
                 }
-                val (shownTab, shownSettings) = onPage
                 Box(Modifier.weight(1f).fillMaxWidth()) {
                     Box(Modifier.fillMaxSize().focusRequester(pageFocus).restoresFocus(entry).graphicsLayer { alpha = fade.value; translationY = (1f - fade.value) * rise }) {
                         pages.SaveableStateProvider(if (shownSettings) "settings" else shownTab.name) {
