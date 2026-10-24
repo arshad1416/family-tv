@@ -215,9 +215,9 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
     }
     val pages = rememberSaveableStateHolder()
     // A new tab or Settings comes in behind Rive's glass wipe: the tab's pill moves at once and the
-    // page swaps when the wipe covers it. Not on the first page, on Back, on the light look (the
-    // wipe is dark glass) or where Rive can't run: the page fades in over 200 ms there (backlog item
-    // 15), rising 10 px as it does. Neither when the system asks for less motion.
+    // page swaps when the wipe covers it, in dark glass on the dark look and light glass on the light
+    // one. Not on the first page, on Back or where Rive can't run: the page fades in over 200 ms
+    // there (backlog item 15), rising 10 px as it does. Neither when the system asks for less motion.
     val still = rememberReducedMotion()
     val ctx = LocalContext.current
     val wipe = remember { if (still) null else RiveTransition.create(ctx) }
@@ -227,11 +227,11 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
     val rise = with(LocalDensity.current) { 10.dp.toPx() }
     var firstPage by remember { mutableStateOf(true) }
     LaunchedEffect(pageKey) {
-        val w = wipe?.takeIf { !instant && !firstPage && t < 0.5f }
+        val w = wipe?.takeIf { !instant && !firstPage }
         instant = false
         // While the wipe covers, its swap picks up this page too; once it reveals, a new page swaps at once.
         if (w != null && w.phase != RiveTransition.Phase.REVEALING) {
-            if (w.phase == RiveTransition.Phase.COVERING || w.go(RiveTransition.PAGE) { onPage = tab to settings }) return@LaunchedEffect
+            if (w.phase == RiveTransition.Phase.COVERING || w.go(if (t < 0.5f) RiveTransition.PAGE else RiveTransition.PAGE_LIGHT) { onPage = tab to settings }) return@LaunchedEffect
         }
         onPage = tab to settings
         if (firstPage || still) { firstPage = false; return@LaunchedEffect }
