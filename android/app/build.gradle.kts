@@ -57,6 +57,8 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+        // The external source connector's contract (src/main/aidl, docs/CONNECTOR.md).
+        aidl = true
     }
     // lifecycle 2.9's LiveData lint check (pulled in by Rive) crashes this AGP's lint; the app uses no LiveData.
     lint { disable += "NullSafeMutableLiveData" }

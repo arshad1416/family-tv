@@ -38,6 +38,10 @@
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="https" />
         </intent>
+        <!-- External source companions (docs/CONNECTOR.md); only approved, pinned ones are ever bound. -->
+        <intent>
+            <action android:name="app.familytv.connector.SOURCE_PROVIDER_V1" />
+        </intent>
     </queries>
 
     <application
