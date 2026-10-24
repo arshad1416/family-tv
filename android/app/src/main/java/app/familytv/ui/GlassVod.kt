@@ -276,8 +276,7 @@ private fun VodHome(
     // For you comes right after it, for the picked viewer.
     val rows = listOf(CONTINUE_WATCHING, FOR_YOU, "Favourites").mapNotNull { t -> (if (t == FOR_YOU) forYou.ifEmpty { null } else shelves[t])?.let { t to it } }
     val providers = remember(movieCats, seriesCats) { Provider.entries.filter { p -> movieCats.any { p.matches(it.name) } || seriesCats.any { p.matches(it.name) } } }
-    val groups = remember(movieCats, seriesCats) { LanguageGroup.entries.filter { g -> movieCats.any { g.matches(it.name) } || seriesCats.any { g.matches(it.name) } } }
-    val (regions, languages) = groups.partition { it.region }
+    val languages = remember(movieCats, seriesCats) { LanguageGroup.entries.filter { g -> movieCats.any { g.matches(it.name) } || seriesCats.any { g.matches(it.name) } } }
     // The category chip wall starts folded away behind "Show all categories".
     var allCats by rememberSaveable(kind) { mutableStateOf<Boolean?>(null) }
     val ctx = LocalContext.current
@@ -292,7 +291,7 @@ private fun VodHome(
         if (shelves[newest] != null) add("newest")
         if (shelves["Top rated"] != null) add("top")
         providers.forEach { add("provider/${it.name}") }
-        groups.forEach { add("language/${it.name}") }
+        languages.forEach { add("language/${it.name}") }
         cats.forEach { add("cat/${it.chipKey}") }
         if (hasAdult) add("adult")
     }
@@ -337,15 +336,12 @@ private fun VodHome(
                 ProvidersShelf(providers, target) { open("provider/${it.name}") }
             }
         }
-        // Languages and regions are separate rows (backlog item 26).
-        listOf("Languages" to languages, "Regions" to regions).forEach { (heading, pills) ->
-            if (pills.isNotEmpty()) item(heading) {
-                Column(verticalArrangement = Arrangement.spacedBy(10.gx)) {
-                    GlassHeading(heading, Modifier.padding(start = FOCUS_ROOM))
-                    PillRow {
-                        items(pills, key = { it.name }) { g ->
-                            BigPill(g.label, entryPoint(target == "language/${g.name}")) { open("language/${g.name}") }
-                        }
+        if (languages.isNotEmpty()) item("Languages") {
+            Column(verticalArrangement = Arrangement.spacedBy(10.gx)) {
+                GlassHeading("Languages", Modifier.padding(start = FOCUS_ROOM))
+                PillRow {
+                    items(languages, key = { it.name }) { g ->
+                        BigPill(g.label, entryPoint(target == "language/${g.name}")) { open("language/${g.name}") }
                     }
                 }
             }
