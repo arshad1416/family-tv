@@ -136,9 +136,9 @@ private fun Modifier.drawnSmall() = layout { measurable, c ->
 }
 
 /**
- * Plays [video] over the app while it starts underneath, on a surface laid above the app's window (a
- * media overlay): frames reach the screen however busy the app's own thread is, and nothing the app
- * draws can hide them. The surface shows nothing until its first frame, and every video ends on the
+ * Plays [video] over the app while it starts underneath, on a surface laid on top of the app's window
+ * (a media overlay still sits under it on Fire OS 7): frames reach the screen however busy the app's
+ * own thread is, and nothing the app draws can hide them. The surface shows nothing until its first frame, and every video ends on the
  * app's background colour. It doesn't fade with the app's layers, so on a skip it goes at once and
  * the frame's background fades as usual.
  */
@@ -164,7 +164,7 @@ private fun SplashVideo(@RawRes video: Int, skipped: Boolean, onSkip: () -> Unit
     SplashFrame(skipped, onSkip, onDone) {
         if (!skipped) {
             AndroidView(
-                { SurfaceView(it).apply { setZOrderMediaOverlay(true) }.also(player::setVideoSurfaceView) },
+                { SurfaceView(it).apply { setZOrderOnTop(true) }.also(player::setVideoSurfaceView) },
                 Modifier.aspectRatio(16f / 9f),
             )
         }
