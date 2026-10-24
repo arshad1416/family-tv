@@ -274,14 +274,14 @@ internal fun GlassPill(
     slid: Boolean = false,
 ) {
     // Backlog item 8: the chosen one is the filled pill, without a ring; focus raises the glass bubble.
-    // [slid]: a pill drawn behind the row (the tabs' slider) is the chosen one's fill instead.
+    // [slid]: the row draws the chosen pill and the focus bubble behind its pills, gliding between them
+    // (the tabs, [rememberTabGlide]), so this pill draws neither: no fill, ring or bubble of its own.
     var focused by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(50)
     FocusBox(
-        onClick = onClick, onFocus = onFocus, shape = shape, scale = 1.06f, lift = Lift.Glow, contentAlignment = Alignment.Center,
+        onClick = onClick, onFocus = onFocus, shape = shape, scale = 1.06f, lift = if (slid) Lift.None else Lift.Glow, contentAlignment = Alignment.Center,
         color = when { selected && slid -> Color.Transparent; selected -> Glass.Selected; else -> fill },
-        // Focus on the slid pill keeps the slider showing through: a wash over it hid the label in the light look.
-        outline = selected && slid,
+        outline = slid, ring = !slid,
         modifier = modifier.onFocusChanged { focused = it.isFocused }.then(if (border && !selected && !focused) Modifier.border(1.dp, Glass.LineSoft, shape) else Modifier),
     ) { _ ->
         Row(Modifier.padding(horizontal = padH, vertical = padV), verticalAlignment = Alignment.CenterVertically) {

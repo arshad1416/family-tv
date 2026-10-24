@@ -12,6 +12,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -115,6 +118,27 @@ internal fun Modifier.bubbleGlow(shape: Shape, strength: () -> Float, accent: ()
         val c = accent()
         rings.forEach { (px, fade, o) -> translate(-px, -px) { drawOutline(o, c, alpha = a * fade, style = ring) } }
     }
+}
+
+/**
+ * The focus bubble on a pill at [topLeft] and [size], drawn straight onto the canvas for one that
+ * glides between pills ([rememberTabGlide]): the glow, the lit face (unless [face] is false, over
+ * a white pill) and the rim, all at [lit].
+ */
+internal fun DrawScope.drawPillBubble(topLeft: Offset, size: Size, look: BubbleLook, accent: Color, lit: Float, face: Boolean) {
+    val r = size.height / 2
+    val ring = Stroke(GLOW_RING_DP.dp.toPx())
+    GLOW_RINGS.forEach { (out, fade) ->
+        val px = out.dp.toPx()
+        drawRoundRect(accent, topLeft - Offset(px, px), Size(size.width + 2 * px, size.height + 2 * px), CornerRadius(r + px), alpha = BUBBLE_GLOW * lit * fade, style = ring)
+    }
+    val top = topLeft.y
+    if (face) drawRoundRect(Brush.verticalGradient(listOf(look.faceTop, look.faceBottom), top, top + size.height), topLeft, size, CornerRadius(r), alpha = lit)
+    val s = 1.dp.toPx()
+    drawRoundRect(
+        Brush.verticalGradient(listOf(look.rimTop, look.rimBottom), top, top + size.height), topLeft + Offset(s / 2, s / 2),
+        Size(size.width - s, size.height - s), CornerRadius(r - s / 2), alpha = lit, style = Stroke(s),
+    )
 }
 
 /**
