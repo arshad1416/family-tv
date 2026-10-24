@@ -1,9 +1,10 @@
 package app.familytv.ui
 
 import android.net.Uri
-import android.view.TextureView
+import android.view.SurfaceView
 import androidx.annotation.RawRes
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -81,17 +82,21 @@ object Splash {
     private fun video(nook: Boolean, season: Season): Int = when (season) {
         Season.SPRING -> if (nook) R.raw.the_nook_splash_spring else R.raw.family_tv_splash_spring
         Season.SUMMER -> if (nook) R.raw.the_nook_splash_summer else R.raw.family_tv_splash_summer
-        // There is no Halloween video; October's stand-in is fall's.
-        Season.FALL, Season.HALLOWEEN -> if (nook) R.raw.the_nook_splash_fall else R.raw.family_tv_splash_fall
+        Season.FALL -> if (nook) R.raw.the_nook_splash_fall else R.raw.family_tv_splash_fall
+        Season.HALLOWEEN -> if (nook) R.raw.the_nook_splash_halloween else R.raw.family_tv_splash_halloween
         Season.WINTER -> if (nook) R.raw.the_nook_splash_winter else R.raw.family_tv_splash_winter
     }
 }
 
-/** The splash for [choice]: the Rive animation, or its video where Rive can't run or the file won't play. */
+/**
+ * The splash for [choice]: on a TV box its video, which the hardware decoder draws straight to the
+ * screen, so the app starting underneath can't make it stutter (the live Rive scene did on the onn);
+ * elsewhere the Rive animation, or the video where Rive can't run or the file won't play.
+ */
 @Composable
 fun SplashAnimation(choice: Splash.Choice, skipped: Boolean, onSkip: () -> Unit, onDone: () -> Unit) {
     val ctx = LocalContext.current
-    var rive by remember { mutableStateOf(RiveArt.ready(ctx)) }
+    var rive by remember { mutableStateOf(!ctx.isTelevision() && RiveArt.ready(ctx)) }
     if (rive) SplashRive(choice, skipped, onSkip, onDone, onFail = { rive = false })
     else SplashVideo(choice.video, skipped, onSkip, onDone)
 }
@@ -131,7 +136,12 @@ private fun Modifier.drawnSmall() = layout { measurable, c ->
     layout(c.maxWidth, c.maxHeight) { p.placeWithLayer((c.maxWidth - w) / 2, (c.maxHeight - h) / 2) { scaleX = s; scaleY = s } }
 }
 
-/** Plays [video] over the app while it starts underneath. Every video ends on the app's background colour. */
+/**
+ * Plays [video] over the app while it starts underneath, in a SurfaceView, so frames reach the screen
+ * however busy the app's own thread is. Every video ends on the app's background colour. A
+ * SurfaceView doesn't fade with the layers above it, so on a skip the background first covers it
+ * ([COVER_MS]), then the frame fades as usual.
+ */
 @Composable
 private fun SplashVideo(@RawRes video: Int, skipped: Boolean, onSkip: () -> Unit, onDone: () -> Unit) {
     val ctx = LocalContext.current
@@ -140,22 +150,31 @@ private fun SplashVideo(@RawRes video: Int, skipped: Boolean, onSkip: () -> Unit
             setMediaItem(MediaItem.fromUri(Uri.parse("android.resource://${ctx.packageName}/$video")))
             volume = 0f
             prepare()
-            playWhenReady = true
         }
     }
+    // The background covers the view until the video's first frame is up, so the surface's black never
+    // shows; only then does it play, so a busy start can't hide its opening.
+    var playing by remember { mutableStateOf(false) }
     DisposableEffect(player) {
         val listener = object : Player.Listener {
+            override fun onRenderedFirstFrame() { playing = true; player.play() }
             override fun onPlaybackStateChanged(state: Int) { if (state == Player.STATE_ENDED) onSkip() }
             override fun onPlayerError(error: PlaybackException) = onSkip()
         }
         player.addListener(listener)
         onDispose { player.removeListener(listener); player.release() }
     }
-    SplashFrame(skipped, onSkip, onDone) {
-        // A TextureView, unlike PlayerView's SurfaceView, fades with the layer above.
-        AndroidView({ TextureView(it).also(player::setVideoTextureView) }, Modifier.aspectRatio(16f / 9f))
+    // It uncovers at once (the first frame is the background colour) and covers over [COVER_MS] on a skip.
+    val cover by animateFloatAsState(if (skipped || !playing) 1f else 0f, if (skipped) tween(COVER_MS) else snap(), label = "cover")
+    val covered = skipped && cover == 1f
+    SplashFrame(covered, onSkip, onDone) {
+        if (!covered) AndroidView({ SurfaceView(it).also(player::setVideoSurfaceView) }, Modifier.aspectRatio(16f / 9f))
+        Box(Modifier.fillMaxSize().graphicsLayer { alpha = cover }.background(Tv.Bg))
     }
 }
+
+/** How long the background takes to cover a skipped video before the splash fades. */
+private const val COVER_MS = 150
 
 /**
  * The splash's frame: [content] on the app's background, faded out in 0.4 s once [skipped] (any
