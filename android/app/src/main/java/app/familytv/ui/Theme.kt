@@ -40,6 +40,8 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -140,6 +142,10 @@ fun FocusBox(
     val grow = if (animated) animateFloatAsState(if (focused && !still) scale else 1f, if (still) snap() else spring(dampingRatio = 0.8f, stiffness = 700f), label = "grow") else null
     val chosen = if (bubble) animateFloatAsState(if (selected) 1f else 0f, if (still) snap() else tween(CHOSEN_FADE_MS), label = "chosen") else null
     val accent = LocalGlassShell.current?.glow
+    // OK on a glass card also starts the Rive press ripple over it ([PressRipple]); the click never waits for it.
+    val press = LocalPress.current?.takeIf { glass }
+    val placed = remember { arrayOfNulls<LayoutCoordinates>(1) }
+    val click: () -> Unit = if (press == null) onClick else { { placed[0]?.let { press.press(it, shape) }; onClick() } }
     Box(
         modifier
             .then(
@@ -153,6 +159,7 @@ fun FocusBox(
                     if (lifted == Lift.Tilt) { rotationX = 3f * l; cameraDistance = 16 * density }
                 } else Modifier,
             )
+            .then(if (press != null) Modifier.onPlaced { placed[0] = it } else Modifier)
             .onFocusChanged { hasFocus = it.isFocused; if (it.isFocused) { onFocus(); memory?.focused(me) } }
             .then(if (memory != null) Modifier.focusRequester(me) else Modifier)
             .then(
@@ -167,10 +174,10 @@ fun FocusBox(
             .then(if (ring != null) Modifier.border(if (outline) 3.dp else 2.dp, ring, shape) else Modifier)
             .then(
                 if (onLongClick == null) {
-                    Modifier.clickable(source, indication = null, onClick = onClick)
+                    Modifier.clickable(source, indication = null, onClick = click)
                 } else {
                     val held = { Usage.log(Usage.Action.HOLD_OK); onLongClick() }
-                    Modifier.remoteLongPress(okPress, onClick, held).combinedClickable(source, indication = null, onLongClick = held, onClick = onClick)
+                    Modifier.remoteLongPress(okPress, click, held).combinedClickable(source, indication = null, onLongClick = held, onClick = click)
                 },
             ),
         contentAlignment = contentAlignment,

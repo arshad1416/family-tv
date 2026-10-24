@@ -19,7 +19,7 @@ class RiveArtTest {
 
     @Test
     fun theRiveFilesShip() {
-        for (raw in listOf(R.raw.family_tv_appearance_switch, R.raw.family_tv_splash, R.raw.family_tv_loading, R.raw.family_tv_transition)) {
+        for (raw in listOf(R.raw.family_tv_appearance_switch, R.raw.family_tv_splash, R.raw.family_tv_loading, R.raw.family_tv_transition, R.raw.family_tv_nav_icons, R.raw.family_tv_press)) {
             val magic = ctx.resources.openRawResource(raw).use { String(it.readNBytes(4)) }
             assertEquals("RIVE", magic)
         }
