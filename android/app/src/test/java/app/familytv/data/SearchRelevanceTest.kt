@@ -29,7 +29,7 @@ class SearchRelevanceTest {
     private fun show(id: String, name: String, rating: String?) =
         SeriesEntity("s", id, name, null, "c", null, rating, 0, titleKey = SeriesTitles.parse(name).key)
 
-    private fun channel(id: String, name: String, num: Int) = ChannelEntity("s", id, name, num, null, "c", null, null, 0, 0)
+    private fun channel(id: String, name: String, num: Int, epgId: String? = null) = ChannelEntity("s", id, name, num, null, "c", epgId, null, 0, 0)
 
     @Before
     fun fill() = runBlocking {
@@ -51,15 +51,25 @@ class SearchRelevanceTest {
                 movie("13", "EN - Office Space (1999)", "7.6"),
                 movie("14", "|EN| Enola Holmes (2020)", "6.6"),
                 movie("15", "EN - The Up in Smoke Tour (2000)", "6.0"),
-                movie("16", "EN - Uppity (2020)", "6.1"),
-                movie("17", "EN - Uproar (2023)", "6.4"),
+                // Obscure titles with high ratings: the rating is no sign of how well known a title is.
+                movie("16", "EN - Uppity (2020)", "8.9"),
+                movie("17", "EN - Uproar (2023)", "8.5"),
+                // The line carries the well-known films in several languages and qualities.
+                movie("18", "FR - Up (2009)", "8.3"),
+                movie("19", "ES - Up (2009)", "8.3"),
+                movie("20", "EN - Up (2009) 4K", "8.3"),
+                movie("21", "FR - Up in the Air (2009)", "7.4"),
             ),
         )
         dao.upsertSeries(
             listOf(
                 show("1", "Prison Break", "8.3"),
-                show("2", "Break Point", "6.5"),
+                show("2", "Break Point", "9.6"),
                 show("3", "EN - Breaking Bad", "9.5"),
+                show("8", "BREAK IT ALL", "9.7"),
+                show("9", "FR - Breaking Bad", "9.5"),
+                show("10", "ES - Breaking Bad", "9.5"),
+                show("11", "EN - Breaking Bad 4K", "9.5"),
                 show("4", "Breakout Kings", "7.0"),
                 show("5", "EN - The Office (US)", "9.0"),
                 show("6", "The Office (UK)", "8.5"),
@@ -81,6 +91,9 @@ class SearchRelevanceTest {
                 channel("11", "CA| CBC Toronto", 11),
                 channel("12", "AR| CBC", 12),
                 channel("13", "CA| FOX NEWS", 13),
+                // A Canadian line's own guide id ends in .ca for every channel it carries, BBC's too.
+                channel("14", "CA| BBC World News", 14, "BBCWorldNews.ca"),
+                channel("15", "CA| CTV NewsChannel", 15, "CTVNewsChannel.ca"),
             ),
         )
     }
@@ -88,25 +101,27 @@ class SearchRelevanceTest {
     @After
     fun close() = db.close()
 
-    private fun movies(q: String) = runBlocking { dao.searchMovies(q, 50).map { SeriesTitles.parse(it.name).title } }
-    private fun shows(q: String) = runBlocking { dao.searchSeries(q, 50).map { SeriesTitles.parse(it.name).title } }
+    // One entry per title, as Search shows them (copies grouped).
+    private fun movies(q: String) = runBlocking { dao.searchMovies(q, 50).map { SeriesTitles.parse(it.name).title }.distinct() }
+    private fun shows(q: String) = runBlocking { dao.searchSeries(q, 50).map { SeriesTitles.parse(it.name).title }.distinct() }
     private fun channels(q: String) = runBlocking { dao.searchChannels(q, 50).map { Names.channel(it.name) } }
 
     @Test
     fun aShortTitleComesFirstAndNotInsideOtherWords() {
-        // Whole words before word starts: Up in the Air before Upgrade and Uppity.
-        // Titles that start with "up" by how well known they are, whole words a point ahead.
-        assertEquals(listOf("Up", "Up in the Air", "Upgrade", "The Up in Smoke Tour", "Uproar", "Uppity", "What's Up, Doc?"), movies("up"))
+        // Titles that start with "up" by how well known they are (copies on the line, whole words one ahead),
+        // the rating only between equals: Up in the Air before the higher rated Uppity and Uproar.
+        assertEquals(listOf("Up", "Up in the Air", "The Up in Smoke Tour", "Uppity", "Uproar", "Upgrade", "What's Up, Doc?"), movies("up"))
         assertEquals(movies("up"), movies("UP"))
         assertEquals("Upgrade", movies("upg").first())
     }
 
     @Test
     fun aYearPicksTheFilm() {
-        assertEquals(listOf("Dune", "Dune"), movies("dune 2021"))
+        assertEquals(listOf("Dune"), movies("dune 2021"))
         assertEquals(setOf("7", "8"), runBlocking { dao.searchMovies("dune 2021", 50).map { it.streamId }.toSet() })
-        // Both films called Dune before Dune: Part Two.
-        assertEquals(listOf("Dune", "Dune", "Dune", "Dune: Part Two"), movies("dune"))
+        // Both films called Dune (three rows) before Dune: Part Two.
+        assertEquals(listOf("Dune", "Dune: Part Two"), movies("dune"))
+        assertEquals(3, runBlocking { dao.searchMovies("dune", 50).count { SeriesTitles.parse(it.name).title == "Dune" } })
         // Every word has to match.
         assertEquals(listOf("Dune: Part Two"), movies("dune two"))
     }
@@ -137,8 +152,8 @@ class SearchRelevanceTest {
 
     @Test
     fun aWordTypedPartWayFindsTheBestKnownTitleFirst() {
-        // Breaking Bad's rating keeps it first, whole word or not (round 3).
-        assertEquals(listOf("Breaking Bad", "Break Point", "Breakout Kings", "Prison Break"), shows("break"))
+        // Breaking Bad's copies put it first, whole word or not, ahead of higher rated obscure shows (round 4).
+        assertEquals(listOf("Breaking Bad", "BREAK IT ALL", "Break Point", "Breakout Kings", "Prison Break"), shows("break"))
         assertEquals(listOf("Breaking Bad"), shows("bad breaking"))
         assertEquals("Up in the Air", movies("air").single())
         assertEquals("What's Up, Doc?", movies("doc").single())
@@ -164,7 +179,11 @@ class SearchRelevanceTest {
         assertEquals(listOf("Global TV", "Global News BC", "Global News Toronto"), channels("global"))
         // Canadian lines first, then English ones.
         // Canadian broadcasters first, then the US channels a Canadian line carries, then English ones.
-        assertEquals(listOf("CTV News", "Global News BC", "CBC News Network", "Global News Toronto", "FOX NEWS", "BBC News"), channels("news"))
+        // Every Canadian broadcaster (a word start too: NewsChannel) before BBC World News on the Canadian line.
+        assertEquals(
+            listOf("CTV News", "Global News BC", "CBC News Network", "Global News Toronto", "CTV NewsChannel", "FOX NEWS", "BBC World News", "BBC News"),
+            channels("news"),
+        )
         // CBC Canada before Egypt's CBC channels, and the cut-off feed last.
         assertEquals(listOf("11", "8", "12", "9", "10"), runBlocking { dao.searchChannels("cbc", 50).map { it.streamId } })
         assertTrue(channels("ca").isEmpty())

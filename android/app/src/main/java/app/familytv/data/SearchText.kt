@@ -13,10 +13,11 @@ import java.text.Normalizer
  * finds "Star Wars"). Films and shows: the exact title first ("up" is Up; a leading "The" or "A"
  * and a trailing year don't count), then titles that start with the typed text, then the other
  * word matches, then names that merely contain every word (3 letters or more). Within a group the
- * better known title leads: the provider's rating, a point more when the typed words are whole
- * words of the title (Up in the Air before Upgrade, Breaking Bad still before Break Point). Channels
- * rank Canadian ones first, then English ones, among the good matches, and feeds with a cut-off name
- * ("CBC 22:") last. Styled letters count as plain ones ([Names.clean]).
+ * better known title leads: the line's copies of it (languages, qualities: popular titles have
+ * many), a copy more when the typed words are whole words of the title (Up in the Air before
+ * Uppity); the provider's rating only breaks ties, since obscure titles carry high ones. Channels:
+ * Canadian broadcasters first, then the rest (Canadian lines, then English ones), and feeds with a
+ * cut-off name ("CBC 22:") last. Styled letters count as plain ones ([Names.clean]).
  */
 object SearchText {
     private val MARKS = Regex("\\p{Mn}+")
@@ -58,6 +59,9 @@ object SearchText {
     /** [rank]'s groups for films and shows: 0 exact, 1 starts with the text (ranks 1 and 3), 2 the other word matches, 3 contains. */
     fun group(rank: Int): Int = when (rank) { 0 -> 0; 1, 3 -> 1; 2, 4 -> 2; else -> 3 }
 
+    /** How well known a title is within its [group], as in the SQL: its [copies], one more for whole words (ranks 1 and 2). */
+    fun known(rank: Int, copies: Int): Int = copies + if (rank == 1 || rank == 2) 1 else 0
+
     private val TRAILING_YEAR = Regex(" (19|20)\\d\\d$")
 
     /** The stored form, a space before every word (" pokemon the movie"), so `LIKE '% poke%'` is a word-prefix match. */
@@ -96,7 +100,7 @@ object SearchText {
             ARTICLES.forEach { add("$it$phrase%") }
             addAll(prefixArgs)
         }
-        val parts = order.split("{tier}")
+        val parts = order.replace("{table}", table).split("{tier}")
         val sql = buildString {
             append("SELECT * FROM $table WHERE ($prefix)")
             if (contains) append(" OR (${words.joinToString(" AND ") { "searchText LIKE ?" }})")
@@ -117,12 +121,15 @@ object SearchText {
     internal suspend fun <T> run(q: String, limit: Int, table: String, order: String, query: suspend (SupportSQLiteQuery) -> List<T>): List<T> =
         query(table, order, q, limit)?.let { query(it) }.orEmpty()
 
+    /** A row's copies on the line: rows of the same title ([MovieEntity.titleKey], indexed), itself included. */
+    private const val COPIES = "(CASE WHEN titleKey = '' THEN 1 ELSE (SELECT COUNT(*) FROM {table} c WHERE c.titleKey = {table}.titleKey) END)"
+
     /**
-     * Films and shows: by [group]; within one, the provider's rating with a point more for whole
-     * words (ranks 1 and 2), then rank, the shorter title and the name.
+     * Films and shows: by [group]; within one, by [known] (copies, one more for whole words), then
+     * the provider's rating, rank, the shorter title and the name.
      */
     internal const val TITLE_ORDER = "(CASE WHEN {tier} = 0 THEN 0 WHEN {tier} IN (1, 3) THEN 1 WHEN {tier} IN (2, 4) THEN 2 ELSE 3 END), " +
-        "COALESCE(CAST(rating AS REAL), 0) + (CASE WHEN {tier} IN (1, 2) THEN 1.0 ELSE 0 END) DESC, {tier}, length(searchText), name"
+        "$COPIES + (CASE WHEN {tier} IN (1, 2) THEN 1 ELSE 0 END) DESC, COALESCE(CAST(rating AS REAL), 0) DESC, {tier}, length(searchText), name"
 
     private const val CATEGORY = "(SELECT c.name FROM categories c WHERE c.sourceId = channels.sourceId AND c.kind = 'live' AND c.categoryId = channels.categoryId)"
     private fun canadian(x: String) =
@@ -144,15 +151,16 @@ object SearchText {
     private const val CANADIAN_ID = "(epgId NOT LIKE 'x:%' AND (lower(epgId) GLOB '*.ca' OR lower(epgId) GLOB '*.ca[0-9]'))"
 
     /**
-     * Channels: cut-off names ("CBC 22:") last; then the good matches (rank 0 to 2), word starts,
-     * contains; within each, Canadian broadcasters (by name, or the provider's guide id), then the
-     * rest of Canadian lines (name or category coded CA, which can be US channels), then English
+     * Channels: cut-off names ("CBC 22:") last, and names that only contain the words after the
+     * rest; then every Canadian broadcaster (by name) before any other channel; within each, the
+     * good matches (rank 0 to 2) before word starts, then Canadian lines (the provider's guide id,
+     * or a name or category coded CA: BBC World News on a Canadian line, US channels), then English
      * ones; then rank, the shorter name and the channel number.
      */
     internal val CHANNEL_ORDER =
-        "(CASE WHEN rtrim(name) GLOB '*[:|-]' THEN 1 ELSE 0 END), (CASE WHEN {tier} <= 2 THEN 0 WHEN {tier} <= 4 THEN 1 ELSE 2 END), " +
-            "(CASE WHEN $canadianBrand OR $CANADIAN_ID THEN 0 WHEN ${canadian("name")} OR ${canadian(CATEGORY)} THEN 1 " +
-            "WHEN ${english("name")} OR ${english(CATEGORY)} THEN 2 ELSE 3 END), " +
+        "(CASE WHEN rtrim(name) GLOB '*[:|-]' THEN 1 ELSE 0 END), (CASE WHEN {tier} = 5 THEN 1 ELSE 0 END), (CASE WHEN $canadianBrand THEN 0 ELSE 1 END), " +
+            "(CASE WHEN {tier} <= 2 THEN 0 ELSE 1 END), " +
+            "(CASE WHEN $CANADIAN_ID OR ${canadian("name")} OR ${canadian(CATEGORY)} THEN 0 WHEN ${english("name")} OR ${english(CATEGORY)} THEN 1 ELSE 2 END), " +
             "{tier}, length(searchText), num, name"
 }
 

@@ -95,17 +95,21 @@ internal sealed interface VodItem {
     val key: String
     val group: String
     val title: String
+    /** The line's copies of it (languages, qualities): how well known it is, for search. */
+    val copyCount: Int
 
     class Movie(val g: MovieGroup) : VodItem {
         override val key get() = "m/${g.key}"
         override val group get() = g.key
         override val title get() = g.title
+        override val copyCount get() = g.copies.size
     }
 
     class Show(val g: SeriesGroup) : VodItem {
         override val key get() = "s/${g.key}"
         override val group get() = g.key
         override val title get() = g.title
+        override val copyCount get() = g.copies.size
     }
 }
 
@@ -608,8 +612,11 @@ private fun CollectionPage(
             val m = movies.map { VodItem.Movie(it) }
             val s = shows.map { VodItem.Show(it) }
             val all = (m + s).sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.title })
-            // Best match first (exact title, then starts with it, then any word), A to Z within each.
-            if (q.length >= 2) all.mapNotNull { x -> SearchText.rank(SearchText.index(x.title), q)?.let { x to SearchText.group(it) } }.sortedBy { it.second }.map { it.first } else when (view) {
+            // Best match first (exact title, then starts with it, then any word), the better known (more copies) first within each, else A to Z.
+            if (q.length >= 2) {
+                all.mapNotNull { x -> SearchText.rank(SearchText.index(x.title), q)?.let { Triple(x, SearchText.group(it), SearchText.known(it, x.copyCount)) } }
+                    .sortedWith(compareBy<Triple<VodItem, Int, Int>> { it.second }.thenByDescending { it.third }).map { it.first }
+            } else when (view) {
                 View.Movies -> m
                 View.Shows -> s
                 View.Recent -> movies.sortedByDescending { g -> g.copies.maxOf { it.added } }.map { VodItem.Movie(it) }
