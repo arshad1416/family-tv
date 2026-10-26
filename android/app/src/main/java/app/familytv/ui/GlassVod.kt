@@ -343,12 +343,13 @@ private fun VodHome(
 
     // Like Apple TV's, the first row (Continue watching) shows whole at rest, over the bottom of the carousel's art
     // (Arshad, Oct 26): the carousel takes what the page has left above it, between its least and its full height.
+    // The row's height is its tallest card's (two-line titles and the time left included), plus a little room below.
     val shell = LocalGlassShell.current
     val slot = shell?.slot ?: remember { mutableFloatStateOf(0f) }
     val density = LocalDensity.current
     val most = with(density) { CAROUSEL_HEIGHT.gx.toPx() }
     val least = with(density) { CAROUSEL_MIN.gx.toPx() }
-    val gap = with(density) { ROW_GAP.gx.toPx() }
+    val gap = with(density) { (ROW_GAP + ROW_ROOM).gx.toPx() }
     val fits by remember(list, most, least, gap) {
         derivedStateOf {
             val info = list.layoutInfo
@@ -369,7 +370,7 @@ private fun VodHome(
         ) {
             // Always the first item, so the highlights loading in after the rest don't land above the scroll position.
             item("hero") {
-                if (slides.isNotEmpty()) HomeCarousel(slides, marks, Modifier.height(heroHeight).onFocusChanged { heroFocused = it.hasFocus }, entry = entryPoint(target == "hero"))
+                if (slides.isNotEmpty()) HomeCarousel(slides, marks, Modifier.height(heroHeight).onFocusChanged { heroFocused = it.hasFocus }, entry = entryPoint(target == "hero"), compact = heroHeight < CAROUSEL_COMPACT.gx)
                 else if (featured != null) Row(Modifier.fillMaxWidth().height(190.gx).padding(horizontal = FOCUS_ROOM), horizontalArrangement = Arrangement.spacedBy(20.gx)) {
                     val (item, from) = featured
                     HeroCard(
@@ -420,6 +421,8 @@ private fun VodHome(
 }
 
 private const val ADULT_CONTENT = "Adult Content"
+/** Room left under Home's first row at rest, past its own focus room, so nothing of it touches the page's end. */
+private const val ROW_ROOM = 8
 private val HERO_MAIN = listOf(Color(0xFF3B4A6B), Color(0xFF1D2638), Color(0xFF0F1420))
 private val HERO_NEW = listOf(Color(0xFF5A3D2B), Color(0xFF1F1612))
 private val HERO_TOP = listOf(Color(0xFF2B4A5A), Color(0xFF121C22))

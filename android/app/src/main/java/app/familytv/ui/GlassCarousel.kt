@@ -74,20 +74,22 @@ internal const val SLIDE_FADE_MS = 700
  * art itself still fills about the top three quarters of the screen.
  */
 internal const val CAROUSEL_HEIGHT = 340
-internal const val CAROUSEL_MIN = 180
+internal const val CAROUSEL_MIN = 140
+/** Below this the carousel's title and buttons draw smaller ([HomeCarousel]'s compact), so the first row still shows whole. */
+internal const val CAROUSEL_COMPACT = 190
 /** The space between Home's rows, and so between the carousel and the first row. */
 internal const val ROW_GAP = 22
 
 /**
  * The Home carousel's text and buttons (the backdrop itself is [HomeBackdrop], drawn by the TV home
  * behind the top bar): the title logo, one detail line, Play and More info, and a dot per slide;
- * [entry] lands focus on Play.
+ * [entry] lands focus on Play; [compact] draws the title and buttons smaller, for a short slot.
  * It moves on every [SLIDE_SHOW_MS] while it is on screen and the app is in front (not under the
  * player, a dialog or the screensaver); Left on Play and Right on the last button step through it
  * and restart the wait. Always on the dark look: the scrim under it stays dark in the light look.
  */
 @Composable
-internal fun HomeCarousel(slides: List<Slide>, marks: VodMarks, modifier: Modifier = Modifier, entry: Modifier = Modifier) {
+internal fun HomeCarousel(slides: List<Slide>, marks: VodMarks, modifier: Modifier = Modifier, entry: Modifier = Modifier, compact: Boolean = false) {
     val ctx = LocalContext.current
     val shell = LocalGlassShell.current
     val nav = LocalSeriesNav.current
@@ -133,12 +135,14 @@ internal fun HomeCarousel(slides: List<Slide>, marks: VodMarks, modifier: Modifi
 
     OnDarkArt {
         // The title and buttons sit just above the first row, which lies over the bottom of the art.
-        Column(modifier.fillMaxWidth().padding(start = FOCUS_ROOM, bottom = 4.gx), verticalArrangement = Arrangement.spacedBy(10.gx, Alignment.Bottom)) {
-            Box(Modifier.heightIn(min = 80.gx), contentAlignment = Alignment.BottomStart) {
+        val logo = if (compact) 56.gx else 80.gx
+        val padV = if (compact) 8.gx else 10.gx
+        Column(modifier.fillMaxWidth().padding(start = FOCUS_ROOM, bottom = 4.gx), verticalArrangement = Arrangement.spacedBy(if (compact) 8.gx else 10.gx, Alignment.Bottom)) {
+            Box(Modifier.heightIn(min = logo), contentAlignment = Alignment.BottomStart) {
                 if (slide.logo != null) {
-                    AsyncImage(slide.logo, contentDescription = slide.title, contentScale = ContentScale.Fit, alignment = Alignment.BottomStart, modifier = Modifier.height(80.gx).widthIn(max = 400.gx))
+                    AsyncImage(slide.logo, contentDescription = slide.title, contentScale = ContentScale.Fit, alignment = Alignment.BottomStart, modifier = Modifier.height(logo).widthIn(max = 400.gx))
                 } else {
-                    Text(slide.title, fontSize = 40.gsp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 620.gx))
+                    Text(slide.title, fontSize = (if (compact) 30 else 40).gsp, fontWeight = FontWeight.Bold, maxLines = if (compact) 1 else 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 620.gx))
                 }
             }
             val event = slide.target as? Slide.Target.Event
@@ -158,8 +162,8 @@ internal fun HomeCarousel(slides: List<Slide>, marks: VodMarks, modifier: Modifi
                 horizontalArrangement = Arrangement.spacedBy(12.gx),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                GlassPill("Play", play, entry.onFocusChanged { if (it.isFocused) focusedButton = 0 }, fill = Glass.Raised, border = true, fontSize = 17.gsp, padH = 26.gx, padV = 10.gx)
-                more?.let { GlassPill("More info", it, Modifier.onFocusChanged { f -> if (f.isFocused) focusedButton = 1 }, fill = Glass.Raised, border = true, fontSize = 17.gsp, padH = 26.gx, padV = 10.gx) }
+                GlassPill("Play", play, entry.onFocusChanged { if (it.isFocused) focusedButton = 0 }, fill = Glass.Raised, border = true, fontSize = 17.gsp, padH = 26.gx, padV = padV)
+                more?.let { GlassPill("More info", it, Modifier.onFocusChanged { f -> if (f.isFocused) focusedButton = 1 }, fill = Glass.Raised, border = true, fontSize = 17.gsp, padH = 26.gx, padV = padV) }
                 // The dots beside the buttons, so the row under them can come up.
                 if (slides.size > 1) Row(horizontalArrangement = Arrangement.spacedBy(8.gx), verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 12.gx)) {
                     slides.indices.forEach { i ->
