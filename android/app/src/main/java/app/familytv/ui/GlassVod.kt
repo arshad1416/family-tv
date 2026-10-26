@@ -322,7 +322,7 @@ private fun VodHome(
     LazyColumn(state = list, verticalArrangement = Arrangement.spacedBy(22.gx), contentPadding = PaddingValues(bottom = 40.dp)) {
         // Always the first item, so the highlights loading in after the rest don't land above the scroll position.
         item("hero") {
-            if (slides.isNotEmpty()) HomeCarousel(slides, marks, Modifier.height(250.gx), entry = entryPoint(target == "hero"))
+            if (slides.isNotEmpty()) HomeCarousel(slides, marks, Modifier.height(CAROUSEL_HEIGHT.gx), entry = entryPoint(target == "hero"))
             else if (featured != null) Row(Modifier.fillMaxWidth().height(190.gx).padding(horizontal = FOCUS_ROOM), horizontalArrangement = Arrangement.spacedBy(20.gx)) {
                 val (item, from) = featured
                 HeroCard(

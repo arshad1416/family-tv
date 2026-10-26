@@ -59,6 +59,11 @@ import kotlinx.coroutines.launch
 /** How long a carousel slide shows before the next, and the cross-fade between them. */
 internal const val SLIDE_SHOW_MS = 8_000L
 internal const val SLIDE_FADE_MS = 700
+/**
+ * The carousel's slot in mockup pixels (720 tall): under the top bar it reaches about 70% down, so
+ * with the art's fade the carousel fills the top three quarters of the screen.
+ */
+internal const val CAROUSEL_HEIGHT = 340
 
 /**
  * The Home carousel's text and buttons (the backdrop itself is [HomeBackdrop], drawn by the TV home
@@ -112,7 +117,8 @@ internal fun HomeCarousel(slides: List<Slide>, marks: VodMarks, modifier: Modifi
     LaunchedEffect(notYet) { if (notYet) { delay(3_000); notYet = false } }
 
     OnDarkArt {
-        Column(modifier.fillMaxWidth().padding(start = FOCUS_ROOM, top = 8.gx), verticalArrangement = Arrangement.spacedBy(12.gx)) {
+        // The title and buttons sit low in the art, the rows just under its fade.
+        Column(modifier.fillMaxWidth().padding(start = FOCUS_ROOM, bottom = 14.gx), verticalArrangement = Arrangement.spacedBy(12.gx, Alignment.Bottom)) {
             Box(Modifier.heightIn(min = 96.gx), contentAlignment = Alignment.BottomStart) {
                 if (slide.logo != null) {
                     AsyncImage(slide.logo, contentDescription = slide.title, contentScale = ContentScale.Fit, alignment = Alignment.BottomStart, modifier = Modifier.height(96.gx).widthIn(max = 440.gx))
@@ -203,7 +209,8 @@ internal fun BoxScope.HomeBackdrop(slide: State<Slide?>, show: Boolean) {
                 val dark = Color(0xE6060A14)
                 val across = Brush.horizontalGradient(0f to dark, 0.45f to Color(0x99060A14), 0.75f to Color.Transparent)
                 // The top bar's light text sits on this shade, whatever the art.
-                val down = Brush.verticalGradient(0f to Color(0xCC060A14), 0.12f to Color(0x8C060A14), 0.24f to Color.Transparent, 0.48f to Color.Transparent, 0.62f to p.middle.copy(alpha = 0.9f), 0.72f to p.middle)
+                // The art fills the top three quarters of the screen (Arshad, Oct 26), fading into the page by 78%.
+                val down = Brush.verticalGradient(0f to Color(0xCC060A14), 0.12f to Color(0x8C060A14), 0.24f to Color.Transparent, 0.56f to Color.Transparent, 0.68f to p.middle.copy(alpha = 0.75f), 0.78f to p.middle)
                 onDrawBehind { drawRect(across); drawRect(down) }
             },
         )
