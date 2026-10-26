@@ -1,5 +1,7 @@
 package app.familytv.ui
 
+import android.graphics.drawable.BitmapDrawable
+import androidx.compose.foundation.Image
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -21,6 +23,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -35,6 +39,8 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -52,6 +58,7 @@ import androidx.tv.material3.Text
 import app.familytv.app
 import coil.compose.AsyncImage
 import coil.imageLoader
+import coil.request.CachePolicy
 import coil.request.ImageRequest
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -94,8 +101,10 @@ internal fun HomeCarousel(slides: List<Slide>, marks: VodMarks, modifier: Modifi
     LaunchedEffect(slide) { shell?.backdrop?.value = slide }
     LaunchedEffect(index, paused, slides) {
         if (paused || slides.size < 2) return@LaunchedEffect
-        // The next backdrop decodes while this one shows, at the size it is drawn.
-        slides[(index + 1) % slides.size].backdrop?.let { ctx.imageLoader.enqueue(backdropRequest(ctx, it)) }
+        // The next backdrop (and its title logo) decodes while this one shows.
+        val next = slides[(index + 1) % slides.size]
+        launch { next.backdrop?.let { Backdrops.load(ctx, it) } }
+        next.logo?.let { ctx.imageLoader.enqueue(ImageRequest.Builder(ctx).data(it).build()) }
         delay(SLIDE_SHOW_MS)
         step(1)
     }
@@ -158,13 +167,31 @@ internal fun HomeCarousel(slides: List<Slide>, marks: VodMarks, modifier: Modifi
 private const val EVENT_EARLY_MS = 15 * 60_000L
 
 /**
- * A backdrop decoded off the main thread at the screen's size, in 16-bit colour (half the memory
- * and upload of 32-bit; photos show no difference), so the preload and the drawn image share one
- * cached bitmap.
+ * Backdrops decoded off the main thread at the screen's size, in 16-bit colour (half the memory of
+ * 32-bit; photos show no difference), held here rather than in Coil's small shared cache: rows of
+ * posters used to push the next slide out of it, so the fade waited on a decode (onn jank) and
+ * Home came back blank for a moment. Each bitmap is handed to the GPU ([Bitmap.prepareToDraw])
+ * before it is drawn, so no fade frame waits on an upload. The slide on screen, the one fading out
+ * and the next one: [KEEP] at most, about 12 MB at 1080p.
  */
-private fun backdropRequest(ctx: android.content.Context, url: String): ImageRequest {
-    val m = ctx.resources.displayMetrics
-    return ImageRequest.Builder(ctx).data(url).size(m.widthPixels, m.heightPixels).allowRgb565(true).build()
+internal object Backdrops {
+    private const val KEEP = 3
+    private val held = object : LinkedHashMap<String, ImageBitmap>(KEEP + 1, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ImageBitmap>?) = size > KEEP
+    }
+
+    fun get(url: String): ImageBitmap? = synchronized(held) { held[url] }
+
+    /** [url] decoded and on its way to the GPU, or null when it can't be loaded. */
+    suspend fun load(ctx: android.content.Context, url: String): ImageBitmap? {
+        get(url)?.let { return it }
+        val m = ctx.resources.displayMetrics
+        val request = ImageRequest.Builder(ctx).data(url).size(m.widthPixels, m.heightPixels)
+            .allowHardware(false).allowRgb565(true).memoryCachePolicy(CachePolicy.DISABLED).build()
+        val bitmap = (ctx.imageLoader.execute(request).drawable as? BitmapDrawable)?.bitmap ?: return null
+        bitmap.prepareToDraw()
+        return bitmap.asImageBitmap().also { synchronized(held) { held[url] = it } }
+    }
 }
 
 /**
@@ -177,29 +204,35 @@ private fun backdropRequest(ctx: android.content.Context, url: String): ImageReq
  * pan, so the onn keeps up.
  */
 @Composable
-internal fun BoxScope.HomeBackdrop(slide: State<Slide?>, show: Boolean) {
+internal fun BoxScope.HomeBackdrop(slide: State<Slide?>, show: Boolean, covers: MutableState<Boolean>? = null) {
+    val ctx = LocalContext.current
     val target = slide.value.takeIf { show }
     val still = LocalReducedMotion.current
     val shown by animateFloatAsState(if (target != null) 1f else 0f, tween(if (still) 0 else 400), label = "backdrop")
-    // The slide in front, and the one it is fading in over (none once the fade ends).
-    var front by remember { mutableStateOf<Slide?>(null) }
-    var behind by remember { mutableStateOf<Slide?>(null) }
+    // The slide in front with its decoded art, and the one it is fading in over (none once the fade ends).
+    var front by remember { mutableStateOf<Shown?>(null) }
+    var behind by remember { mutableStateOf<Shown?>(null) }
     val fade = remember { Animatable(1f) }
     LaunchedEffect(target) {
-        if (target == null || target === front) return@LaunchedEffect
+        if (target == null || target === front?.slide) return@LaunchedEffect
+        // The old art stays up until the new one is decoded: the fade never starts on a blank.
+        val art = target.backdrop?.let { Backdrops.load(ctx, it) ?: return@LaunchedEffect }
         behind = front
-        front = target
+        front = Shown(target, art)
         if (behind != null && !still) {
             fade.snapTo(0f)
             fade.animateTo(1f, tween(SLIDE_FADE_MS))
         }
         behind = null
     }
+    // While the art is fully up it covers the whole screen, so the page background under it isn't drawn.
+    val covered = shown == 1f && front != null
+    if (covers != null) SideEffect { covers.value = covered }
     if (shown == 0f || front == null) return
     val p = LocalGlassPalette.current
     Box(Modifier.matchParentSize().graphicsLayer { alpha = shown; compositingStrategy = CompositingStrategy.ModulateAlpha }) {
         listOfNotNull(behind, front).forEach { s ->
-            androidx.compose.runtime.key(s.key) {
+            androidx.compose.runtime.key(s.slide.key) {
                 BackdropArt(s, if (s === front && behind != null) Modifier.graphicsLayer { alpha = fade.value; compositingStrategy = CompositingStrategy.ModulateAlpha } else Modifier)
             }
         }
@@ -217,16 +250,18 @@ internal fun BoxScope.HomeBackdrop(slide: State<Slide?>, show: Boolean) {
     }
 }
 
+/** A slide on the backdrop, with its art already decoded (null for an event without TMDB art). */
+private class Shown(val slide: Slide, val art: ImageBitmap?)
+
 @Composable
-private fun BackdropArt(s: Slide, modifier: Modifier) {
-    val ctx = LocalContext.current
+private fun BackdropArt(s: Shown, modifier: Modifier) {
     Box(modifier.fillMaxSize()) {
-        val url = s.backdrop
-        if (url != null) {
-            AsyncImage(backdropRequest(ctx, url), contentDescription = null, contentScale = ContentScale.Crop, alignment = Alignment.TopCenter, modifier = Modifier.fillMaxSize())
+        val art = s.art
+        if (art != null) {
+            Image(art, contentDescription = null, contentScale = ContentScale.Crop, alignment = Alignment.TopCenter, modifier = Modifier.fillMaxSize())
         } else {
             Box(Modifier.fillMaxSize().background(Brush.linearGradient(listOf(Color(0xFF07131F), Color(0xFF0B2A22), Color(0xFF060A14)))))
-            s.art?.let {
+            s.slide.art?.let {
                 AsyncImage(it, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.align(Alignment.TopEnd).padding(top = 90.gx, end = 90.gx).size(360.gx, 240.gx))
             }
         }

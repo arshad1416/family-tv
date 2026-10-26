@@ -71,6 +71,8 @@ class GuideMatchTest {
         assertEquals("Global.Regina.ca2", link("CA| Global News Regina", index = local)?.guideId)
         assertEquals("Global.Manitoba.ca2", link("CA| GLOBAL NEWS WINNIPEG", index = local)?.guideId)
         assertEquals("CFCF.ca2", link("CA| CTV MONTREAL HD", index = local)?.guideId)
+        assertEquals("CFCF.ca2", link("CA| CTV News Montreal", index = local)?.guideId)
+        assertEquals("CTV.Edmonton.HD.ca2", link("CA| CTV News Edmonton HD", index = local)?.guideId)
         assertEquals("CTV.Edmonton.HD.ca2", link("CA| CTV Edmonton (CFRN)", index = local)?.guideId)
         // The provider's id says USA, the name says Canada: the name's country still finds it.
         assertEquals("CTV.Edmonton.HD.ca2", link("CA| CTV Edmonton", epgId = "CTVEdmonton.us", index = local)?.guideId)

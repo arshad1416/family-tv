@@ -66,14 +66,18 @@ object GuideMatch {
     /**
      * The keys a provider's channel name goes by, best first: the name, then without a call sign in
      * brackets ("CTV Edmonton (CFRN)"), then the call sign itself, then how the guides name regional
-     * news feeds ("Global News Calgary" is "Global Calgary"; "Global News Kingston" is CKWS).
+     * news feeds ("Global News Calgary" is "Global Calgary", "CTV News Montreal" is CFCF; "Global
+     * News Kingston" is CKWS).
      */
     internal fun nameKeys(name: String): List<String> {
         val full = key(name)
         val signs = ALIAS.findAll(name).map { it.groupValues[1] }.filter { CALL_SIGN.matches(it) }.map(::key).toList()
         val bare = key(name.replace(ALIAS, " "))
         val base = listOf(full, bare).distinct()
-        val regional = base.flatMap { k -> listOfNotNull(k.takeIf { it.startsWith(GLOBAL_NEWS) && it.length > GLOBAL_NEWS.length }?.let { "global" + it.removePrefix(GLOBAL_NEWS) }) }
+        // "Global News Calgary" is "Global Calgary", "CTV News Edmonton" is "CTV Edmonton"; not "CTV News Channel".
+        val regional = base.flatMap { k ->
+            NETWORKS.mapNotNull { n -> k.removePrefix(n + "news").takeIf { k.startsWith(n + "news") && it.length >= 2 && it != "channel" && it != "network" }?.let { n + it } }
+        }
         val renamed = (base + regional).mapNotNull { REGIONAL[it] }
         return (base + signs + regional + renamed).distinct()
     }
@@ -186,7 +190,6 @@ object GuideMatch {
     private val ALIAS = Regex("""\(([A-Z0-9][A-Z0-9-]{2,7})\)""")
     private val SUFFIX = Regex("""\.([a-zA-Z]{2})\d*$""")
     private val PREFIX = Regex("""^\s*(?:\[[^\]]{1,10}]|\([^)]{1,10}\)|[\p{L}\d]{1,8}(?:\s+\p{L}{2,3})?\s*[|:]|24/7)\s*""")
-    private const val GLOBAL_NEWS = "globalnews"
     /** Networks whose feeds are regional stations: "Global News Regina" is Global plus a place. */
     private val NETWORKS = listOf("citytv", "global", "ctv", "cbc")
     /** A call sign or short code worth matching on its own: "CFRN", "CFCF-DT", "CP24". Not "EVENT". */

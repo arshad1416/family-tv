@@ -80,6 +80,7 @@ class SearchRelevanceTest {
                 channel("10", "CBC 22:", 10),
                 channel("11", "CA| CBC Toronto", 11),
                 channel("12", "AR| CBC", 12),
+                channel("13", "CA| FOX NEWS", 13),
             ),
         )
     }
@@ -94,7 +95,8 @@ class SearchRelevanceTest {
     @Test
     fun aShortTitleComesFirstAndNotInsideOtherWords() {
         // Whole words before word starts: Up in the Air before Upgrade and Uppity.
-        assertEquals(listOf("Up", "Up in the Air", "The Up in Smoke Tour", "What's Up, Doc?", "Upgrade", "Uproar", "Uppity"), movies("up"))
+        // Titles that start with "up" by how well known they are, whole words a point ahead.
+        assertEquals(listOf("Up", "Up in the Air", "Upgrade", "The Up in Smoke Tour", "Uproar", "Uppity", "What's Up, Doc?"), movies("up"))
         assertEquals(movies("up"), movies("UP"))
         assertEquals("Upgrade", movies("upg").first())
     }
@@ -135,7 +137,8 @@ class SearchRelevanceTest {
 
     @Test
     fun aWordTypedPartWayFindsTheBestKnownTitleFirst() {
-        assertEquals(listOf("Break Point", "Prison Break", "Breaking Bad", "Breakout Kings"), shows("break"))
+        // Breaking Bad's rating keeps it first, whole word or not (round 3).
+        assertEquals(listOf("Breaking Bad", "Break Point", "Breakout Kings", "Prison Break"), shows("break"))
         assertEquals(listOf("Breaking Bad"), shows("bad breaking"))
         assertEquals("Up in the Air", movies("air").single())
         assertEquals("What's Up, Doc?", movies("doc").single())
@@ -160,7 +163,8 @@ class SearchRelevanceTest {
         assertEquals(listOf("Global News BC", "Global News Toronto"), channels("global news"))
         assertEquals(listOf("Global TV", "Global News BC", "Global News Toronto"), channels("global"))
         // Canadian lines first, then English ones.
-        assertEquals(listOf("CTV News", "Global News BC", "CBC News Network", "Global News Toronto", "BBC News"), channels("news"))
+        // Canadian broadcasters first, then the US channels a Canadian line carries, then English ones.
+        assertEquals(listOf("CTV News", "Global News BC", "CBC News Network", "Global News Toronto", "FOX NEWS", "BBC News"), channels("news"))
         // CBC Canada before Egypt's CBC channels, and the cut-off feed last.
         assertEquals(listOf("11", "8", "12", "9", "10"), runBlocking { dao.searchChannels("cbc", 50).map { it.streamId } })
         assertTrue(channels("ca").isEmpty())

@@ -64,9 +64,11 @@ class Catalog(private val db: AppDb, private val marks: SharedPreferences? = nul
     /**
      * False from the start of a refresh until it finishes, extra guides and all: a refresh cut off
      * (the app closed during the first load) leaves lists without their extra guides, and the next
-     * start loads them again. False on a TV that hasn't recorded one yet.
+     * start loads them again. False on a TV that hasn't recorded one yet, and after an update that
+     * changes how lists are stored or matched ([FORMAT]): an update over an existing install keeps
+     * its lists, which only pick up new search text and guide links when they are loaded again.
      */
-    val complete: Boolean get() = marks?.getBoolean(COMPLETE, false) ?: true
+    val complete: Boolean get() = marks?.let { it.getBoolean(COMPLETE, false) && it.getInt(FORMAT_KEY, 0) == FORMAT } ?: true
 
     suspend fun refresh(profile: Profile, onProgress: (Progress) -> Unit = {}) = withContext(Dispatchers.IO) {
         marks?.edit()?.putBoolean(COMPLETE, false)?.apply()
@@ -95,7 +97,7 @@ class Catalog(private val db: AppDb, private val marks: SharedPreferences? = nul
         val now = System.currentTimeMillis()
         dao.pruneProgrammes(before = now - 2 * HOUR, after = now + GUIDE_HOURS * HOUR)
         if (errors.isNotEmpty() && errors.size == profile.sources.size) throw IOException(errors.joinToString("; "))
-        marks?.edit()?.putBoolean(COMPLETE, true)?.apply()
+        marks?.edit()?.putBoolean(COMPLETE, true)?.putInt(FORMAT_KEY, FORMAT)?.apply()
     }
 
     /**
@@ -432,6 +434,14 @@ class Catalog(private val db: AppDb, private val marks: SharedPreferences? = nul
         const val GUIDE_HOURS = 48L
         const val MAX_EXTRA_GUIDES = 4
         private const val COMPLETE = "complete"
+        private const val FORMAT_KEY = "format"
+
+        /**
+         * How lists are stored and matched: raise it with any change to search text or guide
+         * matching, so TVs updated over an existing install load their lists again once.
+         * 2: search on clean titles and guide links for regional stations (Oct 26).
+         */
+        const val FORMAT = 2
         const val GUIDE_RETRY_MS = 20_000L
         /** Thin channels with no extra guide, listed for the admin (the portal keeps a few KB of status). */
         const val MAX_REPORTED = 30

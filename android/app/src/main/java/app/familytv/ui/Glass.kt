@@ -34,6 +34,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
 import androidx.tv.material3.LocalContentColor
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.ReadOnlyComposable
@@ -240,14 +241,15 @@ fun Modifier.glass(shape: Shape): Modifier = glass(shape, Glass.Fill, Glass.Line
 
 /** The radial gradient with [glow] softly lighting the top right. */
 @Composable
-internal fun GlassBackground(glow: Color, modifier: Modifier = Modifier, content: @Composable BoxScope.() -> Unit) {
+internal fun GlassBackground(glow: Color, modifier: Modifier = Modifier, hidden: State<Boolean>? = null, content: @Composable BoxScope.() -> Unit) {
     val p = LocalGlassPalette.current
     val top = lerp(p.top, glow, 0.16f)
     Box(modifier.fillMaxSize()) {
         // Its own cached layer: focus moving or a preview playing above never repaints the two
         // full-screen gradients (on the onn box every frame used to); only a glow or look change does.
         Box(
-            Modifier.fillMaxSize().graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }.drawWithCache {
+            // [hidden] (art covering the whole screen) is read here, so it only flips the layer, never recomposes.
+            Modifier.fillMaxSize().graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen; alpha = if (hidden?.value == true) 0f else 1f }.drawWithCache {
                 val base = Brush.radialGradient(0f to top, 0.45f to p.middle, 1f to p.bottom, center = Offset(size.width * 0.22f, 0f), radius = size.width * 1.1f)
                 val light = Brush.radialGradient(listOf(glow.copy(alpha = p.glow), glow.copy(alpha = p.glow / 3), Color.Transparent), center = Offset(size.width * 0.78f, size.height * 0.04f), radius = size.width * 0.42f)
                 onDrawBehind { drawRect(base); drawRect(light) }

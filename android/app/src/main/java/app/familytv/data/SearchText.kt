@@ -10,13 +10,13 @@ import java.text.Normalizer
  * display title ([SeriesTitles.parse]: no "EN -", "[4K]" or "(2019)" tags) plus the year, channels
  * on their listed name ([Names.channel]: no "CA|" code), ignoring case, accents and "&" vs "and".
  * Every word typed must start a word of the name ("pokemon" finds "Pokémon: The Movie", "star wa"
- * finds "Star Wars"). Results rank exact title first ("up" is Up; a leading "The" or "A" and a
- * trailing year don't count), then titles that start with the typed words as whole words (Up in the
- * Air), then the typed words as whole words anywhere (What's Up, Doc?), then titles that start with
- * the typed text (Upgrade), then the rest of the word matches; ties go to the provider's higher
- * rating, then the shorter title. Names that merely contain every word (3 letters or more) come
- * last. Channels rank Canadian lines first, then English ones, among the good matches, and feeds
- * with a cut-off name ("CBC 22:") last. Styled letters count as plain ones ([Names.clean]).
+ * finds "Star Wars"). Films and shows: the exact title first ("up" is Up; a leading "The" or "A"
+ * and a trailing year don't count), then titles that start with the typed text, then the other
+ * word matches, then names that merely contain every word (3 letters or more). Within a group the
+ * better known title leads: the provider's rating, a point more when the typed words are whole
+ * words of the title (Up in the Air before Upgrade, Breaking Bad still before Break Point). Channels
+ * rank Canadian ones first, then English ones, among the good matches, and feeds with a cut-off name
+ * ("CBC 22:") last. Styled letters count as plain ones ([Names.clean]).
  */
 object SearchText {
     private val MARKS = Regex("\\p{Mn}+")
@@ -54,6 +54,9 @@ object SearchText {
             else -> null
         }
     }
+
+    /** [rank]'s groups for films and shows: 0 exact, 1 starts with the text (ranks 1 and 3), 2 the other word matches, 3 contains. */
+    fun group(rank: Int): Int = when (rank) { 0 -> 0; 1, 3 -> 1; 2, 4 -> 2; else -> 3 }
 
     private val TRAILING_YEAR = Regex(" (19|20)\\d\\d$")
 
@@ -114,8 +117,12 @@ object SearchText {
     internal suspend fun <T> run(q: String, limit: Int, table: String, order: String, query: suspend (SupportSQLiteQuery) -> List<T>): List<T> =
         query(table, order, q, limit)?.let { query(it) }.orEmpty()
 
-    /** Films and shows: by rank, then the provider's higher rating, then the shorter title. */
-    internal const val TITLE_ORDER = "{tier}, CAST(rating AS REAL) DESC, length(searchText), name"
+    /**
+     * Films and shows: by [group]; within one, the provider's rating with a point more for whole
+     * words (ranks 1 and 2), then rank, the shorter title and the name.
+     */
+    internal const val TITLE_ORDER = "(CASE WHEN {tier} = 0 THEN 0 WHEN {tier} IN (1, 3) THEN 1 WHEN {tier} IN (2, 4) THEN 2 ELSE 3 END), " +
+        "COALESCE(CAST(rating AS REAL), 0) + (CASE WHEN {tier} IN (1, 2) THEN 1.0 ELSE 0 END) DESC, {tier}, length(searchText), name"
 
     private const val CATEGORY = "(SELECT c.name FROM categories c WHERE c.sourceId = channels.sourceId AND c.kind = 'live' AND c.categoryId = channels.categoryId)"
     private fun canadian(x: String) =
@@ -124,14 +131,28 @@ object SearchText {
         listOf("US", "USA", "UK", "GB", "EN").joinToString(" OR ") { "upper(ltrim($x)) GLOB '$it[^A-Z]*' OR upper(ltrim($x)) GLOB '[[(]$it[])]*'" } +
             " OR $x LIKE '%english%'"
 
+    /** Canadian broadcasters, as words of a channel's search text: they lead even where a Canadian line also carries US channels. */
+    private val CANADIAN_BRANDS = listOf(
+        "cbc", "ctv", "global", "citytv", "cp24", "tsn", "sportsnet", "rds", "tva", "cpac", "aptn", "tvo", "omni", "chch", "noovo", "ytv", "treehouse", "crave",
+    )
+    /** A country code other than Canada's in front ("EG| CBC Drama", "[AR] CBC"): Egypt's CBC isn't Canada's. */
+    private fun foreign(x: String) =
+        "((upper(ltrim($x)) GLOB '[A-Z][A-Z][|:]*' OR upper(ltrim($x)) GLOB '[A-Z][A-Z][A-Z][|:]*' OR upper(ltrim($x)) GLOB '[[(][A-Z][A-Z][])]*') " +
+            "AND NOT (${canadian(x)}) AND upper(ltrim($x)) NOT GLOB 'EN[^A-Z]*' AND upper(ltrim($x)) NOT GLOB 'FR[^A-Z]*')"
+    private val canadianBrand = "((${CANADIAN_BRANDS.joinToString(" OR ") { "searchText || ' ' LIKE '% $it %'" }}) AND NOT ${foreign("name")} AND NOT ${foreign("COALESCE($CATEGORY, '')")})"
+    /** The provider's own guide id names Canada ("CBCNewsNetwork.ca"); an extra guide's id ("x:...") doesn't count. */
+    private const val CANADIAN_ID = "(epgId NOT LIKE 'x:%' AND (lower(epgId) GLOB '*.ca' OR lower(epgId) GLOB '*.ca[0-9]'))"
+
     /**
      * Channels: cut-off names ("CBC 22:") last; then the good matches (rank 0 to 2), word starts,
-     * contains; within each, Canadian lines (by name or category), then English ones; then rank,
-     * the shorter name and the channel number.
+     * contains; within each, Canadian broadcasters (by name, or the provider's guide id), then the
+     * rest of Canadian lines (name or category coded CA, which can be US channels), then English
+     * ones; then rank, the shorter name and the channel number.
      */
     internal val CHANNEL_ORDER =
         "(CASE WHEN rtrim(name) GLOB '*[:|-]' THEN 1 ELSE 0 END), (CASE WHEN {tier} <= 2 THEN 0 WHEN {tier} <= 4 THEN 1 ELSE 2 END), " +
-            "(CASE WHEN ${canadian("name")} OR ${canadian(CATEGORY)} THEN 0 WHEN ${english("name")} OR ${english(CATEGORY)} THEN 1 ELSE 2 END), " +
+            "(CASE WHEN $canadianBrand OR $CANADIAN_ID THEN 0 WHEN ${canadian("name")} OR ${canadian(CATEGORY)} THEN 1 " +
+            "WHEN ${english("name")} OR ${english(CATEGORY)} THEN 2 ELSE 3 END), " +
             "{tier}, length(searchText), num, name"
 }
 

@@ -565,7 +565,7 @@ private fun CollectionPage(
             val s = shows.map { VodItem.Show(it) }
             val all = (m + s).sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.title })
             // Best match first (exact title, then starts with it, then any word), A to Z within each.
-            if (q.length >= 2) all.mapNotNull { x -> SearchText.rank(SearchText.index(x.title), q)?.let { x to it } }.sortedBy { it.second }.map { it.first } else when (view) {
+            if (q.length >= 2) all.mapNotNull { x -> SearchText.rank(SearchText.index(x.title), q)?.let { x to SearchText.group(it) } }.sortedBy { it.second }.map { it.first } else when (view) {
                 View.Movies -> m
                 View.Shows -> s
                 View.Recent -> movies.sortedByDescending { g -> g.copies.maxOf { it.added } }.map { VodItem.Movie(it) }

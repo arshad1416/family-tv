@@ -269,6 +269,7 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
             if (!saver && after > 0 && idle.ms >= after && !LivePreview.anyActive) saver = true
         }
     }
+    val backdropCovers = remember { mutableStateOf(false) }
     CompositionLocalProvider(
         LocalGlass provides true,
         LocalReducedMotion provides still,
@@ -280,7 +281,7 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
         LocalContentColor provides palette.text,
         LocalPress provides pressHost,
     ) {
-        GlassBackground(shown) {
+        GlassBackground(shown, hidden = backdropCovers) {
           // Any key resets the idle count; while the screensaver shows, the key that wakes it (down and up) goes no further.
           Box(
             Modifier.fillMaxSize().onPreviewKeyEvent { e ->
@@ -299,7 +300,7 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
           ) {
             val (shownTab, shownSettings) = onPage
             val backdropOn = shownTab == GlassTab.Home && !shownSettings && !barHidden.value && darkPages.intValue == 0
-            HomeBackdrop(shell.backdrop, show = backdropOn)
+            HomeBackdrop(shell.backdrop, show = backdropOn, covers = backdropCovers)
             // Only whether there is a slide, so the home doesn't recompose on every one.
             val hasSlide by remember { derivedStateOf { shell.backdrop.value != null } }
             // Inside the TV's overscan safe zone (48 dp across, 27 dp at the top and bottom).
