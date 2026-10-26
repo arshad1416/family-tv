@@ -54,6 +54,8 @@ internal object Featured {
     private const val TTL_MS = 6 * 3_600_000L
     private const val EVENT_DAYS = 7
     private const val POPULAR_PAGES = 2
+    /** The screensaver's most films, and most shows, from TMDB's lists. */
+    private const val ART_EACH = 20
 
     private val EVENT_CATEGORY = Regex("""\bPPV\b|\bEVENTS?\b""", RegexOption.IGNORE_CASE)
     /** Guide fillers between events, never an event of their own. */
@@ -135,7 +137,20 @@ internal object Featured {
 
     // ---- matching against the line ----
 
-    private suspend fun pickMovies(app: FamilyTvApp, l: Lists, visible: Set<Pair<String, String>>): List<Pair<MovieGroup, TmdbTitle>> {
+    /**
+     * The screensaver's "Movie and show art": backdrops of TMDB's top and popular films and shows
+     * that this profile's visible categories have (so a kids viewer gets kids' titles), with each
+     * title as its caption. Empty without a TMDB key or before the lists have ever loaded.
+     */
+    suspend fun art(app: FamilyTvApp, movies: List<CategoryEntity>, shows: List<CategoryEntity>, now: Long = System.currentTimeMillis()): List<Pair<String, String>> {
+        val key = app.portal.cachedConfig?.tmdbApiKey?.trim()?.takeIf { it.isNotEmpty() } ?: return emptyList()
+        val l = runCatching { lists(app, Tmdb(key, Http.client), now) }.getOrNull() ?: return emptyList()
+        val films = pickMovies(app, l, categoryKeys(movies), ART_EACH, fillBelow = ART_EACH)
+        val series = pickShows(app, l, categoryKeys(shows), ART_EACH, fillBelow = ART_EACH)
+        return (films.map { it.second } + series.map { it.second }).mapNotNull { t -> t.backdrop?.let { it to t.title } }.distinctBy { it.first }
+    }
+
+    private suspend fun pickMovies(app: FamilyTvApp, l: Lists, visible: Set<Pair<String, String>>, max: Int = MOVIES, fillBelow: Int = MIN_TITLES / 2): List<Pair<MovieGroup, TmdbTitle>> {
         val dao = app.db.catalog()
         val out = LinkedHashMap<String, Pair<MovieGroup, TmdbTitle>>()
         suspend fun take(list: List<TmdbTitle>, max: Int) {
@@ -150,12 +165,12 @@ internal object Featured {
                 out[t.id] = g to t
             }
         }
-        take(l.movies, MOVIES)
-        if (out.size < MIN_TITLES / 2) take(l.popularMovies, MOVIES)
+        take(l.movies, max)
+        if (out.size < fillBelow) take(l.popularMovies, max)
         return out.values.toList()
     }
 
-    private suspend fun pickShows(app: FamilyTvApp, l: Lists, visible: Set<Pair<String, String>>): List<Pair<SeriesGroup, TmdbTitle>> {
+    private suspend fun pickShows(app: FamilyTvApp, l: Lists, visible: Set<Pair<String, String>>, max: Int = SHOWS, fillBelow: Int = MIN_TITLES / 2): List<Pair<SeriesGroup, TmdbTitle>> {
         val dao = app.db.catalog()
         val out = LinkedHashMap<String, Pair<SeriesGroup, TmdbTitle>>()
         suspend fun take(list: List<TmdbTitle>, max: Int) {
@@ -170,8 +185,8 @@ internal object Featured {
                 out[t.id] = g to t
             }
         }
-        take(l.shows, SHOWS)
-        if (out.size < MIN_TITLES / 2) take(l.popularShows, SHOWS)
+        take(l.shows, max)
+        if (out.size < fillBelow) take(l.popularShows, max)
         return out.values.toList()
     }
 

@@ -187,7 +187,7 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
     LaunchedEffect(Unit) { delay(50); focusBar() }
     LaunchedEffect(settings) { if (!settings && barFocused) { delay(50); focusBar() } }
 
-    // The screensaver (backlog item 16): after 5 minutes without a key, unless a preview is playing.
+    // The screensaver (backlog item 16): after Settings' minutes without a key (5 unless changed), unless a preview is playing.
     val saverState = remember { mutableStateOf(false) }
     var saver by saverState
     val shell = remember { GlassShell(queries, glow, barHidden, darkPages, mutableStateOf(null), saverState) }
@@ -257,7 +257,8 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
         while (true) {
             delay(IDLE_STEP_MS)
             idle.ms += IDLE_STEP_MS
-            if (!saver && idle.ms >= SCREENSAVER_IDLE_MS && !LivePreview.anyActive) saver = true
+            val after = prefs.saverMinutes.value * 60_000L
+            if (!saver && after > 0 && idle.ms >= after && !LivePreview.anyActive) saver = true
         }
     }
     CompositionLocalProvider(
