@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.FloatState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.SideEffect
@@ -49,6 +50,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.Lifecycle
@@ -204,7 +206,7 @@ internal object Backdrops {
  * pan, so the onn keeps up.
  */
 @Composable
-internal fun BoxScope.HomeBackdrop(slide: State<Slide?>, show: Boolean, covers: MutableState<Boolean>? = null) {
+internal fun BoxScope.HomeBackdrop(slide: State<Slide?>, show: Boolean, covers: MutableState<Boolean>? = null, pageTop: FloatState? = null) {
     val ctx = LocalContext.current
     val target = slide.value.takeIf { show }
     val still = LocalReducedMotion.current
@@ -230,6 +232,12 @@ internal fun BoxScope.HomeBackdrop(slide: State<Slide?>, show: Boolean, covers: 
     if (covers != null) SideEffect { covers.value = covered }
     if (shown == 0f || front == null) return
     val p = LocalGlassPalette.current
+    val density = LocalDensity.current
+    // The art's bottom: the carousel slot's end under the top bar, so the first row's heading always sits on the page colour.
+    val slot = with(density) { CAROUSEL_HEIGHT.gx.toPx() }
+    val fadeLength = with(density) { 170.gx.toPx() }
+    val margin = with(density) { 8.gx.toPx() }
+    val near = with(density) { 50.gx.toPx() }
     Box(Modifier.matchParentSize().graphicsLayer { alpha = shown; compositingStrategy = CompositingStrategy.ModulateAlpha }) {
         listOfNotNull(behind, front).forEach { s ->
             androidx.compose.runtime.key(s.slide.key) {
@@ -242,8 +250,14 @@ internal fun BoxScope.HomeBackdrop(slide: State<Slide?>, show: Boolean, covers: 
                 val dark = Color(0xE6060A14)
                 val across = Brush.horizontalGradient(0f to dark, 0.45f to Color(0x99060A14), 0.75f to Color.Transparent)
                 // The top bar's light text sits on this shade, whatever the art.
-                // The art fills the top three quarters of the screen (Arshad, Oct 26), fading into the page by 78%.
-                val down = Brush.verticalGradient(0f to Color(0xCC060A14), 0.12f to Color(0x8C060A14), 0.24f to Color.Transparent, 0.56f to Color.Transparent, 0.68f to p.middle.copy(alpha = 0.75f), 0.78f to p.middle)
+                // The art fills about the top three quarters of the screen (Arshad, Oct 26), fading into the page at the slot's end.
+                val h = size.height
+                val end = ((pageTop?.floatValue ?: 0f).takeIf { it > 0f }?.let { it + slot + margin } ?: (h * 0.75f)).coerceIn(h * 0.4f, h) / h
+                val clear = (end - fadeLength / h).coerceAtLeast(0.25f)
+                val down = Brush.verticalGradient(
+                    0f to Color(0xCC060A14), 0.12f to Color(0x8C060A14), 0.24f to Color.Transparent, clear to Color.Transparent,
+                    (end - near / h).coerceAtLeast(clear) to p.middle.copy(alpha = 0.8f), end to p.middle,
+                )
                 onDrawBehind { drawRect(across); drawRect(down) }
             },
         )
@@ -262,7 +276,8 @@ private fun BackdropArt(s: Shown, modifier: Modifier) {
         } else {
             Box(Modifier.fillMaxSize().background(Brush.linearGradient(listOf(Color(0xFF07131F), Color(0xFF0B2A22), Color(0xFF060A14)))))
             s.slide.art?.let {
-                AsyncImage(it, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.align(Alignment.TopEnd).padding(top = 90.gx, end = 90.gx).size(360.gx, 240.gx))
+                // Below the top bar, clear of the search box.
+                AsyncImage(it, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.align(Alignment.TopEnd).padding(top = 190.gx, end = 90.gx).size(320.gx, 200.gx))
             }
         }
     }

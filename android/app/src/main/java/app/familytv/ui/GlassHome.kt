@@ -42,6 +42,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -52,6 +53,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.FocusDirection
@@ -270,6 +272,8 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
         }
     }
     val backdropCovers = remember { mutableStateOf(false) }
+    // Where the page starts under the top bar: the carousel's art fades out at its slot's bottom.
+    val pageTop = remember { mutableFloatStateOf(0f) }
     CompositionLocalProvider(
         LocalGlass provides true,
         LocalReducedMotion provides still,
@@ -300,7 +304,7 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
           ) {
             val (shownTab, shownSettings) = onPage
             val backdropOn = shownTab == GlassTab.Home && !shownSettings && !barHidden.value && darkPages.intValue == 0
-            HomeBackdrop(shell.backdrop, show = backdropOn, covers = backdropCovers)
+            HomeBackdrop(shell.backdrop, show = backdropOn, covers = backdropCovers, pageTop = pageTop)
             // Only whether there is a slide, so the home doesn't recompose on every one.
             val hasSlide by remember { derivedStateOf { shell.backdrop.value != null } }
             // Inside the TV's overscan safe zone (48 dp across, 27 dp at the top and bottom).
@@ -324,7 +328,7 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
                     }
                     Spacer(Modifier.height(16.gx))
                 }
-                Box(Modifier.weight(1f).fillMaxWidth()) {
+                Box(Modifier.weight(1f).fillMaxWidth().onPlaced { pageTop.floatValue = it.positionInRoot().y }) {
                     Box(Modifier.fillMaxSize().focusRequester(pageFocus).restoresFocus(entry).graphicsLayer { alpha = fade.value; translationY = (1f - fade.value) * rise }) {
                         pages.SaveableStateProvider(if (shownSettings) "settings" else shownTab.name) {
                             if (shownSettings) {

@@ -46,6 +46,7 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
@@ -319,10 +320,25 @@ private fun VodHome(
         }
     }
 
-    LazyColumn(state = list, verticalArrangement = Arrangement.spacedBy(22.gx), contentPadding = PaddingValues(bottom = 40.dp)) {
+    // Like Apple TV's: Down from the carousel scrolls it away whole, so the first row sits right under the top bar
+    // (and the art fades out with it); Up to the carousel brings the page back to the top.
+    var heroFocused by remember { mutableStateOf(false) }
+    var listFocused by remember { mutableStateOf(false) }
+    LaunchedEffect(heroFocused, listFocused, slides.isNotEmpty()) {
+        if (slides.isEmpty()) return@LaunchedEffect
+        when {
+            heroFocused -> if (list.firstVisibleItemIndex != 0 || list.firstVisibleItemScrollOffset != 0) list.animateScrollToItem(0)
+            listFocused && list.firstVisibleItemIndex == 0 -> list.animateScrollToItem(1)
+        }
+    }
+
+    LazyColumn(
+        Modifier.onFocusChanged { listFocused = it.hasFocus },
+        state = list, verticalArrangement = Arrangement.spacedBy(22.gx), contentPadding = PaddingValues(bottom = 40.dp),
+    ) {
         // Always the first item, so the highlights loading in after the rest don't land above the scroll position.
         item("hero") {
-            if (slides.isNotEmpty()) HomeCarousel(slides, marks, Modifier.height(CAROUSEL_HEIGHT.gx), entry = entryPoint(target == "hero"))
+            if (slides.isNotEmpty()) HomeCarousel(slides, marks, Modifier.height(CAROUSEL_HEIGHT.gx).onFocusChanged { heroFocused = it.hasFocus }, entry = entryPoint(target == "hero"))
             else if (featured != null) Row(Modifier.fillMaxWidth().height(190.gx).padding(horizontal = FOCUS_ROOM), horizontalArrangement = Arrangement.spacedBy(20.gx)) {
                 val (item, from) = featured
                 HeroCard(
