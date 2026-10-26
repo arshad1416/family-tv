@@ -36,6 +36,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableFloatState
 import androidx.compose.runtime.MutableIntState
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.collectAsState
@@ -112,6 +113,8 @@ internal class GlassShell(
     val backdrop: MutableState<Slide?>,
     /** True while the screensaver shows. */
     val saver: MutableState<Boolean>,
+    /** The Home carousel's height in pixels as last laid out (0 before), so the backdrop's shade lines up with the first row. */
+    val slot: MutableFloatState = mutableFloatStateOf(0f),
 )
 
 internal val LocalGlassShell = staticCompositionLocalOf<GlassShell?> { null }
@@ -272,7 +275,7 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
         }
     }
     val backdropCovers = remember { mutableStateOf(false) }
-    // Where the page starts under the top bar: the carousel's art fades out at its slot's bottom.
+    // Where the page starts under the top bar: the carousel's shade under the first row is measured from it.
     val pageTop = remember { mutableFloatStateOf(0f) }
     CompositionLocalProvider(
         LocalGlass provides true,
@@ -304,7 +307,7 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
           ) {
             val (shownTab, shownSettings) = onPage
             val backdropOn = shownTab == GlassTab.Home && !shownSettings && !barHidden.value && darkPages.intValue == 0
-            HomeBackdrop(shell.backdrop, show = backdropOn, covers = backdropCovers, pageTop = pageTop)
+            HomeBackdrop(shell.backdrop, show = backdropOn, covers = backdropCovers, pageTop = pageTop, slot = shell.slot)
             // Only whether there is a slide, so the home doesn't recompose on every one.
             val hasSlide by remember { derivedStateOf { shell.backdrop.value != null } }
             // Inside the TV's overscan safe zone (48 dp across, 27 dp at the top and bottom).
