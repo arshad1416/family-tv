@@ -286,8 +286,9 @@ private fun VodHome(
     val hasAdult = remember(all, profile, mine) { adultCategories(all, profile, mine[kind].orEmpty()).isNotEmpty() }
     // Home's carousel (TMDB's top titles the line has, and upcoming events); the highlights row stands in until it loads, or without it.
     val liveCats = categories(profile, Kind.LIVE)
-    val slides by produceState(emptyList<Slide>(), carousel, movieCats, seriesCats, liveCats) {
-        if (carousel && (movieCats.isNotEmpty() || seriesCats.isNotEmpty())) value = runCatching { Featured.load(ctx.app, movieCats, seriesCats, liveCats) }.getOrDefault(emptyList())
+    // The last slides made for this viewer show at once when Home comes back; they refresh behind.
+    val slides by produceState(remember(profile, carousel) { if (carousel) Featured.cached(profile) else emptyList() }, carousel, movieCats, seriesCats, liveCats) {
+        if (carousel && (movieCats.isNotEmpty() || seriesCats.isNotEmpty())) value = runCatching { Featured.load(ctx.app, profile, movieCats, seriesCats, liveCats) }.getOrDefault(value)
     }
 
     // Where focus lands: the poster whose page just closed, else the tile that opened the last page, else the first.

@@ -63,7 +63,26 @@ internal object Featured {
     /** Guide fillers between events, never an event of their own. */
     private val FILLER = Regex("""^(no (event|programme|program|information)|off air|tba|tbd|to be announced|coming soon|stay tuned|event (starts|start) soon)""", RegexOption.IGNORE_CASE)
 
-    suspend fun load(app: FamilyTvApp, movies: List<CategoryEntity>, shows: List<CategoryEntity>, live: List<CategoryEntity>, now: Long = System.currentTimeMillis()): List<Slide> {
+    /** The slides last made, and for whom, so Home shows the carousel at once when it comes back while they refresh. */
+    @Volatile private var last: Pair<Any, List<Slide>>? = null
+
+    /** The slides last made for [owner] (the profile as this viewer sees it), or none. */
+    fun cached(owner: Any): List<Slide> = last?.takeIf { it.first == owner }?.second.orEmpty()
+
+    /**
+     * Makes the slides for [owner] off the main thread. When they come out the same as [cached]'s,
+     * those very objects come back, so a refresh doesn't restart the carousel.
+     */
+    suspend fun load(app: FamilyTvApp, owner: Any, movies: List<CategoryEntity>, shows: List<CategoryEntity>, live: List<CategoryEntity>, now: Long = System.currentTimeMillis()): List<Slide> =
+        withContext(Dispatchers.Default) {
+            val made = make(app, movies, shows, live, now)
+            val before = cached(owner)
+            val out = if (before.map { it.key to it.detail } == made.map { it.key to it.detail }) before else made
+            if (out.isNotEmpty()) last = owner to out
+            out
+        }
+
+    private suspend fun make(app: FamilyTvApp, movies: List<CategoryEntity>, shows: List<CategoryEntity>, live: List<CategoryEntity>, now: Long): List<Slide> {
         val key = app.portal.cachedConfig?.tmdbApiKey?.trim()?.takeIf { it.isNotEmpty() }
         val lists = key?.let { runCatching { lists(app, Tmdb(it, Http.client), now) }.getOrNull() }
         val films = lists?.let { pickMovies(app, it, categoryKeys(movies)) }.orEmpty()

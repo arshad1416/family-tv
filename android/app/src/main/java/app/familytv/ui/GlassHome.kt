@@ -71,6 +71,7 @@ import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -253,11 +254,17 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
     }
     // The screensaver's idle time is counted in delays, not read in composition, so a key press never recomposes the home.
     val idle = remember { IdleCount() }
+    // The screen stays on while the home is in front, so the TV's own screensaver (Fire OS starts one
+    // at 5 minutes) doesn't beat ours; after SAVER_HOLD_MS of ours, or with ours Off, the TV's own
+    // screensaver and sleep take over as usual.
+    val view = LocalView.current
+    DisposableEffect(view) { onDispose { view.keepScreenOn = false } }
     LaunchedEffect(Unit) {
         while (true) {
+            val after = prefs.saverMinutes.value * 60_000L
+            view.keepScreenOn = after > 0 && idle.ms < after + SAVER_HOLD_MS
             delay(IDLE_STEP_MS)
             idle.ms += IDLE_STEP_MS
-            val after = prefs.saverMinutes.value * 60_000L
             if (!saver && after > 0 && idle.ms >= after && !LivePreview.anyActive) saver = true
         }
     }
@@ -290,7 +297,7 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
             },
           ) {
             val (shownTab, shownSettings) = onPage
-            HomeBackdrop(shell.backdrop.value.takeIf { shownTab == GlassTab.Home && !shownSettings && !barHidden.value && darkPages.intValue == 0 })
+            HomeBackdrop(shell.backdrop, show = shownTab == GlassTab.Home && !shownSettings && !barHidden.value && darkPages.intValue == 0)
             // Inside the TV's overscan safe zone (48 dp across, 27 dp at the top and bottom).
             Column(Modifier.fillMaxSize().padding(start = 48.dp, end = 48.dp, top = 27.dp, bottom = 18.dp).onFocusChanged { anyFocused = it.hasFocus }) {
                 if (!barHidden.value) {
@@ -364,6 +371,9 @@ private class IdleCount {
 }
 
 private const val IDLE_STEP_MS = 15_000L
+
+/** How long our screensaver keeps the screen on before the TV may sleep. */
+private const val SAVER_HOLD_MS = 2 * 3_600_000L
 
 /**
  * The title with the clock, YouTube and JustWatch (Movies and TV Shows), the Appearance switch and

@@ -271,7 +271,7 @@ private fun ScreensaverPanel() {
                     (if (s == source) "✓  $label" else label) to {
                         if (s == SaverSource.PHOTOS) {
                             menus.open = ItemMenu(
-                                "Google Photos needs a one-time setup on the Family TV portal before a TV can show an album. It isn't ready yet, so the screensaver keeps its pictures.",
+                                "Google Photos needs a setup on the portal first. It isn't ready yet.",
                                 listOf("OK" to {}),
                             )
                         } else {

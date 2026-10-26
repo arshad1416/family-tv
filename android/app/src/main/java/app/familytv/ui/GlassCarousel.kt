@@ -1,6 +1,6 @@
 package app.familytv.ui
 
-import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -20,6 +21,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -28,9 +30,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -145,44 +149,76 @@ internal fun HomeCarousel(slides: List<Slide>, marks: VodMarks, modifier: Modifi
 /** An event can be opened this long before it starts: its channel is usually showing the build-up. */
 private const val EVENT_EARLY_MS = 15 * 60_000L
 
-/** A backdrop decoded at the screen's size, so the preload and the drawn image share one cached bitmap. */
+/**
+ * A backdrop decoded off the main thread at the screen's size, in 16-bit colour (half the memory
+ * and upload of 32-bit; photos show no difference), so the preload and the drawn image share one
+ * cached bitmap.
+ */
 private fun backdropRequest(ctx: android.content.Context, url: String): ImageRequest {
     val m = ctx.resources.displayMetrics
-    return ImageRequest.Builder(ctx).data(url).size(m.widthPixels, m.heightPixels).build()
+    return ImageRequest.Builder(ctx).data(url).size(m.widthPixels, m.heightPixels).allowRgb565(true).build()
 }
 
 /**
  * The carousel's backdrop, full-bleed behind the TV home's top bar and page: the slide's TMDB art
  * (or an event's art over a dark sports backdrop), with a dark scrim behind the carousel's text and
- * a fade into the page's background below it. Cross-fades in [SLIDE_FADE_MS]; a plain cut when the
- * system asks for less motion. No zoom or pan, so the onn keeps up.
+ * a fade into the page's background below it, while [show]. Only this reads [slide], so a new slide
+ * redraws the backdrop and nothing else of the home. The new art fades in over the old in
+ * [SLIDE_FADE_MS] with its alpha applied to its own pixels (no offscreen copy of the screen), and
+ * the scrims sit in one cached layer; a plain cut when the system asks for less motion. No zoom or
+ * pan, so the onn keeps up.
  */
 @Composable
-internal fun BoxScope.HomeBackdrop(slide: Slide?) {
-    val ctx = LocalContext.current
+internal fun BoxScope.HomeBackdrop(slide: State<Slide?>, show: Boolean) {
+    val target = slide.value.takeIf { show }
     val still = LocalReducedMotion.current
-    val shown by animateFloatAsState(if (slide != null) 1f else 0f, tween(if (still) 0 else 400), label = "backdrop")
-    var last by remember { mutableStateOf<Slide?>(null) }
-    if (slide != null) last = slide
-    if (shown == 0f) return
+    val shown by animateFloatAsState(if (target != null) 1f else 0f, tween(if (still) 0 else 400), label = "backdrop")
+    // The slide in front, and the one it is fading in over (none once the fade ends).
+    var front by remember { mutableStateOf<Slide?>(null) }
+    var behind by remember { mutableStateOf<Slide?>(null) }
+    val fade = remember { Animatable(1f) }
+    LaunchedEffect(target) {
+        if (target == null || target === front) return@LaunchedEffect
+        behind = front
+        front = target
+        if (behind != null && !still) {
+            fade.snapTo(0f)
+            fade.animateTo(1f, tween(SLIDE_FADE_MS))
+        }
+        behind = null
+    }
+    if (shown == 0f || front == null) return
     val p = LocalGlassPalette.current
-    Box(Modifier.matchParentSize().graphicsLayer { alpha = shown }) {
-        Crossfade(last, animationSpec = tween(if (still) 0 else SLIDE_FADE_MS), label = "slide") { s ->
-            Box(Modifier.fillMaxSize()) {
-                val url = s?.backdrop
-                if (url != null) {
-                    AsyncImage(backdropRequest(ctx, url), contentDescription = null, contentScale = ContentScale.Crop, alignment = Alignment.TopCenter, modifier = Modifier.fillMaxSize())
-                } else if (s != null) {
-                    Box(Modifier.fillMaxSize().background(Brush.linearGradient(listOf(Color(0xFF07131F), Color(0xFF0B2A22), Color(0xFF060A14)))))
-                    s.art?.let {
-                        AsyncImage(it, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.align(Alignment.TopEnd).padding(top = 90.gx, end = 90.gx).size(360.gx, 240.gx))
-                    }
-                }
+    Box(Modifier.matchParentSize().graphicsLayer { alpha = shown; compositingStrategy = CompositingStrategy.ModulateAlpha }) {
+        listOfNotNull(behind, front).forEach { s ->
+            androidx.compose.runtime.key(s.key) {
+                BackdropArt(s, if (s === front && behind != null) Modifier.graphicsLayer { alpha = fade.value; compositingStrategy = CompositingStrategy.ModulateAlpha } else Modifier)
             }
         }
-        val dark = Color(0xE6060A14)
         // Dark behind the text on the left whatever the look; below the carousel, the page's own colour.
-        Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(0f to dark, 0.45f to Color(0x99060A14), 0.75f to Color.Transparent)))
-        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0f to Color(0x80060A14), 0.2f to Color.Transparent, 0.48f to Color.Transparent, 0.62f to p.middle.copy(alpha = 0.9f), 0.72f to p.middle)))
+        Spacer(
+            Modifier.fillMaxSize().graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }.drawWithCache {
+                val dark = Color(0xE6060A14)
+                val across = Brush.horizontalGradient(0f to dark, 0.45f to Color(0x99060A14), 0.75f to Color.Transparent)
+                val down = Brush.verticalGradient(0f to Color(0x80060A14), 0.2f to Color.Transparent, 0.48f to Color.Transparent, 0.62f to p.middle.copy(alpha = 0.9f), 0.72f to p.middle)
+                onDrawBehind { drawRect(across); drawRect(down) }
+            },
+        )
+    }
+}
+
+@Composable
+private fun BackdropArt(s: Slide, modifier: Modifier) {
+    val ctx = LocalContext.current
+    Box(modifier.fillMaxSize()) {
+        val url = s.backdrop
+        if (url != null) {
+            AsyncImage(backdropRequest(ctx, url), contentDescription = null, contentScale = ContentScale.Crop, alignment = Alignment.TopCenter, modifier = Modifier.fillMaxSize())
+        } else {
+            Box(Modifier.fillMaxSize().background(Brush.linearGradient(listOf(Color(0xFF07131F), Color(0xFF0B2A22), Color(0xFF060A14)))))
+            s.art?.let {
+                AsyncImage(it, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.align(Alignment.TopEnd).padding(top = 90.gx, end = 90.gx).size(360.gx, 240.gx))
+            }
+        }
     }
 }
