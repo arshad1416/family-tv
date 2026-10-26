@@ -74,7 +74,9 @@ internal fun HomeCarousel(slides: List<Slide>, marks: VodMarks, modifier: Modifi
     val shell = LocalGlassShell.current
     val nav = LocalSeriesNav.current
     val scope = rememberCoroutineScope()
-    var index by remember(slides) { mutableIntStateOf(0) }
+    // Back on Home, the slide that was showing comes back as it was, with no fade from another.
+    var index by remember(slides) { mutableIntStateOf(Featured.lastIndex.takeIf { it in slides.indices } ?: 0) }
+    LaunchedEffect(index) { Featured.lastIndex = index }
     val slide = slides[index.coerceIn(slides.indices)]
     val resumed by LocalLifecycleOwner.current.lifecycle.currentStateAsState()
     val paused = resumed != Lifecycle.State.RESUMED || shell?.saver?.value == true
@@ -200,7 +202,8 @@ internal fun BoxScope.HomeBackdrop(slide: State<Slide?>, show: Boolean) {
             Modifier.fillMaxSize().graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }.drawWithCache {
                 val dark = Color(0xE6060A14)
                 val across = Brush.horizontalGradient(0f to dark, 0.45f to Color(0x99060A14), 0.75f to Color.Transparent)
-                val down = Brush.verticalGradient(0f to Color(0x80060A14), 0.2f to Color.Transparent, 0.48f to Color.Transparent, 0.62f to p.middle.copy(alpha = 0.9f), 0.72f to p.middle)
+                // The top bar's light text sits on this shade, whatever the art.
+                val down = Brush.verticalGradient(0f to Color(0xCC060A14), 0.12f to Color(0x8C060A14), 0.24f to Color.Transparent, 0.48f to Color.Transparent, 0.62f to p.middle.copy(alpha = 0.9f), 0.72f to p.middle)
                 onDrawBehind { drawRect(across); drawRect(down) }
             },
         )

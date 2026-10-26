@@ -335,7 +335,10 @@ class Catalog(private val db: AppDb, private val marks: SharedPreferences? = nul
                 continue
             }
             val extraId = GuideMatch.EXTRA_PREFIX + link.guideId
-            if (cover >= GuideMatch.GOOD_COVERAGE) {
+            val extraCover = GuideMatch.coverage(next[extraId].orEmpty(), c.name, now, day)
+            // A regional station the provider points at another city's schedule takes its own.
+            val elsewhere = link.how == GuideMatch.How.NAME && extraCover >= GuideMatch.GOOD_COVERAGE && GuideMatch.ownIdIsElsewhere(provider[i])
+            if (cover >= GuideMatch.GOOD_COVERAGE && !elsewhere) {
                 if (ownId != null && filled.add(ownId)) {
                     val changed = GuideMatch.fill(
                         dao.programmeRows(ownId, now - 2 * HOUR, now + GUIDE_HOURS * HOUR),
@@ -343,7 +346,7 @@ class Catalog(private val db: AppDb, private val marks: SharedPreferences? = nul
                     )
                     if (changed.isNotEmpty()) dao.updateProgrammes(changed)
                 }
-            } else if (GuideMatch.coverage(next[extraId].orEmpty(), c.name, now, day) > cover) {
+            } else if (elsewhere || extraCover > cover) {
                 dao.setChannelGuide(c.sourceId, c.streamId, extraId)
                 used += extraId
                 switched++

@@ -447,11 +447,15 @@ internal fun AppButtons() {
             fill = Glass.Raised, border = true, fontSize = 15.gsp, padH = 16.gx, padV = 13.gx,
             icon = { PlayMark(Color(0xFFFF0033), Color.White) },
         )
-        GlassPill(
-            "JustWatch", { openApp(ctx, "JustWatch", JUSTWATCH, "https://www.justwatch.com") },
-            fill = Glass.Raised, border = true, fontSize = 15.gsp, padH = 16.gx, padV = 13.gx,
-            icon = { PlayMark(Color(0xFFFBC500), Color(0xFF0B0F18)) },
-        )
+        // Fire OS has no JustWatch app, and its Silk browser lands on an Appstore page instead of the site.
+        val justWatch = remember { !isFireTv(ctx) || installed(ctx, JUSTWATCH) }
+        if (justWatch) {
+            GlassPill(
+                "JustWatch", { openApp(ctx, "JustWatch", JUSTWATCH, "https://www.justwatch.com") },
+                fill = Glass.Raised, border = true, fontSize = 15.gsp, padH = 16.gx, padV = 13.gx,
+                icon = { PlayMark(Color(0xFFFBC500), Color(0xFF0B0F18)) },
+            )
+        }
     }
 }
 
@@ -474,10 +478,17 @@ private fun PlayMark(back: Color, mark: Color) {
 internal val YOUTUBE = listOf("com.google.android.youtube.tv", "com.amazon.firetv.youtube", "com.google.android.youtube")
 internal val JUSTWATCH = listOf("com.justwatch.justwatch")
 
+internal fun isFireTv(ctx: Context): Boolean = ctx.packageManager.hasSystemFeature("amazon.hardware.fire_tv")
+
+/** True when one of [packages] can be launched here. */
+internal fun installed(ctx: Context, packages: List<String>): Boolean = packages.any { launchIntent(ctx, it) != null }
+
+private fun launchIntent(ctx: Context, pkg: String): Intent? =
+    runCatching { ctx.packageManager.getLeanbackLaunchIntentForPackage(pkg) ?: ctx.packageManager.getLaunchIntentForPackage(pkg) }.getOrNull()
+
 /** Opens the first of [packages] installed, else [web] in the browser; says so when the TV can do neither. */
 internal fun openApp(ctx: Context, name: String, packages: List<String>, web: String) {
-    val pm = ctx.packageManager
-    val app = packages.firstNotNullOfOrNull { runCatching { pm.getLeanbackLaunchIntentForPackage(it) ?: pm.getLaunchIntentForPackage(it) }.getOrNull() }
+    val app = packages.firstNotNullOfOrNull { launchIntent(ctx, it) }
     val intent = (app ?: Intent(Intent.ACTION_VIEW, Uri.parse(web))).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     try {
         ctx.startActivity(intent)

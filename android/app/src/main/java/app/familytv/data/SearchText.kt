@@ -10,11 +10,13 @@ import java.text.Normalizer
  * display title ([SeriesTitles.parse]: no "EN -", "[4K]" or "(2019)" tags) plus the year, channels
  * on their listed name ([Names.channel]: no "CA|" code), ignoring case, accents and "&" vs "and".
  * Every word typed must start a word of the name ("pokemon" finds "Pokémon: The Movie", "star wa"
- * finds "Star Wars"). Results rank exact title first ("up" is Up before Up in the Air; a leading
- * "The" or "A" and a trailing year don't count), then titles that start with the typed text, then
- * the rest of the word matches; ties go to the provider's higher rating, then the shorter title.
- * When that finds fewer than asked for, names that merely contain every word (3 letters or more)
- * fill the rest. Styled letters count as plain ones ([Names.clean]: "raw" finds "ᴿᴬᵂ").
+ * finds "Star Wars"). Results rank exact title first ("up" is Up; a leading "The" or "A" and a
+ * trailing year don't count), then titles that start with the typed words as whole words (Up in the
+ * Air), then the typed words as whole words anywhere (What's Up, Doc?), then titles that start with
+ * the typed text (Upgrade), then the rest of the word matches; ties go to the provider's higher
+ * rating, then the shorter title. Names that merely contain every word (3 letters or more) come
+ * last. Channels rank Canadian lines first, then English ones, among the good matches, and feeds
+ * with a cut-off name ("CBC 22:") last. Styled letters count as plain ones ([Names.clean]).
  */
 object SearchText {
     private val MARKS = Regex("\\p{Mn}+")
@@ -35,17 +37,20 @@ object SearchText {
     fun matches(name: String, q: String): Boolean = rank(index(name), q) != null
 
     /**
-     * Where [name] ranks for [q] (0 exact title, 1 starts with it, 2 every word starts a word), or
-     * null when it doesn't match: the SQL ranking, for a list already loaded.
+     * Where [indexed] ranks for [q] (0 exact title, 1 starts with the words, 2 has the words, 3
+     * starts with the text, 4 every word starts a word), or null when it doesn't match: the SQL
+     * ranking, for a list already loaded.
      */
     fun rank(indexed: String, q: String): Int? {
-        val want = words(q).take(MAX_WORDS).ifEmpty { return 2 }
+        val want = words(q).take(MAX_WORDS).ifEmpty { return 4 }
         val phrase = want.joinToString("") { " $it" }
         val bare = indexed.replace(TRAILING_YEAR, "")
         return when {
             ARTICLES.any { bare == it + phrase || indexed == it + phrase } -> 0
-            ARTICLES.any { indexed.startsWith(it + phrase) } -> 1
-            want.all { indexed.contains(" $it") } -> 2
+            ARTICLES.any { indexed.startsWith("$it$phrase ") } -> 1
+            want.all { "$indexed ".contains(" $it ") } -> 2
+            ARTICLES.any { indexed.startsWith(it + phrase) } -> 3
+            want.all { indexed.contains(" $it") } -> 4
             else -> null
         }
     }
@@ -64,44 +69,74 @@ object SearchText {
     /** A channel's stored form: its name as listed, without the country code. */
     fun channelIndex(name: String): String = index(Names.channel(name))
 
-    /** The ranked query for [q], or null when it has no words. [tiebreak] orders rows of one rank. */
-    internal fun query(table: String, tiebreak: String, q: String, limit: Int): SupportSQLiteQuery? {
+    /**
+     * The ranked query for [q], or null when it has no words. [order] is the ORDER BY, where
+     * `{tier}` stands for [rank]'s number (5 for names that only contain the words).
+     */
+    internal fun query(table: String, order: String, q: String, limit: Int): SupportSQLiteQuery? {
         val words = words(q).take(MAX_WORDS).ifEmpty { return null }
         val phrase = words.joinToString("") { " $it" }
         val prefix = words.joinToString(" AND ") { "searchText LIKE ?" }
         val prefixArgs = words.map { "% $it%" }
         val contains = words.all { it.length >= CONTAINS_MIN }
+        val tier = buildString {
+            append("(CASE WHEN ${ARTICLES.joinToString(" OR ") { "searchText = ? OR searchText GLOB ?" }} THEN 0")
+            append(" WHEN ${ARTICLES.joinToString(" OR ") { "searchText LIKE ?" }} THEN 1")
+            append(" WHEN ${words.joinToString(" AND ") { "searchText || ' ' LIKE ?" }} THEN 2")
+            append(" WHEN ${ARTICLES.joinToString(" OR ") { "searchText LIKE ?" }} THEN 3")
+            append(" WHEN $prefix THEN 4 ELSE 5 END)")
+        }
+        val tierArgs = buildList<Any> {
+            ARTICLES.forEach { add(it + phrase); add("$it$phrase [12][0-9][0-9][0-9]") }
+            ARTICLES.forEach { add("$it$phrase %") }
+            words.forEach { add("% $it %") }
+            ARTICLES.forEach { add("$it$phrase%") }
+            addAll(prefixArgs)
+        }
+        val parts = order.split("{tier}")
         val sql = buildString {
             append("SELECT * FROM $table WHERE ($prefix)")
             if (contains) append(" OR (${words.joinToString(" AND ") { "searchText LIKE ?" }})")
             // Rows from before searchText existed (empty until the next reload) match on the raw name, as before.
             append(" OR (searchText = '' AND name LIKE ?)")
-            append(" ORDER BY CASE")
-            append(" WHEN ${ARTICLES.joinToString(" OR ") { "searchText = ? OR searchText GLOB ?" }} THEN 0")
-            append(" WHEN ${ARTICLES.joinToString(" OR ") { "searchText LIKE ?" }} THEN 1")
-            append(" WHEN $prefix THEN 2 ELSE 3 END, $tiebreak LIMIT ?")
+            append(" ORDER BY ").append(parts.joinToString(tier)).append(" LIMIT ?")
         }
         val args = buildList<Any> {
             addAll(prefixArgs)
             if (contains) addAll(words.map { "%$it%" })
             add("%${q.trim()}%")
-            ARTICLES.forEach { add(it + phrase); add("$it$phrase [12][0-9][0-9][0-9]") }
-            ARTICLES.forEach { add("$it$phrase%") }
-            addAll(prefixArgs)
+            repeat(parts.size - 1) { addAll(tierArgs) }
             add(limit)
         }
         return SimpleSQLiteQuery(sql, args.toTypedArray())
     }
 
-    internal suspend fun <T> run(q: String, limit: Int, table: String, tiebreak: String, query: suspend (SupportSQLiteQuery) -> List<T>): List<T> =
-        query(table, tiebreak, q, limit)?.let { query(it) }.orEmpty()
+    internal suspend fun <T> run(q: String, limit: Int, table: String, order: String, query: suspend (SupportSQLiteQuery) -> List<T>): List<T> =
+        query(table, order, q, limit)?.let { query(it) }.orEmpty()
 
-    /** Rows of one rank: the provider's higher rating first, then the shorter title. */
-    internal const val TITLE_ORDER = "CAST(rating AS REAL) DESC, length(searchText), name"
+    /** Films and shows: by rank, then the provider's higher rating, then the shorter title. */
+    internal const val TITLE_ORDER = "{tier}, CAST(rating AS REAL) DESC, length(searchText), name"
+
+    private const val CATEGORY = "(SELECT c.name FROM categories c WHERE c.sourceId = channels.sourceId AND c.kind = 'live' AND c.categoryId = channels.categoryId)"
+    private fun canadian(x: String) =
+        "upper(ltrim($x)) GLOB 'CA[^A-Z]*' OR upper(ltrim($x)) GLOB 'CAN[^A-Z]*' OR upper(ltrim($x)) GLOB '[[(]CA[])]*' OR $x LIKE '%canad%'"
+    private fun english(x: String) =
+        listOf("US", "USA", "UK", "GB", "EN").joinToString(" OR ") { "upper(ltrim($x)) GLOB '$it[^A-Z]*' OR upper(ltrim($x)) GLOB '[[(]$it[])]*'" } +
+            " OR $x LIKE '%english%'"
+
+    /**
+     * Channels: cut-off names ("CBC 22:") last; then the good matches (rank 0 to 2), word starts,
+     * contains; within each, Canadian lines (by name or category), then English ones; then rank,
+     * the shorter name and the channel number.
+     */
+    internal val CHANNEL_ORDER =
+        "(CASE WHEN rtrim(name) GLOB '*[:|-]' THEN 1 ELSE 0 END), (CASE WHEN {tier} <= 2 THEN 0 WHEN {tier} <= 4 THEN 1 ELSE 2 END), " +
+            "(CASE WHEN ${canadian("name")} OR ${canadian(CATEGORY)} THEN 0 WHEN ${english("name")} OR ${english(CATEGORY)} THEN 1 ELSE 2 END), " +
+            "{tier}, length(searchText), num, name"
 }
 
 suspend fun CatalogDao.searchChannels(q: String, limit: Int): List<ChannelEntity> =
-    SearchText.run(q, limit, "channels", "length(searchText), num, name") { rawChannels(it) }
+    SearchText.run(q, limit, "channels", SearchText.CHANNEL_ORDER) { rawChannels(it) }
 
 suspend fun CatalogDao.searchMovies(q: String, limit: Int): List<MovieEntity> =
     SearchText.run(q, limit, "movies", SearchText.TITLE_ORDER) { rawMovies(it) }

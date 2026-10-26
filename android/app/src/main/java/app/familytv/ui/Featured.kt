@@ -69,6 +69,9 @@ internal object Featured {
     /** The slides last made for [owner] (the profile as this viewer sees it), or none. */
     fun cached(owner: Any): List<Slide> = last?.takeIf { it.first == owner }?.second.orEmpty()
 
+    /** The carousel's slide when Home was last left, so coming back shows the same one. */
+    @Volatile var lastIndex = 0
+
     /**
      * Makes the slides for [owner] off the main thread. When they come out the same as [cached]'s,
      * those very objects come back, so a refresh doesn't restart the carousel.

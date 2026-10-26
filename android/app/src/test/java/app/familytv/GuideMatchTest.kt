@@ -56,6 +56,40 @@ class GuideMatchTest {
     }
 
     @Test
+    fun regionalStationsLinkUnderTheGuidesNames() {
+        // Names as epgshare01's CA2 guide lists them (Oct 26).
+        val local = GuideMatch.Index(
+            listOf(
+                "Global.Calgary.HD.ca2", "Global.Calgary.ca2", "Global.Edmonton.ca2", "Global.Regina.ca2", "Global.Maritimes.ca2",
+                "Global.Maritimes.(CIHF).ca2", "Global.Manitoba.ca2", "CKWS.ca2", "CFCF.ca2", "CTV.Edmonton.HD.ca2", "CTV.Edmonton.ca2",
+            ).map(::ch),
+        )
+        assertEquals("CKWS.ca2", link("CA| GLOBAL NEWS KINGSTON HD", index = local)?.guideId)
+        assertEquals("Global.Calgary.HD.ca2", link("CA| Global News Calgary", index = local)?.guideId)
+        assertEquals("Global.Maritimes.ca2", link("CA| Global News Halifax", index = local)?.guideId)
+        assertEquals("Global.Edmonton.ca2", link("CA| Global News Edmonton", index = local)?.guideId)
+        assertEquals("Global.Regina.ca2", link("CA| Global News Regina", index = local)?.guideId)
+        assertEquals("Global.Manitoba.ca2", link("CA| GLOBAL NEWS WINNIPEG", index = local)?.guideId)
+        assertEquals("CFCF.ca2", link("CA| CTV MONTREAL HD", index = local)?.guideId)
+        assertEquals("CTV.Edmonton.HD.ca2", link("CA| CTV Edmonton (CFRN)", index = local)?.guideId)
+        // The provider's id says USA, the name says Canada: the name's country still finds it.
+        assertEquals("CTV.Edmonton.HD.ca2", link("CA| CTV Edmonton", epgId = "CTVEdmonton.us", index = local)?.guideId)
+        // "(EVENT)" is not a call sign.
+        assertEquals(listOf("ctvedmontonevent", "ctvedmonton"), GuideMatch.nameKeys("CTV Edmonton (EVENT)"))
+    }
+
+    @Test
+    fun aRegionalStationPointedAtAnotherCityIsSpotted() {
+        fun elsewhere(name: String, id: String?) = GuideMatch.ownIdIsElsewhere(GuideMatch.Channel(name, id, null))
+        assertTrue(elsewhere("CA| Global News Regina", "GlobalBC1.ca"))
+        assertFalse(elsewhere("CA| Global News Regina", "Global.Regina.ca"))
+        assertFalse(elsewhere("CA| CTV Montreal", "CTVMontreal.ca"))
+        assertFalse(elsewhere("CA| CP24", "CP24.ca"))
+        assertFalse(elsewhere("CA| Global News Regina", null))
+        assertFalse(elsewhere("CA| TSN 1", "TSN.ca"))
+    }
+
+    @Test
     fun countriesFromIdsNamesAndCategories() {
         assertEquals("ca", GuideMatch.countryOfId("CTV.Toronto.HD.ca2"))
         assertEquals("us", GuideMatch.countryOfId("cnn.us"))

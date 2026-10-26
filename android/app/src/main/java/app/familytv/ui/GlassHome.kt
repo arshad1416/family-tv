@@ -39,6 +39,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableIntState
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
@@ -297,21 +298,29 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
             },
           ) {
             val (shownTab, shownSettings) = onPage
-            HomeBackdrop(shell.backdrop, show = shownTab == GlassTab.Home && !shownSettings && !barHidden.value && darkPages.intValue == 0)
+            val backdropOn = shownTab == GlassTab.Home && !shownSettings && !barHidden.value && darkPages.intValue == 0
+            HomeBackdrop(shell.backdrop, show = backdropOn)
+            // Only whether there is a slide, so the home doesn't recompose on every one.
+            val hasSlide by remember { derivedStateOf { shell.backdrop.value != null } }
             // Inside the TV's overscan safe zone (48 dp across, 27 dp at the top and bottom).
             Column(Modifier.fillMaxSize().padding(start = 48.dp, end = 48.dp, top = 27.dp, bottom = 18.dp).onFocusChanged { anyFocused = it.hasFocus }) {
                 if (!barHidden.value) {
-                    GlassTopBar(
-                        tab, settings, tabFocus, settingsFocus,
-                        query = queries.getValue(tab).takeIf { !settings },
-                        onTab = { tab = it; settings = false },
-                        onSettings = { settings = true },
-                        onFocused = { barFocused = it },
-                        appearance = appearance,
-                        onAppearance = prefs::setAppearance,
-                        viewer = viewer?.name ?: "Who's watching?",
-                        onViewers = { picking = true }.takeIf { hasViewers },
-                    )
+                    // Over the carousel's art the bar keeps light text in either look, on the art's dark top shade.
+                    // One provider either way, so the bar (and its focus) stays put when the tab changes.
+                    val barPalette = if (backdropOn && hasSlide) GlassPalette.Dark else palette
+                    CompositionLocalProvider(LocalGlassPalette provides barPalette, LocalContentColor provides barPalette.text) {
+                        GlassTopBar(
+                            tab, settings, tabFocus, settingsFocus,
+                            query = queries.getValue(tab).takeIf { !settings },
+                            onTab = { tab = it; settings = false },
+                            onSettings = { settings = true },
+                            onFocused = { barFocused = it },
+                            appearance = appearance,
+                            onAppearance = prefs::setAppearance,
+                            viewer = viewer?.name ?: "Who's watching?",
+                            onViewers = { picking = true }.takeIf { hasViewers },
+                        )
+                    }
                     Spacer(Modifier.height(16.gx))
                 }
                 Box(Modifier.weight(1f).fillMaxWidth()) {

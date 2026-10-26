@@ -30,11 +30,13 @@ class SearchTextTest {
     }
 
     @Test
-    fun rankIsExactThenStartsWithThenWordStarts() {
+    fun rankIsExactThenWholeWordsThenWordStarts() {
         assertEquals(0, SearchText.rank(" up 2009", "up"))
         assertEquals(0, SearchText.rank(" the office", "office"))
         assertEquals(1, SearchText.rank(" up in the air 2009", "up"))
         assertEquals(2, SearchText.rank(" what s up doc 1972", "up"))
+        assertEquals(3, SearchText.rank(" upgrade 2018", "up"))
+        assertEquals(4, SearchText.rank(" what s upgrade", "up"))
         assertNull(SearchText.rank(" superman 1978", "up"))
     }
 
