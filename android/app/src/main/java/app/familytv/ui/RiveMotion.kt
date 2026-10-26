@@ -160,6 +160,64 @@ internal class RiveTransition private constructor(val view: RiveAnimationView) {
 }
 
 /**
+ * The Home carousel's slide-change flourish (family_tv_carousel.riv, state machine "Carousel":
+ * number "style", trigger "go", event "done"): light drawn over the art while the backdrop fades
+ * underneath; the art itself stays in the app. Hidden and paused when idle; a [play] while one runs
+ * is refused. If "done" doesn't arrive in time, it hides anyway.
+ */
+internal class RiveCarouselFx private constructor(val view: RiveAnimationView) {
+    private var playing = false
+    private val doneLate = Runnable { done() }
+
+    init {
+        view.visibility = View.INVISIBLE
+        view.addEventListener(object : RiveFileController.RiveEventListener {
+            override fun notifyEvent(event: RiveEvent) {
+                if (event.name == "done") view.post(::done)
+            }
+        })
+    }
+
+    /** Plays [style] ([SWEEP], [GLOW] or [STREAKS]); false, with nothing played, unless idle. */
+    fun play(style: Int): Boolean {
+        if (playing) return false
+        val started = runCatching {
+            view.visibility = View.VISIBLE
+            view.play(CAROUSEL, isStateMachine = true)
+            view.setNumberState(CAROUSEL, "style", style.toFloat())
+            view.fireState(CAROUSEL, "go")
+        }.isSuccess
+        if (!started) {
+            view.visibility = View.INVISIBLE
+            return false
+        }
+        playing = true
+        view.postDelayed(doneLate, CAROUSEL_DONE_BY_MS)
+        return true
+    }
+
+    private fun done() {
+        if (!playing) return
+        playing = false
+        view.removeCallbacks(doneLate)
+        view.visibility = View.INVISIBLE
+        runCatching { view.pause() }
+    }
+
+    companion object {
+        /** A soft diagonal band of light crossing left to right (films). */
+        const val SWEEP = 0
+        /** A bloom and ring opening over the art's upper right (shows). */
+        const val GLOW = 1
+        /** Thin streaks gliding right to left at different speeds (events). */
+        const val STREAKS = 2
+
+        /** Null where Rive can't run; the slides then just fade. */
+        fun create(ctx: Context): RiveCarouselFx? = riveView(ctx, R.raw.family_tv_carousel, CAROUSEL, Fit.FILL)?.let(::RiveCarouselFx)
+    }
+}
+
+/**
  * A tab's Rive icon (family_tv_nav_icons.riv, artboard [artboard], state machine "Icon"): it plays
  * its own move once on focus, a squash on each new [presses], and follows [selected] and [light]
  * for its ink. Still when idle: paused once its move is over.
@@ -264,6 +322,9 @@ private const val ICON_SETTLE_MS = 900L
 private const val PRESS_MS = 350L
 private const val LOADING = "Loading"
 private const val TRANSITION = "Transition"
+private const val CAROUSEL = "Carousel"
+/** The flourish runs 800 ms; past this it hides anyway. */
+private const val CAROUSEL_DONE_BY_MS = 1_100L
 /** How long a load runs before the loader shows. */
 private const val LOADER_WAIT_MS = 300L
 /** The loader's 200 ms fade-out, with room to spare. */

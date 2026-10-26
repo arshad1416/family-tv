@@ -31,6 +31,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
@@ -54,6 +55,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.currentStateAsState
@@ -217,7 +219,9 @@ internal object Backdrops {
  * redraws the backdrop and nothing else of the home. The new art fades in over the old in
  * [SLIDE_FADE_MS] with its alpha applied to its own pixels (no offscreen copy of the screen), and
  * the scrims sit in one cached layer; a plain cut when the system asks for less motion, or on a box
- * that can't keep up with the fade ([SlideFade]). No zoom or pan.
+ * that can't keep up with the fade ([SlideFade]). Where the fades keep up, a Rive flourish of light
+ * plays over the art as it fades ([RiveCarouselFx]: a sweep for films, a glow for shows, streaks
+ * for events), under the text's shade. No zoom or pan.
  */
 @Composable
 internal fun BoxScope.HomeBackdrop(slide: State<Slide?>, show: Boolean, covers: MutableState<Boolean>? = null, pageTop: FloatState? = null, slot: FloatState? = null) {
@@ -229,6 +233,11 @@ internal fun BoxScope.HomeBackdrop(slide: State<Slide?>, show: Boolean, covers: 
     var front by remember { mutableStateOf<Shown?>(null) }
     var behind by remember { mutableStateOf<Shown?>(null) }
     val fade = remember { Animatable(1f) }
+    // The flourish's view exists only on a box whose plain fades passed (never on the onn, which cuts).
+    remember { SlideFade.cuts(ctx) }
+    val fxOn = SlideFade.effects.value && !still
+    val fx = remember(fxOn) { if (fxOn) RiveCarouselFx.create(ctx) else null }
+    val fxNow by rememberUpdatedState(fx)
     LaunchedEffect(target) {
         if (target == null || target === front?.slide) return@LaunchedEffect
         // The old art stays up until the new one is decoded: the fade never starts on a blank.
@@ -238,7 +247,13 @@ internal fun BoxScope.HomeBackdrop(slide: State<Slide?>, show: Boolean, covers: 
         front = Shown(target, art)
         if (fading) {
             fade.snapTo(0f)
-            SlideFade.watch(ctx) { fade.animateTo(1f, tween(SLIDE_FADE_MS)) }
+            val style = when (target.target) {
+                is Slide.Target.Movie -> RiveCarouselFx.SWEEP
+                is Slide.Target.Show -> RiveCarouselFx.GLOW
+                is Slide.Target.Event -> RiveCarouselFx.STREAKS
+            }
+            val withFx = fxNow?.play(style) == true
+            SlideFade.watch(ctx, withFx) { fade.animateTo(1f, tween(SLIDE_FADE_MS)) }
         }
         behind = null
     }
@@ -257,6 +272,8 @@ internal fun BoxScope.HomeBackdrop(slide: State<Slide?>, show: Boolean, covers: 
                 BackdropArt(s, if (s === front && behind != null) Modifier.graphicsLayer { alpha = fade.value; compositingStrategy = CompositingStrategy.ModulateAlpha } else Modifier)
             }
         }
+        // Invisible and paused between changes.
+        fx?.let { f -> AndroidView({ f.view }, Modifier.matchParentSize()) }
         // Dark behind the text on the left whatever the look; below the carousel, the page's own colour.
         Spacer(
             Modifier.fillMaxSize().graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }.drawWithCache {
@@ -284,29 +301,62 @@ internal fun BoxScope.HomeBackdrop(slide: State<Slide?>, show: Boolean, covers: 
 }
 
 /**
- * Whether this box cross-fades the carousel's slides or cuts between them. Decided on the box, not
- * from a list of models: a low-RAM device cuts from the start; otherwise the first fades are
- * timed, and when [BAD_FADES] of the first [TRIED_FADES] miss more than [LATE_SHARE] of their
- * frames (the onn, 5-40%), it cuts from then on. Kept per app version, so an update times again.
+ * How this box changes the carousel's slides, decided on the box, not from a list of models:
+ *  - a low-RAM device cuts from the start;
+ *  - otherwise the first [TRIED] fades are timed, and when [BAD] of them miss more than
+ *    [LATE_SHARE] of their frames (the onn, 5-40%) it cuts from then on;
+ *  - a box whose fades pass gets the Rive flourish over them ([effects], [RiveCarouselFx]), and
+ *    those fades are timed again: [BAD] of [TRIED] missing frames turns the flourish off, the
+ *    plain fade stays.
+ * Each outcome is kept per app version, so an update times again.
  */
 internal object SlideFade {
-    private const val TRIED_FADES = 3
-    private const val BAD_FADES = 2
+    private const val TRIED = 3
+    private const val BAD = 2
     private const val LATE_SHARE = 0.1
-    private const val KEY = "slideCut"
-    @Volatile private var cut: Boolean? = null
+    private const val CUT = "slideCut"
+    private const val OK = "slideOk"
+    private const val FX_OFF = "slideFxOff"
+    private const val FX_OK = "slideFxOk"
+    private var loaded = false
+    private var cut = false
+    private var ok = false
+    private var fxOff = false
+    private var fxOk = false
     private var tried = 0
     private var bad = 0
+    private var fxTried = 0
+    private var fxBad = 0
 
-    fun cuts(ctx: android.content.Context): Boolean = cut ?: run {
-        val p = ctx.getSharedPreferences("featured", android.content.Context.MODE_PRIVATE)
+    /** True once the plain fades have passed and the flourish hasn't been turned off. */
+    val effects = mutableStateOf(false)
+
+    private fun prefs(ctx: android.content.Context) = ctx.getSharedPreferences("featured", android.content.Context.MODE_PRIVATE)
+
+    private fun load(ctx: android.content.Context) {
+        if (loaded) return
+        loaded = true
+        val p = prefs(ctx)
+        val v = BuildConfig.VERSION_CODE
         val am = ctx.getSystemService(android.content.Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
-        (am?.isLowRamDevice == true || p.getInt(KEY, 0) == BuildConfig.VERSION_CODE).also { cut = it }
+        cut = am?.isLowRamDevice == true || p.getInt(CUT, 0) == v
+        ok = p.getInt(OK, 0) == v
+        fxOff = p.getInt(FX_OFF, 0) == v
+        fxOk = p.getInt(FX_OK, 0) == v
+        effects.value = !cut && ok && !fxOff
     }
 
-    /** Runs [fade] while counting frames that came later than one and a half refreshes, while the first fades are still being timed. */
-    suspend fun watch(ctx: android.content.Context, fade: suspend () -> Unit) {
-        if (tried >= TRIED_FADES) return fade()
+    fun cuts(ctx: android.content.Context): Boolean = load(ctx).let { cut }
+
+    private fun keep(ctx: android.content.Context, key: String) = prefs(ctx).edit().putInt(key, BuildConfig.VERSION_CODE).apply()
+
+    /**
+     * Runs [fade] ([withFx]: with the flourish over it) while counting frames that came later than one and a
+     * half refreshes, while that kind of fade is still being timed.
+     */
+    suspend fun watch(ctx: android.content.Context, withFx: Boolean, fade: suspend () -> Unit) {
+        load(ctx)
+        if (if (withFx) fxOk || fxTried >= TRIED else ok || tried >= TRIED) return fade()
         @Suppress("DEPRECATION")
         val hz = (ctx.getSystemService(android.content.Context.WINDOW_SERVICE) as? android.view.WindowManager)?.defaultDisplay?.refreshRate?.takeIf { it >= 20f } ?: 60f
         val late = (1.5e9 / hz).toLong()
@@ -325,12 +375,25 @@ internal object SlideFade {
             fade()
             clock.cancel()
         }
-        tried++
-        if (frames >= 5 && missed > frames * LATE_SHARE) bad++
-        android.util.Log.i("SlideFade", "fade $tried: $missed of $frames frames late, ${if (bad >= BAD_FADES) "cutting from now on" else "fading"}")
-        if (bad >= BAD_FADES) {
-            cut = true
-            ctx.getSharedPreferences("featured", android.content.Context.MODE_PRIVATE).edit().putInt(KEY, BuildConfig.VERSION_CODE).apply()
+        val slow = frames >= 5 && missed > frames * LATE_SHARE
+        if (withFx) {
+            fxTried++
+            if (slow) fxBad++
+            val verdict = when {
+                fxBad >= BAD -> { fxOff = true; effects.value = false; keep(ctx, FX_OFF); "flourish off, fading" }
+                fxTried >= TRIED -> { fxOk = true; keep(ctx, FX_OK); "flourish kept" }
+                else -> "timing"
+            }
+            android.util.Log.i("SlideFade", "fade with flourish $fxTried: $missed of $frames frames late, $verdict")
+        } else {
+            tried++
+            if (slow) bad++
+            val verdict = when {
+                bad >= BAD -> { cut = true; effects.value = false; keep(ctx, CUT); "cutting from now on" }
+                tried >= TRIED -> { ok = true; keep(ctx, OK); effects.value = !fxOff; "fading, flourish ${if (fxOff) "off" else "on"}" }
+                else -> "timing"
+            }
+            android.util.Log.i("SlideFade", "fade $tried: $missed of $frames frames late, $verdict")
         }
     }
 }
