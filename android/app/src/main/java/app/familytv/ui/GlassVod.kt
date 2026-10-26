@@ -564,7 +564,8 @@ private fun CollectionPage(
             val m = movies.map { VodItem.Movie(it) }
             val s = shows.map { VodItem.Show(it) }
             val all = (m + s).sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.title })
-            if (q.length >= 2) all.filter { SearchText.matches(it.title, q) } else when (view) {
+            // Best match first (exact title, then starts with it, then any word), A to Z within each.
+            if (q.length >= 2) all.mapNotNull { x -> SearchText.rank(SearchText.index(x.title), q)?.let { x to it } }.sortedBy { it.second }.map { it.first } else when (view) {
                 View.Movies -> m
                 View.Shows -> s
                 View.Recent -> movies.sortedByDescending { g -> g.copies.maxOf { it.added } }.map { VodItem.Movie(it) }
@@ -674,9 +675,10 @@ private fun VodSearch(profile: Profile, kind: String, q: String, marks: VodMarks
     LaunchedEffect(q, keys) {
         delay(300) // let typing settle
         val found = if (kind == Kind.MOVIE) {
-            groupMovies(dao.searchMovies(q, SEARCH_LIMIT * 3).filter { (it.sourceId to it.categoryId) in keys }.take(SEARCH_LIMIT)).map { VodItem.Movie(it) }
+            // Copies in other languages are one result: group, then count.
+            groupMovies(dao.searchMovies(q, SEARCH_LIMIT * 4).filter { (it.sourceId to it.categoryId) in keys }).take(SEARCH_LIMIT).map { VodItem.Movie(it) }
         } else {
-            groupSeries(dao.searchSeries(q, SEARCH_LIMIT * 3).filter { (it.sourceId to it.categoryId) in keys }.take(SEARCH_LIMIT)).map { VodItem.Show(it) }
+            groupSeries(dao.searchSeries(q, SEARCH_LIMIT * 4).filter { (it.sourceId to it.categoryId) in keys }).take(SEARCH_LIMIT).map { VodItem.Show(it) }
         }
         results = found
         found.size.let { Usage.log(if (it == 0) Usage.Action.SEARCH_EMPTY else Usage.Action.SEARCH_SUBMIT, it) }

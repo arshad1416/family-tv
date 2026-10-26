@@ -62,8 +62,8 @@ data class ChannelEntity(
     val url: String?,
     val catchupDays: Int,
     val gen: Long,
-    /** [SearchText.index] of [name], what Search matches against ("" on rows from before it existed, until the next reload). */
-    @ColumnInfo(defaultValue = "") val searchText: String = SearchText.index(name),
+    /** [SearchText.channelIndex] of [name], what Search matches against ("" on rows from before it existed, until the next reload). */
+    @ColumnInfo(defaultValue = "") val searchText: String = SearchText.channelIndex(name),
 )
 
 @Entity(tableName = "movies", primaryKeys = ["sourceId", "streamId"], indices = [Index("categoryId"), Index("tmdb"), Index("titleKey")])
@@ -85,8 +85,8 @@ data class MovieEntity(
     @ColumnInfo(defaultValue = "") val titleKey: String = "",
     /** Language of this copy, from its title or category ([app.familytv.iptv.SeriesTitles.ORIGINAL] when neither says). */
     val lang: String? = null,
-    /** [SearchText.index] of [name], what Search matches against ("" on rows from before it existed, until the next reload). */
-    @ColumnInfo(defaultValue = "") val searchText: String = SearchText.index(name),
+    /** [SearchText.titleIndex] of [name] and [year], what Search matches against ("" on rows from before it existed, until the next reload). */
+    @ColumnInfo(defaultValue = "") val searchText: String = SearchText.titleIndex(name, year),
 )
 
 @Entity(tableName = "series", primaryKeys = ["sourceId", "seriesId"], indices = [Index("categoryId"), Index("tmdb"), Index("titleKey")])
@@ -105,8 +105,8 @@ data class SeriesEntity(
     val titleKey: String = "",
     /** Language of this copy, from its title or category ([app.familytv.iptv.SeriesTitles.ORIGINAL] when neither says). */
     val lang: String? = null,
-    /** [SearchText.index] of [name], what Search matches against ("" on rows from before it existed, until the next reload). */
-    @ColumnInfo(defaultValue = "") val searchText: String = SearchText.index(name),
+    /** [SearchText.titleIndex] of [name] and [year], what Search matches against ("" on rows from before it existed, until the next reload). */
+    @ColumnInfo(defaultValue = "") val searchText: String = SearchText.titleIndex(name, year),
 )
 
 @Entity(tableName = "programmes", indices = [Index(value = ["epgId", "start"])])
