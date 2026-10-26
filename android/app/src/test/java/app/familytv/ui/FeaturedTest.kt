@@ -22,7 +22,7 @@ class FeaturedTest {
     @Test
     fun slidesAlternateWithAnEventAfterEveryTwo() {
         val mixed = Featured.mix((1..5).map(::movie), (1..5).map(::show), (1..4).map(::event))
-        assertEquals(listOf("m1", "s1", "e1", "m2", "s2", "e2", "m3", "s3", "e3", "m4", "s4", "m5", "s5"), mixed.map { it.key })
+        assertEquals(listOf("m1", "s1", "e1", "m2", "s2", "e2", "m3", "s3", "e3", "m4", "s4", "m5"), mixed.map { it.key })
         // A short line: whatever there is, in turn, with the events after.
         assertEquals(listOf("m1", "e1", "e2"), Featured.mix(listOf(movie(1)), emptyList(), listOf(event(1), event(2))).map { it.key })
         assertEquals(listOf("s1", "s2"), Featured.mix(emptyList(), listOf(show(1), show(2)), emptyList()).map { it.key })

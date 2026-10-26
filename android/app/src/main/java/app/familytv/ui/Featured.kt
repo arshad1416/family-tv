@@ -50,6 +50,8 @@ internal object Featured {
     const val MOVIES = 5
     const val SHOWS = 5
     const val EVENTS = 3
+    /** The most slides, whatever the mix. */
+    const val MAX_SLIDES = 12
     const val MIN_TITLES = 6
     private const val TTL_MS = 6 * 3_600_000L
     private const val EVENT_DAYS = 7
@@ -79,7 +81,7 @@ internal object Featured {
         val ev = events.take(EVENTS).iterator()
         titles.forEachIndexed { i, s -> out += s; if (i % 2 == 1 && ev.hasNext()) out += ev.next() }
         ev.forEachRemaining { out += it }
-        return out.take(MOVIES + SHOWS + EVENTS)
+        return out.take(MAX_SLIDES)
     }
 
     /** "2024 · Action · ★ 7.8": whatever TMDB knows of the three. */
