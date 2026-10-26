@@ -3,6 +3,7 @@ package app.familytv.ui
 import android.graphics.drawable.BitmapDrawable
 import androidx.compose.foundation.Image
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -34,7 +35,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithCache
@@ -55,7 +55,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.currentStateAsState
@@ -220,8 +219,8 @@ internal object Backdrops {
  * redraws the backdrop and nothing else of the home. The new art fades in over the old in
  * [SLIDE_FADE_MS] with its alpha applied to its own pixels (no offscreen copy of the screen), and
  * the scrims sit in one cached layer; a plain cut when the system asks for less motion, or on a box
- * that can't keep up with the fade ([SlideFade]). Where the fades keep up, a Rive flourish of light
- * plays over the art as it fades ([RiveCarouselFx]: a sweep for films, a glow for shows, streaks
+ * that can't keep up with the fade ([SlideFade]). Where the fades keep up, a flourish of light
+ * plays over the art as it fades ([CarouselFlourish]: a sweep for films, a glow for shows, streaks
  * for events), under the text's shade. No zoom or pan.
  */
 @Composable
@@ -237,11 +236,12 @@ internal fun BoxScope.HomeBackdrop(slide: State<Slide?>, show: Boolean, covers: 
     val shown = if (back) 1f else fadeIn
     var behind by remember { mutableStateOf<Shown?>(null) }
     val fade = remember { Animatable(1f) }
-    // The flourish's view exists only on a box whose plain fades passed (never on the onn, which cuts).
+    // The flourish only on a box whose plain fades passed (never on the onn, which cuts); nothing of it is
+    // composed between changes.
     remember { SlideFade.cuts(ctx) }
-    val fxOn = SlideFade.effects.value && !still
-    val fx = remember(fxOn) { if (fxOn) RiveCarouselFx.create(ctx) else null }
-    val fxNow by rememberUpdatedState(fx)
+    val fxOn by rememberUpdatedState(SlideFade.effects.value && !still)
+    var flourish by remember { mutableStateOf<Flourish?>(null) }
+    val flourishAt = remember { Animatable(0f) }
     LaunchedEffect(target) {
         if (target == null || target === front?.slide) return@LaunchedEffect
         // The same slide made again: it stays up as it is.
@@ -253,13 +253,25 @@ internal fun BoxScope.HomeBackdrop(slide: State<Slide?>, show: Boolean, covers: 
         front = Shown(target, art)
         if (fading) {
             fade.snapTo(0f)
-            val style = when (target.target) {
-                is Slide.Target.Movie -> RiveCarouselFx.SWEEP
-                is Slide.Target.Show -> RiveCarouselFx.GLOW
-                is Slide.Target.Event -> RiveCarouselFx.STREAKS
+            val withFx = fxOn
+            if (withFx) {
+                flourishAt.snapTo(0f)
+                flourish = when (target.target) {
+                    is Slide.Target.Movie -> Flourish.SWEEP
+                    is Slide.Target.Show -> Flourish.GLOW
+                    is Slide.Target.Event -> Flourish.STREAKS
+                }
             }
-            val withFx = fxNow?.play(style) == true
-            SlideFade.watch(ctx, withFx) { fade.animateTo(1f, tween(SLIDE_FADE_MS)) }
+            try {
+                SlideFade.watch(ctx, withFx) {
+                    coroutineScope {
+                        if (withFx) launch { flourishAt.animateTo(1f, tween(FLOURISH_MS, easing = LinearEasing)) }
+                        fade.animateTo(1f, tween(SLIDE_FADE_MS))
+                    }
+                }
+            } finally {
+                flourish = null
+            }
         }
         behind = null
     }
@@ -278,8 +290,7 @@ internal fun BoxScope.HomeBackdrop(slide: State<Slide?>, show: Boolean, covers: 
                 BackdropArt(s, if (s === front && behind != null) Modifier.graphicsLayer { alpha = fade.value; compositingStrategy = CompositingStrategy.ModulateAlpha } else Modifier)
             }
         }
-        // Invisible and paused between changes.
-        fx?.let { f -> AndroidView({ f.view }, Modifier.matchParentSize()) }
+        flourish?.let { CarouselFlourish(it) { flourishAt.value } }
         // Dark behind the text on the left whatever the look; below the carousel, the page's own colour.
         Spacer(
             Modifier.fillMaxSize().graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }.drawWithCache {
@@ -311,7 +322,7 @@ internal fun BoxScope.HomeBackdrop(slide: State<Slide?>, show: Boolean, covers: 
  *  - a low-RAM device cuts from the start;
  *  - otherwise the first [TRIED] fades are timed, and when [BAD] of them miss more than
  *    [LATE_SHARE] of their frames (the onn, 5-40%) it cuts from then on;
- *  - a box whose fades pass gets the Rive flourish over them ([effects], [RiveCarouselFx]), and
+ *  - a box whose fades pass gets the flourish over them ([effects], [CarouselFlourish]), and
  *    those fades are timed again: [BAD] of [TRIED] missing frames turns the flourish off, the
  *    plain fade stays.
  * Each outcome is kept per app version, so an update times again.
@@ -357,30 +368,13 @@ internal object SlideFade {
     private fun keep(ctx: android.content.Context, key: String) = prefs(ctx).edit().putInt(key, BuildConfig.VERSION_CODE).apply()
 
     /**
-     * Runs [fade] ([withFx]: with the flourish over it) while counting frames that came later than one and a
-     * half refreshes, while that kind of fade is still being timed.
+     * Runs [fade] ([withFx]: with the flourish over it) while counting frames that took longer than a
+     * refresh ([timeFrames]), while that kind of fade is still being timed.
      */
     suspend fun watch(ctx: android.content.Context, withFx: Boolean, fade: suspend () -> Unit) {
         load(ctx)
         if (if (withFx) fxOk || fxTried >= TRIED else ok || tried >= TRIED) return fade()
-        @Suppress("DEPRECATION")
-        val hz = (ctx.getSystemService(android.content.Context.WINDOW_SERVICE) as? android.view.WindowManager)?.defaultDisplay?.refreshRate?.takeIf { it >= 20f } ?: 60f
-        val late = (1.5e9 / hz).toLong()
-        var frames = 0
-        var missed = 0
-        coroutineScope {
-            val clock = launch {
-                var last = withFrameNanos { it }
-                while (true) {
-                    val now = withFrameNanos { it }
-                    frames++
-                    if (now - last > late) missed++
-                    last = now
-                }
-            }
-            fade()
-            clock.cancel()
-        }
+        val (frames, missed) = timeFrames(ctx, fade)
         val slow = frames >= 5 && missed > frames * LATE_SHARE
         if (withFx) {
             fxTried++
