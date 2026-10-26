@@ -17,6 +17,7 @@ import app.familytv.perf.Perf
 import app.familytv.portal.Profile
 import app.familytv.portal.Source
 import app.familytv.sync.PlaybackStatus
+import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
@@ -246,6 +247,14 @@ class Catalog(private val db: AppDb, private val marks: SharedPreferences? = nul
         }
     }
 
+    /** Network names whose guide links are logged (tag GuideMatch): names and guide ids only, never a URL. */
+    private val TRACED = Regex("""(?i)\b(global|ctv)\b""")
+
+    private fun trace(c: ChannelEntity, linked: String, why: String) =
+        android.util.Log.i("GuideMatch", "${c.name.take(60)} -> provider epgId ${c.epgId ?: "none"} -> linked $linked ($why)")
+
+    private fun pct(f: Float) = "${(f * 100).roundToInt()}%"
+
     private fun entity(p: XmltvProgramme, epgId: String) = ProgrammeEntity(
         epgId = epgId, start = p.start, stop = p.stop, title = p.title, description = p.description,
         subTitle = p.subTitle, season = p.season, episode = p.episode,
@@ -334,15 +343,21 @@ class Catalog(private val db: AppDb, private val marks: SharedPreferences? = nul
             val cover = if (another) 0f else ownId?.let { GuideMatch.coverage(next[it].orEmpty(), c.name, now, day) } ?: 0f
             val link = links[i]
             if (cover < GuideMatch.GOOD_COVERAGE) thin++
+            val traced = TRACED.containsMatchIn(c.name)
             if (link == null) {
                 if (another) dao.setChannelGuide(c.sourceId, c.streamId, null)
+                if (traced) trace(c, "none", if (another) "another station's id, guide cleared" else "own cover ${pct(cover)}")
                 val cat = cats[c.sourceId to c.categoryId]?.lowercase()
                 if (cover < GuideMatch.GOOD_COVERAGE && cat !in hidden) unmatched += (order[cat] ?: Int.MAX_VALUE) to c.name.take(60)
                 continue
             }
             val extraId = GuideMatch.EXTRA_PREFIX + link.guideId
             val extraCover = GuideMatch.coverage(next[extraId].orEmpty(), c.name, now, day)
-            if (another && extraCover == 0f) { dao.setChannelGuide(c.sourceId, c.streamId, null); continue }
+            if (another && extraCover == 0f) {
+                dao.setChannelGuide(c.sourceId, c.streamId, null)
+                if (traced) trace(c, link.guideId, "${link.how}, another station's id, extra guide empty, guide cleared")
+                continue
+            }
             // A regional station the provider points at another city's schedule takes its own.
             val elsewhere = link.how == GuideMatch.How.NAME && extraCover >= GuideMatch.GOOD_COVERAGE && GuideMatch.ownIdIsElsewhere(provider[i])
             if (cover >= GuideMatch.GOOD_COVERAGE && !elsewhere) {
@@ -357,6 +372,10 @@ class Catalog(private val db: AppDb, private val marks: SharedPreferences? = nul
                 dao.setChannelGuide(c.sourceId, c.streamId, extraId)
                 used += extraId
                 switched++
+            }
+            if (traced) {
+                val kept = cover >= GuideMatch.GOOD_COVERAGE && !elsewhere
+                trace(c, link.guideId, "${link.how}, ${if (kept) "provider's kept" else if (elsewhere || extraCover > cover) "switched" else "provider's kept (thin)"}, own ${pct(cover)}, extra ${pct(extraCover)}${if (another) ", another station's id" else ""}")
             }
         }
         linked.map { GuideMatch.EXTRA_PREFIX + it.guideId }.distinct().filter { it !in used }.chunked(500).forEach { dao.deleteProgrammes(it) }
