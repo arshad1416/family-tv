@@ -33,6 +33,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithCache
@@ -57,11 +58,13 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.currentStateAsState
 import androidx.tv.material3.Text
+import app.familytv.BuildConfig
 import app.familytv.app
 import coil.compose.AsyncImage
 import coil.imageLoader
 import coil.request.CachePolicy
 import coil.request.ImageRequest
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -213,8 +216,8 @@ internal object Backdrops {
  * solid dark at the screen's bottom, while [show]. Only this reads [slide], so a new slide
  * redraws the backdrop and nothing else of the home. The new art fades in over the old in
  * [SLIDE_FADE_MS] with its alpha applied to its own pixels (no offscreen copy of the screen), and
- * the scrims sit in one cached layer; a plain cut when the system asks for less motion. No zoom or
- * pan, so the onn keeps up.
+ * the scrims sit in one cached layer; a plain cut when the system asks for less motion, or on a box
+ * that can't keep up with the fade ([SlideFade]). No zoom or pan.
  */
 @Composable
 internal fun BoxScope.HomeBackdrop(slide: State<Slide?>, show: Boolean, covers: MutableState<Boolean>? = null, pageTop: FloatState? = null, slot: FloatState? = null) {
@@ -230,11 +233,12 @@ internal fun BoxScope.HomeBackdrop(slide: State<Slide?>, show: Boolean, covers: 
         if (target == null || target === front?.slide) return@LaunchedEffect
         // The old art stays up until the new one is decoded: the fade never starts on a blank.
         val art = target.backdrop?.let { Backdrops.load(ctx, it) ?: return@LaunchedEffect }
-        behind = front
+        val fading = front != null && !still && !SlideFade.cuts(ctx)
+        behind = front.takeIf { fading }
         front = Shown(target, art)
-        if (behind != null && !still) {
+        if (fading) {
             fade.snapTo(0f)
-            fade.animateTo(1f, tween(SLIDE_FADE_MS))
+            SlideFade.watch(ctx) { fade.animateTo(1f, tween(SLIDE_FADE_MS)) }
         }
         behind = null
     }
@@ -276,6 +280,58 @@ internal fun BoxScope.HomeBackdrop(slide: State<Slide?>, show: Boolean, covers: 
                 onDrawBehind { drawRect(across); drawRect(down) }
             },
         )
+    }
+}
+
+/**
+ * Whether this box cross-fades the carousel's slides or cuts between them. Decided on the box, not
+ * from a list of models: a low-RAM device cuts from the start; otherwise the first fades are
+ * timed, and when [BAD_FADES] of the first [TRIED_FADES] miss more than [LATE_SHARE] of their
+ * frames (the onn, 5-40%), it cuts from then on. Kept per app version, so an update times again.
+ */
+internal object SlideFade {
+    private const val TRIED_FADES = 3
+    private const val BAD_FADES = 2
+    private const val LATE_SHARE = 0.1
+    private const val KEY = "slideCut"
+    @Volatile private var cut: Boolean? = null
+    private var tried = 0
+    private var bad = 0
+
+    fun cuts(ctx: android.content.Context): Boolean = cut ?: run {
+        val p = ctx.getSharedPreferences("featured", android.content.Context.MODE_PRIVATE)
+        val am = ctx.getSystemService(android.content.Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
+        (am?.isLowRamDevice == true || p.getInt(KEY, 0) == BuildConfig.VERSION_CODE).also { cut = it }
+    }
+
+    /** Runs [fade] while counting frames that came later than one and a half refreshes, while the first fades are still being timed. */
+    suspend fun watch(ctx: android.content.Context, fade: suspend () -> Unit) {
+        if (tried >= TRIED_FADES) return fade()
+        @Suppress("DEPRECATION")
+        val hz = (ctx.getSystemService(android.content.Context.WINDOW_SERVICE) as? android.view.WindowManager)?.defaultDisplay?.refreshRate?.takeIf { it >= 20f } ?: 60f
+        val late = (1.5e9 / hz).toLong()
+        var frames = 0
+        var missed = 0
+        coroutineScope {
+            val clock = launch {
+                var last = withFrameNanos { it }
+                while (true) {
+                    val now = withFrameNanos { it }
+                    frames++
+                    if (now - last > late) missed++
+                    last = now
+                }
+            }
+            fade()
+            clock.cancel()
+        }
+        tried++
+        if (frames >= 5 && missed > frames * LATE_SHARE) bad++
+        android.util.Log.i("SlideFade", "fade $tried: $missed of $frames frames late, ${if (bad >= BAD_FADES) "cutting from now on" else "fading"}")
+        if (bad >= BAD_FADES) {
+            cut = true
+            ctx.getSharedPreferences("featured", android.content.Context.MODE_PRIVATE).edit().putInt(KEY, BuildConfig.VERSION_CODE).apply()
+        }
     }
 }
 
