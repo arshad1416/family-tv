@@ -312,10 +312,10 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
             val hasSlide by remember { derivedStateOf { shell.backdrop.value != null } }
             // Inside the TV's overscan safe zone (48 dp across, 27 dp at the top and bottom).
             Column(Modifier.fillMaxSize().padding(start = 48.dp, end = 48.dp, top = 27.dp, bottom = 18.dp).onFocusChanged { anyFocused = it.hasFocus }) {
+                // Over the carousel's art the bar and the weather hint keep light text in either look, on the art's dark shades.
+                // One provider either way, so the bar (and its focus) stays put when the tab changes.
+                val barPalette = if (backdropOn && hasSlide) GlassPalette.Dark else palette
                 if (!barHidden.value) {
-                    // Over the carousel's art the bar keeps light text in either look, on the art's dark top shade.
-                    // One provider either way, so the bar (and its focus) stays put when the tab changes.
-                    val barPalette = if (backdropOn && hasSlide) GlassPalette.Dark else palette
                     CompositionLocalProvider(LocalGlassPalette provides barPalette, LocalContentColor provides barPalette.text) {
                         GlassTopBar(
                             tab, settings, tabFocus, settingsFocus,
@@ -358,7 +358,9 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
                 // Its own strip under the page, so it never covers the bottom row; the strip stays while the panel is open.
                 if (!settings && !barHidden.value && darkPages.intValue == 0) {
                     Box(Modifier.fillMaxWidth().height(30.gx), contentAlignment = Alignment.BottomCenter) {
-                        if (!panel) WeatherHint({ panel = true })
+                        CompositionLocalProvider(LocalGlassPalette provides barPalette, LocalContentColor provides barPalette.text) {
+                            if (!panel) WeatherHint({ panel = true })
+                        }
                     }
                 }
             }
