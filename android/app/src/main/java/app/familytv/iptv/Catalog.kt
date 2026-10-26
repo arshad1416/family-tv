@@ -1,5 +1,6 @@
 package app.familytv.iptv
 
+import android.content.SharedPreferences
 import android.os.SystemClock
 import android.util.Xml
 import app.familytv.core.Http
@@ -32,7 +33,7 @@ import java.util.zip.GZIPInputStream
  * Lists are streamed straight from the network into SQLite in batches, so memory stays flat
  * no matter how big the provider's lists are.
  */
-class Catalog(private val db: AppDb) {
+class Catalog(private val db: AppDb, private val marks: SharedPreferences? = null) {
     private val dao = db.catalog()
 
     /** [fraction] is 0..1 across the whole refresh; [detail] is a live count such as "12,400 channels". */
@@ -60,7 +61,15 @@ class Catalog(private val db: AppDb) {
             report(Progress(step, ((done + weight * within) / sources.coerceAtLeast(1)).coerceIn(0f, 1f), detail))
     }
 
+    /**
+     * False from the start of a refresh until it finishes, extra guides and all: a refresh cut off
+     * (the app closed during the first load) leaves lists without their extra guides, and the next
+     * start loads them again. False on a TV that hasn't recorded one yet.
+     */
+    val complete: Boolean get() = marks?.getBoolean(COMPLETE, false) ?: true
+
     suspend fun refresh(profile: Profile, onProgress: (Progress) -> Unit = {}) = withContext(Dispatchers.IO) {
+        marks?.edit()?.putBoolean(COMPLETE, false)?.apply()
         dao.dropSourcesExcept(profile.sources.map { it.id }.ifEmpty { listOf("") })
         dao.dropOrphanChannels(); dao.dropOrphanMovies(); dao.dropOrphanSeries(); dao.dropOrphanCategories()
         val errors = mutableListOf<String>()
@@ -86,6 +95,7 @@ class Catalog(private val db: AppDb) {
         val now = System.currentTimeMillis()
         dao.pruneProgrammes(before = now - 2 * HOUR, after = now + GUIDE_HOURS * HOUR)
         if (errors.isNotEmpty() && errors.size == profile.sources.size) throw IOException(errors.joinToString("; "))
+        marks?.edit()?.putBoolean(COMPLETE, true)?.apply()
     }
 
     /**
@@ -418,6 +428,7 @@ class Catalog(private val db: AppDb) {
         const val HOUR = 3_600_000L
         const val GUIDE_HOURS = 48L
         const val MAX_EXTRA_GUIDES = 4
+        private const val COMPLETE = "complete"
         const val GUIDE_RETRY_MS = 20_000L
         /** Thin channels with no extra guide, listed for the admin (the portal keeps a few KB of status). */
         const val MAX_REPORTED = 30

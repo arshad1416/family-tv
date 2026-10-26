@@ -44,7 +44,7 @@ import java.util.concurrent.TimeUnit
 class FamilyTvApp : Application(), ImageLoaderFactory {
     val db by lazy { AppDb.create(this) }
     val portal by lazy { PortalClient(this) }
-    val catalog by lazy { Catalog(db) }
+    val catalog by lazy { Catalog(db, getSharedPreferences("catalog", MODE_PRIVATE)) }
     val diagnoser by lazy { Diagnoser(this, db, portal) }
     val commands by lazy { CommandRunner(this) }
     /** Favourites, resume points and watched marks; kept apart from the catalog so reloads never touch them. */

@@ -14,6 +14,7 @@ import app.familytv.portal.Profile
 import app.familytv.sync.PlaybackStatus
 import app.familytv.update.Updater
 import app.familytv.usage.Usage
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -72,12 +73,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         val profile = config.profile ?: return
-        if (app.db.catalog().channelCount() == 0) {
+        val firstLoad = app.db.catalog().channelCount() == 0
+        if (firstLoad) {
             _screen.value = Screen.Syncing("Loading channels")
             Perf.skipColdStart()
             try {
                 app.catalog.refresh(profile) { _screen.value = Screen.Syncing(it.step, it.fraction, it.detail) }
                 PlaybackStatus.lastRefresh = System.currentTimeMillis()
+            } catch (e: CancellationException) {
+                // The app closed mid-load: not a line error. The next start finishes it (below).
+                throw e
             } catch (e: Exception) {
                 PlaybackStatus.lastRefreshError = e.message
                 _screen.value = Screen.Ready(config)
@@ -86,6 +91,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
         _screen.value = Screen.Ready(config)
+        // Lists from a load that was cut off: finish it behind the home, where closing the app can't stop it.
+        if (!firstLoad && !app.catalog.complete) app.scope.launch { runCatching { app.commands.refreshCatalog(profile) } }
         // Pull favourites, watched marks and resume points from Trakt on every start and reload.
         app.trakt.refreshState()
         app.trakt.sync.soon(0)
