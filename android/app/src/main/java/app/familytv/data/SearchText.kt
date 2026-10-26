@@ -59,8 +59,15 @@ object SearchText {
     /** [rank]'s groups for films and shows: 0 exact, 1 starts with the text (ranks 1 and 3), 2 the other word matches, 3 contains. */
     fun group(rank: Int): Int = when (rank) { 0 -> 0; 1, 3 -> 1; 2, 4 -> 2; else -> 3 }
 
-    /** How well known a title is within its [group], as in the SQL: its [copies], one more for whole words (ranks 1 and 2). */
-    fun known(rank: Int, copies: Int): Int = copies + if (rank == 1 || rank == 2) 1 else 0
+    /** How well known a title is within its [group], as in the SQL: its [copies], [WHOLE_WORD] more for whole words (ranks 1 and 2). */
+    fun known(rank: Int, copies: Int): Int = copies + if (rank == 1 || rank == 2) WHOLE_WORD else 0
+
+    /**
+     * What a whole-word match ("Up in the Air" for "up") is worth against a title that only starts
+     * with the text ("Upgrade"), in copies: enough to lead a few copies of the others, not a title
+     * the line carries in many (Breaking Bad still leads "break").
+     */
+    const val WHOLE_WORD = 2
 
     private val TRAILING_YEAR = Regex(" (19|20)\\d\\d$")
 
@@ -125,11 +132,11 @@ object SearchText {
     private const val COPIES = "(CASE WHEN titleKey = '' THEN 1 ELSE (SELECT COUNT(*) FROM {table} c WHERE c.titleKey = {table}.titleKey) END)"
 
     /**
-     * Films and shows: by [group]; within one, by [known] (copies, one more for whole words), then
+     * Films and shows: by [group]; within one, by [known] (copies, [WHOLE_WORD] more for whole words), then
      * the provider's rating, rank, the shorter title and the name.
      */
     internal const val TITLE_ORDER = "(CASE WHEN {tier} = 0 THEN 0 WHEN {tier} IN (1, 3) THEN 1 WHEN {tier} IN (2, 4) THEN 2 ELSE 3 END), " +
-        "$COPIES + (CASE WHEN {tier} IN (1, 2) THEN 1 ELSE 0 END) DESC, COALESCE(CAST(rating AS REAL), 0) DESC, {tier}, length(searchText), name"
+        "$COPIES + (CASE WHEN {tier} IN (1, 2) THEN $WHOLE_WORD ELSE 0 END) DESC, COALESCE(CAST(rating AS REAL), 0) DESC, {tier}, length(searchText), name"
 
     private const val CATEGORY = "(SELECT c.name FROM categories c WHERE c.sourceId = channels.sourceId AND c.kind = 'live' AND c.categoryId = channels.categoryId)"
     private fun canadian(x: String) =
@@ -138,9 +145,10 @@ object SearchText {
         listOf("US", "USA", "UK", "GB", "EN").joinToString(" OR ") { "upper(ltrim($x)) GLOB '$it[^A-Z]*' OR upper(ltrim($x)) GLOB '[[(]$it[])]*'" } +
             " OR $x LIKE '%english%'"
 
-    /** Canadian broadcasters, as words of a channel's search text: they lead even where a Canadian line also carries US channels. */
+    /** Canadian broadcasters, as words (or a run of words) of a channel's search text: they lead even where a Canadian line also carries US channels. */
     private val CANADIAN_BRANDS = listOf(
-        "cbc", "ctv", "global", "citytv", "cp24", "tsn", "sportsnet", "rds", "tva", "cpac", "aptn", "tvo", "omni", "chch", "noovo", "ytv", "treehouse", "crave",
+        "cbc", "ctv", "global", "citytv", "citynews", "city news", "cp24", "bnn", "business news network", "tsn", "sportsnet", "rds", "tva", "cpac", "aptn",
+        "tvo", "omni", "chch", "noovo", "ytv", "treehouse", "crave",
     )
     /** A country code other than Canada's in front ("EG| CBC Drama", "[AR] CBC"): Egypt's CBC isn't Canada's. */
     private fun foreign(x: String) =

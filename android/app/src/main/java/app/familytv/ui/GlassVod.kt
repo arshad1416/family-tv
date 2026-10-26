@@ -169,9 +169,11 @@ private fun parentOf(path: String) = if (path.startsWith("adult/")) "adult" else
 @Composable
 private fun rememberForYou(kind: String, visible: List<CategoryEntity>, seen: List<String>?): List<VodItem> {
     val dao = LocalContext.current.app.db.catalog()
-    var rows by remember { mutableStateOf(emptyList<VodItem>()) }
+    val key = "forYou/$kind"
+    var rows by remember { mutableStateOf(Kept.get(key, visible to (seen ?: Unit)) ?: emptyList<VodItem>()) }
     LaunchedEffect(kind, visible, seen) {
         rows = if (seen.isNullOrEmpty()) emptyList() else withContext(Dispatchers.IO) { forYou(dao, kind, categoryKeys(visible), seen) }
+        Kept.put(key, visible to (seen ?: Unit), rows)
     }
     return rows
 }
@@ -251,7 +253,12 @@ private fun VodHome(
     val movies = kind == Kind.MOVIE
     val cats = if (movies) movieCats else seriesCats
     if (movieCats.isEmpty() && seriesCats.isEmpty()) {
-        return EmptyState(PlaybackStatus.lastRefreshError?.let { "Couldn't load the line: $it. Open Settings and run a check." } ?: "Nothing here yet.")
+        val error = PlaybackStatus.lastRefreshError
+        // The categories come a moment after the page opens: say there is nothing only once they
+        // have had time to load, so "Nothing here yet." never flashes on the way back to Home.
+        val waited by produceState(error != null) { delay(EMPTY_AFTER_MS); value = true }
+        if (!waited) return
+        return EmptyState(error?.let { "Couldn't load the line: $it. Open Settings and run a check." } ?: "Nothing here yet.")
     }
     // The first frame with rows on it ends a cold start (see Perf).
     LaunchedEffect(Unit) { withFrameNanos { }; Perf.firstScreen() }
@@ -423,6 +430,9 @@ private fun VodHome(
 private const val ADULT_CONTENT = "Adult Content"
 /** Room left under Home's first row at rest, past its own focus room, so nothing of it touches the page's end. */
 private const val ROW_ROOM = 8
+
+/** How long Home waits for its categories before saying there are none. */
+private const val EMPTY_AFTER_MS = 1500L
 private val HERO_MAIN = listOf(Color(0xFF3B4A6B), Color(0xFF1D2638), Color(0xFF0F1420))
 private val HERO_NEW = listOf(Color(0xFF5A3D2B), Color(0xFF1F1612))
 private val HERO_TOP = listOf(Color(0xFF2B4A5A), Color(0xFF121C22))

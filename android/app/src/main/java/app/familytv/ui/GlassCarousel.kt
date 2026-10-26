@@ -111,7 +111,8 @@ internal fun HomeCarousel(slides: List<Slide>, marks: VodMarks, modifier: Modifi
     val step = { by: Int -> index = (index + by + slides.size) % slides.size }
 
     DisposableEffect(shell) { onDispose { shell?.backdrop?.value = null } }
-    LaunchedEffect(slide) { shell?.backdrop?.value = slide }
+    // In the frame the slide changes, so the art and the rows' dark shade come with it.
+    SideEffect { shell?.backdrop?.value = slide }
     LaunchedEffect(index, paused, slides) {
         if (paused || slides.size < 2) return@LaunchedEffect
         // The next backdrop (and its title logo) decodes while this one shows.
@@ -228,9 +229,12 @@ internal fun BoxScope.HomeBackdrop(slide: State<Slide?>, show: Boolean, covers: 
     val ctx = LocalContext.current
     val target = slide.value.takeIf { show }
     val still = LocalReducedMotion.current
-    val shown by animateFloatAsState(if (target != null) 1f else 0f, tween(if (still) 0 else 400), label = "backdrop")
     // The slide in front with its decoded art, and the one it is fading in over (none once the fade ends).
     var front by remember { mutableStateOf<Shown?>(null) }
+    // Back on Home with the slide it left on, the art is up at once (no fade in from the page).
+    val back = target != null && target.key == front?.slide?.key
+    val fadeIn by animateFloatAsState(if (target != null) 1f else 0f, tween(if (still || back) 0 else 400), label = "backdrop")
+    val shown = if (back) 1f else fadeIn
     var behind by remember { mutableStateOf<Shown?>(null) }
     val fade = remember { Animatable(1f) }
     // The flourish's view exists only on a box whose plain fades passed (never on the onn, which cuts).
@@ -240,6 +244,8 @@ internal fun BoxScope.HomeBackdrop(slide: State<Slide?>, show: Boolean, covers: 
     val fxNow by rememberUpdatedState(fx)
     LaunchedEffect(target) {
         if (target == null || target === front?.slide) return@LaunchedEffect
+        // The same slide made again: it stays up as it is.
+        front?.takeIf { it.slide.key == target.key }?.let { front = Shown(target, it.art); return@LaunchedEffect }
         // The old art stays up until the new one is decoded: the fade never starts on a blank.
         val art = target.backdrop?.let { Backdrops.load(ctx, it) ?: return@LaunchedEffect }
         val fading = front != null && !still && !SlideFade.cuts(ctx)

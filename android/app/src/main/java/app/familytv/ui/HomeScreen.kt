@@ -598,7 +598,7 @@ fun QualityBadge(text: String, modifier: Modifier = Modifier) {
 @Composable
 fun categories(profile: Profile, kind: String, liveTv: Boolean = false): List<CategoryEntity> {
     val ctx = LocalContext.current
-    val all by remember(kind) { ctx.app.db.catalog().categories(kind) }.collectAsState(initial = emptyList())
+    val all by remember(kind) { ctx.app.db.catalog().categories(kind) }.collectKept("categories/$kind", emptyList())
     val mine by ctx.app.myCategoryOrder.order.collectAsState()
     val unlocked by ctx.app.adultUnlocked.collectAsState()
     return remember(all, profile, mine, unlocked) { visibleCategories(all, profile, mine[kind].orEmpty(), liveTv && adultOpen(profile, unlocked)) }

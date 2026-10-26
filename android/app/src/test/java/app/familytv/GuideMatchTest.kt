@@ -89,6 +89,30 @@ class GuideMatchTest {
         assertFalse(elsewhere("CA| CP24", "CP24.ca"))
         assertFalse(elsewhere("CA| Global News Regina", null))
         assertFalse(elsewhere("CA| TSN 1", "TSN.ca"))
+        // National channels, not places.
+        assertFalse(elsewhere("CA| CTV News Channel", "CTVNews.ca"))
+        assertFalse(elsewhere("CA| CBC News Network", "CBCNN.ca"))
+    }
+
+    @Test
+    fun anotherStationsScheduleIsNeverUsed() {
+        fun another(name: String, id: String?) = GuideMatch.ownIdIsAnotherStation(GuideMatch.Channel(name, id, null))
+        // Round 4: both showed "Now: BC 1 News" on the onn.
+        assertTrue(another("CA| Global News National HD", "GlobalBC1.ca"))
+        assertTrue(another("CA| Global News Peterborough HD", "GlobalBC1.ca"))
+        assertFalse(another("CA| Global News BC", "GlobalBC1.ca"))
+        assertFalse(another("CA| Global News Peterborough HD", "Global.Peterborough.ca"))
+        // A network-wide id is still the network's schedule, not another station's.
+        assertFalse(another("CA| CBC Toronto", "CBC.ca"))
+        assertFalse(another("CA| CTV News Channel", "CTVNews.ca"))
+
+        val global = GuideMatch.Index(listOf("Global.BC1.ca2", "CHEX.ca2").map(::ch))
+        // Not BC 1 by its id: Peterborough by its call sign, and National by nothing at all.
+        assertEquals(GuideMatch.Link("CHEX.ca2", How.NAME), link("CA| Global News Peterborough HD", epgId = "GlobalBC1.ca", index = global))
+        assertNull(link("CA| Global News National HD", epgId = "GlobalBC1.ca", index = global))
+        assertEquals("Global.National.ca2", link("CA| Global News National HD", epgId = "GlobalBC1.ca", index = GuideMatch.Index(listOf(ch("Global.BC1.ca2"), ch("Global.National.ca2"))))?.guideId)
+        // A channel whose id is its own station still links by it.
+        assertEquals(How.ID_NAME, link("CA| Global BC 1", epgId = "GlobalBC1.ca", index = global)?.how)
     }
 
     @Test

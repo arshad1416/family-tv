@@ -37,7 +37,8 @@ object GuideMatch {
      */
     fun link(c: Channel, index: Index, pin: String?): Link? {
         if (pin != null) return if (pin in index.ids) Link(pin, How.PIN) else null
-        val id = c.epgId?.removePrefix(EXTRA_PREFIX)?.trim()?.takeIf { it.isNotEmpty() }
+        // A regional station whose id is another city's ("Global News Peterborough" on BC 1's) goes by its name alone.
+        val id = c.epgId?.removePrefix(EXTRA_PREFIX)?.trim()?.takeIf { it.isNotEmpty() && !ownIdIsAnotherStation(c) }
         if (id != null && id in index.ids) return Link(id, How.ID)
         val idCountry = countryOfId(id)
         val nameCountry = countryOfName(c.name) ?: c.category?.let(::countryOfName)
@@ -54,13 +55,28 @@ object GuideMatch {
      * names somewhere else: providers often point every Global or CTV feed at one city's schedule.
      * Such a channel shows its name-matched extra guide even when the provider's schedule looks full.
      */
-    fun ownIdIsElsewhere(c: Channel): Boolean {
+    fun ownIdIsElsewhere(c: Channel): Boolean = elsewhere(c) { _, _ -> true }
+
+    /**
+     * True when [c]'s own guide id is the same network's station in another place ("Global News
+     * National" or "Global News Peterborough" on "GlobalBC1.ca", BC 1's): that schedule is never
+     * shown, nor linked to by id; the channel takes its name-matched extra guide, or none. A
+     * network-wide id ("CBC.ca" for CBC Toronto) is not another station.
+     */
+    fun ownIdIsAnotherStation(c: Channel): Boolean =
+        elsewhere(c) { network, own -> own.startsWith(network) && own.removePrefix(network).removePrefix("news").length >= 2 }
+
+    private inline fun elsewhere(c: Channel, idIs: (network: String, own: String) -> Boolean): Boolean {
         val id = c.epgId?.takeUnless { it.startsWith(EXTRA_PREFIX) }?.trim()?.takeIf { it.isNotEmpty() } ?: return false
         val own = key(idName(id))
-        val place = nameKeys(c.name).firstNotNullOfOrNull { k ->
-            NETWORKS.firstOrNull { k.startsWith(it) }?.let { k.removePrefix(it).removePrefix("news") }?.takeIf { it.length >= 3 }
-        } ?: return false
-        return place !in own
+        for (k in nameKeys(c.name)) {
+            val network = NETWORKS.firstOrNull { k.startsWith(it) } ?: continue
+            val place = k.removePrefix(network).removePrefix("news")
+            // "CTV News Channel" and "CBC News Network" are national channels, not places.
+            if (place.length < 3 || place in NOT_PLACES) continue
+            return place !in own && idIs(network, own)
+        }
+        return false
     }
 
     /**
@@ -192,12 +208,14 @@ object GuideMatch {
     private val PREFIX = Regex("""^\s*(?:\[[^\]]{1,10}]|\([^)]{1,10}\)|[\p{L}\d]{1,8}(?:\s+\p{L}{2,3})?\s*[|:]|24/7)\s*""")
     /** Networks whose feeds are regional stations: "Global News Regina" is Global plus a place. */
     private val NETWORKS = listOf("citytv", "global", "ctv", "cbc")
+    private val NOT_PLACES = setOf("channel", "network")
     /** A call sign or short code worth matching on its own: "CFRN", "CFCF-DT", "CP24". Not "EVENT". */
     private val CALL_SIGN = Regex("""C[A-Z]{3}(-[A-Z]{2})?|[A-Z]{2,3}\d{1,3}""")
     /** Regional stations the guides list under another name, by key (after "Global News X" became "Global X"). */
     private val REGIONAL = mapOf(
         "globalhalifax" to "globalmaritimes",
         "globalkingston" to "ckws",
+        "globalpeterborough" to "chex",
         "globalwinnipeg" to "globalmanitoba",
         "globalvancouver" to "globalbc",
         "ctvmontreal" to "cfcf",

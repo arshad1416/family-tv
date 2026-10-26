@@ -195,19 +195,24 @@ internal fun CategoryPosters(profile: Profile, cat: CategoryEntity, nav: SeriesN
 @Composable
 internal fun rememberMovieShelves(visible: List<CategoryEntity>, favMovies: List<MovieEntity>, progress: Map<String, ProgressEntity>): List<Pair<String, List<MovieGroup>>> {
     val dao = LocalContext.current.app.db.catalog()
-    var watching by remember { mutableStateOf(emptyList<MovieGroup>()) }
-    var recent by remember { mutableStateOf(emptyList<MovieGroup>()) }
-    var top by remember { mutableStateOf(emptyList<MovieGroup>()) }
     val seen = rememberSeen()
+    // As they were when Home or Movies last showed (Kept), while they load again.
+    val watchedBy = Triple(visible, progress, seen ?: Unit)
+    var watching by remember { mutableStateOf(Kept.get("movies/watching", watchedBy) ?: emptyList<MovieGroup>()) }
+    var recent by remember { mutableStateOf(Kept.get("movies/recent", visible) ?: emptyList<MovieGroup>()) }
+    var top by remember { mutableStateOf(Kept.get("movies/top", visible) ?: emptyList<MovieGroup>()) }
     LaunchedEffect(visible, progress, seen) {
         val ok = categoryKeys(visible)
         val started = ProgressRules.continueWatching(progress.values.playedBy(seen), ProgressKey.MOVIE).take(SHELF_SIZE)
         watching = groupMovies(started.mapNotNull { dao.movie(it.sourceId, it.itemId) }.filter { (it.sourceId to it.categoryId) in ok })
+        Kept.put("movies/watching", Triple(visible, progress, seen ?: Unit), watching)
     }
     LaunchedEffect(visible) {
         val ok = categoryKeys(visible)
         recent = groupMovies(dao.recentMovies(300).filter { (it.sourceId to it.categoryId) in ok }).take(SHELF_SIZE)
         top = groupMovies(dao.topMovies(TOP_RATING, 300).filter { (it.sourceId to it.categoryId) in ok }).take(SHELF_SIZE)
+        Kept.put("movies/recent", visible, recent)
+        Kept.put("movies/top", visible, top)
     }
     return remember(watching, recent, favMovies, top) {
         listOf(CONTINUE_WATCHING to watching, "Recently added" to recent, "Favourites" to groupMovies(favMovies), "Top rated" to top).filter { it.second.isNotEmpty() }
@@ -284,15 +289,17 @@ internal fun rememberSeriesShelves(
     watchingEpisodes: List<ProgressEntity>,
 ): List<Pair<String, List<SeriesGroup>>> {
     val dao = LocalContext.current.app.db.catalog()
-    var watching by remember { mutableStateOf(emptyList<SeriesGroup>()) }
-    var top by remember { mutableStateOf(emptyList<SeriesGroup>()) }
+    var watching by remember { mutableStateOf(Kept.get("series/watching", visible to watchingEpisodes) ?: emptyList<SeriesGroup>()) }
+    var top by remember { mutableStateOf(Kept.get("series/top", visible) ?: emptyList<SeriesGroup>()) }
     LaunchedEffect(visible, watchingEpisodes) {
         val ok = categoryKeys(visible)
         watching = groupSeries(watchingEpisodes.take(SHELF_SIZE).mapNotNull { dao.seriesItem(it.sourceId, it.itemId) }.filter { (it.sourceId to it.categoryId) in ok })
+        Kept.put("series/watching", visible to watchingEpisodes, watching)
     }
     LaunchedEffect(visible) {
         val ok = categoryKeys(visible)
         top = groupSeries(dao.topSeries(TOP_RATING, 400).filter { (it.sourceId to it.categoryId) in ok }).take(SHELF_SIZE)
+        Kept.put("series/top", visible, top)
     }
     return remember(watching, newShows, favSeries, top) {
         listOf(CONTINUE_WATCHING to watching, "New episodes" to newShows, "Favourites" to groupSeries(favSeries), "Top rated" to top).filter { it.second.isNotEmpty() }

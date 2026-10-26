@@ -328,16 +328,21 @@ class Catalog(private val db: AppDb, private val marks: SharedPreferences? = nul
         var switched = 0
         for ((i, c) in channels.withIndex()) {
             val ownId = own[i]
-            val cover = ownId?.let { GuideMatch.coverage(next[it].orEmpty(), c.name, now, day) } ?: 0f
+            // A regional station the provider points at another station's schedule never shows that one:
+            // its own extra schedule, or none ("Global News National" showed "Now: BC 1 News").
+            val another = GuideMatch.ownIdIsAnotherStation(provider[i])
+            val cover = if (another) 0f else ownId?.let { GuideMatch.coverage(next[it].orEmpty(), c.name, now, day) } ?: 0f
             val link = links[i]
             if (cover < GuideMatch.GOOD_COVERAGE) thin++
             if (link == null) {
+                if (another) dao.setChannelGuide(c.sourceId, c.streamId, null)
                 val cat = cats[c.sourceId to c.categoryId]?.lowercase()
                 if (cover < GuideMatch.GOOD_COVERAGE && cat !in hidden) unmatched += (order[cat] ?: Int.MAX_VALUE) to c.name.take(60)
                 continue
             }
             val extraId = GuideMatch.EXTRA_PREFIX + link.guideId
             val extraCover = GuideMatch.coverage(next[extraId].orEmpty(), c.name, now, day)
+            if (another && extraCover == 0f) { dao.setChannelGuide(c.sourceId, c.streamId, null); continue }
             // A regional station the provider points at another city's schedule takes its own.
             val elsewhere = link.how == GuideMatch.How.NAME && extraCover >= GuideMatch.GOOD_COVERAGE && GuideMatch.ownIdIsElsewhere(provider[i])
             if (cover >= GuideMatch.GOOD_COVERAGE && !elsewhere) {

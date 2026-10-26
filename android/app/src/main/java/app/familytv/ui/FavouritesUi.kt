@@ -58,7 +58,8 @@ val CategoryEntity.isFavourites get() = categoryId == FAV_CATEGORY
 @Composable
 fun rememberFavourites(): List<FavouriteEntity> {
     val ctx = LocalContext.current
-    val all by remember { ctx.app.favourites.all }.collectAsState(initial = emptyList())
+    // Each viewer has their own favourites, so the kept ones are only used again for the same viewer.
+    val all by remember { ctx.app.favourites.all }.collectKept("favourites", emptyList(), ctx.app.viewers.current()?.id ?: "")
     return all
 }
 
@@ -71,7 +72,7 @@ fun rememberFavouriteKeys(favs: List<FavouriteEntity> = rememberFavourites()): S
 @Composable
 fun rememberProgress(): Map<String, ProgressEntity> {
     val ctx = LocalContext.current
-    val rows by remember { ctx.app.userDb.user().progress() }.collectAsState(initial = emptyList())
+    val rows by remember { ctx.app.userDb.user().progress() }.collectKept("progress", emptyList())
     return remember(rows) { rows.associateBy { it.key } }
 }
 
@@ -134,10 +135,12 @@ private fun <T> rememberResolved(
     lookup: suspend (FavouriteEntity) -> T?,
     category: (T) -> Pair<String, String>,
 ): List<T> {
-    var rows by remember { mutableStateOf(emptyList<T>()) }
+    val key = "favourites/$kind"
+    var rows by remember { mutableStateOf(Kept.get(key, favs to visible) ?: emptyList<T>()) }
     LaunchedEffect(favs, visible) {
         val ok = visible.mapTo(HashSet()) { it.sourceId to it.categoryId }
         rows = favs.filter { it.kind == kind }.mapNotNull { lookup(it) }.filter { category(it) in ok }
+        Kept.put(key, favs to visible, rows)
     }
     return rows
 }
@@ -185,8 +188,11 @@ fun MarkBadge(modifier: Modifier = Modifier, favourite: Boolean = false, watched
 @Composable
 fun rememberFavouriteShowRows(favs: List<FavouriteEntity> = rememberFavourites()): List<SeriesEntity> {
     val dao = LocalContext.current.app.db.catalog()
-    var rows by remember { mutableStateOf(emptyList<SeriesEntity>()) }
-    LaunchedEffect(favs) { rows = favs.filter { it.kind == Kind.SERIES }.mapNotNull { dao.seriesItem(it.sourceId, it.itemId) } }
+    var rows by remember { mutableStateOf(Kept.get("favouriteShows", favs) ?: emptyList<SeriesEntity>()) }
+    LaunchedEffect(favs) {
+        rows = favs.filter { it.kind == Kind.SERIES }.mapNotNull { dao.seriesItem(it.sourceId, it.itemId) }
+        Kept.put("favouriteShows", favs, rows)
+    }
     return rows
 }
 
@@ -197,11 +203,12 @@ fun rememberFavouriteShowRows(favs: List<FavouriteEntity> = rememberFavourites()
 @Composable
 fun rememberNewEpisodeKeys(progress: Map<String, ProgressEntity> = rememberProgress()): Map<String, Int> {
     val ctx = LocalContext.current
-    val rows by remember { ctx.app.userDb.user().newEpisodes() }.collectAsState(initial = emptyList())
+    val rows by remember { ctx.app.userDb.user().newEpisodes() }.collectKept("newEpisodes", emptyList())
     // An episode watched on any copy of the show (another language or quality) counts as watched.
-    var copies by remember { mutableStateOf(emptyMap<String, List<Pair<String, String>>>()) }
+    var copies by remember { mutableStateOf(Kept.get("newEpisodeCopies", rows) ?: emptyMap<String, List<Pair<String, String>>>()) }
     LaunchedEffect(rows) {
         copies = rows.associate { w -> "${w.sourceId}/${w.seriesId}" to ctx.app.db.copyIds(w.sourceId, w.seriesId) }
+        Kept.put("newEpisodeCopies", rows, copies)
     }
     return remember(rows, progress, copies) {
         rows.mapNotNull { w ->
@@ -217,11 +224,12 @@ fun rememberNewEpisodeKeys(progress: Map<String, ProgressEntity> = rememberProgr
 @Composable
 fun rememberNewEpisodeShows(keys: Map<String, Int>, visible: List<CategoryEntity>): List<SeriesGroup> {
     val dao = LocalContext.current.app.db.catalog()
-    var shows by remember { mutableStateOf(emptyList<SeriesGroup>()) }
+    var shows by remember { mutableStateOf(Kept.get("newEpisodeShows", keys to visible) ?: emptyList<SeriesGroup>()) }
     LaunchedEffect(keys, visible) {
         val ok = visible.mapTo(HashSet()) { it.sourceId to it.categoryId }
         val rows = keys.keys.mapNotNull { k -> k.split('/', limit = 2).let { (s, id) -> dao.seriesItem(s, id) } }.filter { (it.sourceId to it.categoryId) in ok }
         shows = groupSeries(rows)
+        Kept.put("newEpisodeShows", keys to visible, shows)
     }
     return shows
 }

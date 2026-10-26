@@ -59,6 +59,16 @@ class SearchRelevanceTest {
                 movie("19", "ES - Up (2009)", "8.3"),
                 movie("20", "EN - Up (2009) 4K", "8.3"),
                 movie("21", "FR - Up in the Air (2009)", "7.4"),
+                // Titles that only start with "up", carried in more copies than Up in the Air.
+                movie("22", "EN - The Upside (2017)", "7.1"),
+                movie("23", "FR - The Upside (2017)", "7.1"),
+                movie("24", "ES - The Upside (2017)", "7.1"),
+                movie("25", "EN - The Upside (2017) 4K", "7.1"),
+                movie("26", "EN - Upgraded (2024)", "6.4"),
+                movie("27", "FR - Upgraded (2024)", "6.4"),
+                movie("28", "ES - Upgraded (2024)", "6.4"),
+                movie("29", "EN - Uprising (2001)", "6.5"),
+                movie("30", "FR - Uprising (2001)", "6.5"),
             ),
         )
         dao.upsertSeries(
@@ -94,6 +104,9 @@ class SearchRelevanceTest {
                 // A Canadian line's own guide id ends in .ca for every channel it carries, BBC's too.
                 channel("14", "CA| BBC World News", 14, "BBCWorldNews.ca"),
                 channel("15", "CA| CTV NewsChannel", 15, "CTVNewsChannel.ca"),
+                // Canadian news brands whose names aren't one of the network words (round 4).
+                channel("16", "CA| City News Toronto ON HD", 16),
+                channel("17", "CA| Business News Network HD", 17),
             ),
         )
     }
@@ -108,11 +121,15 @@ class SearchRelevanceTest {
 
     @Test
     fun aShortTitleComesFirstAndNotInsideOtherWords() {
-        // Titles that start with "up" by how well known they are (copies on the line, whole words one ahead),
-        // the rating only between equals: Up in the Air before the higher rated Uppity and Uproar.
-        assertEquals(listOf("Up", "Up in the Air", "The Up in Smoke Tour", "Uppity", "Uproar", "Upgrade", "What's Up, Doc?"), movies("up"))
+        // Titles that start with "up" by how well known they are (copies on the line, whole words two ahead),
+        // the rating only between equals: Up in the Air (2 copies) before The Upside (4) and the higher rated
+        // Uppity and Uproar (round 4: it was 13th on the Kitchen's line).
+        assertEquals(
+            listOf("Up", "Up in the Air", "The Upside", "Upgraded", "The Up in Smoke Tour", "Uprising", "Uppity", "Uproar", "Upgrade", "What's Up, Doc?"),
+            movies("up"),
+        )
         assertEquals(movies("up"), movies("UP"))
-        assertEquals("Upgrade", movies("upg").first())
+        assertEquals("Upgrade", movies("upgrade").first())
     }
 
     @Test
@@ -179,9 +196,12 @@ class SearchRelevanceTest {
         assertEquals(listOf("Global TV", "Global News BC", "Global News Toronto"), channels("global"))
         // Canadian lines first, then English ones.
         // Canadian broadcasters first, then the US channels a Canadian line carries, then English ones.
-        // Every Canadian broadcaster (a word start too: NewsChannel) before BBC World News on the Canadian line.
+        // Every Canadian broadcaster (a word start too: NewsChannel; City News and BNN by their names) before BBC World News on the Canadian line.
         assertEquals(
-            listOf("CTV News", "Global News BC", "CBC News Network", "Global News Toronto", "CTV NewsChannel", "FOX NEWS", "BBC World News", "BBC News"),
+            listOf(
+                "CTV News", "Global News BC", "CBC News Network", "Global News Toronto", "City News Toronto ON HD", "Business News Network HD",
+                "CTV NewsChannel", "FOX NEWS", "BBC World News", "BBC News",
+            ),
             channels("news"),
         )
         // CBC Canada before Egypt's CBC channels, and the cut-off feed last.

@@ -156,9 +156,9 @@ interface CatalogDao {
     @Query("SELECT * FROM programmes WHERE epgId = :epgId AND stop > :from AND start < :until ORDER BY start")
     suspend fun programmeRows(epgId: String, from: Long, until: Long): List<ProgrammeEntity>
     @Update suspend fun updateProgrammes(p: List<ProgrammeEntity>)
-    /** Points a channel at another schedule until the next refresh rewrites it from the provider. */
+    /** Points a channel at another schedule (or none) until the next refresh rewrites it from the provider. */
     @Query("UPDATE channels SET epgId = :epgId WHERE sourceId = :sourceId AND streamId = :streamId")
-    suspend fun setChannelGuide(sourceId: String, streamId: String, epgId: String)
+    suspend fun setChannelGuide(sourceId: String, streamId: String, epgId: String?)
     @Query("SELECT * FROM categories WHERE kind = :kind") suspend fun categoryList(kind: String): List<CategoryEntity>
 
     @Query("SELECT * FROM sources") suspend fun sources(): List<SourceEntity>
