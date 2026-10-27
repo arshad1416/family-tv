@@ -29,21 +29,28 @@ class Popularity(titles: List<TmdbVotes>) {
  * Search results in order of how well known the titles are, by TMDB's votes ([Popularity]): the
  * line's copies can't tell Up in the Air from Upgraded, nor Breaking Bad from Break Clause, and
  * TMDB's own search answers whole words only ("break" never finds Breaking Bad). Exact titles
- * first; then every title whose words start with the typed ones, the most voted first; then the
- * titles that only contain the text. Titles off the list follow the listed ones of their group, as
- * [SearchText] ordered them (copies, then rating).
+ * first; then the titles whose words start with the typed ones, by votes weighted for how well
+ * they match: three times for a title that starts with the typed words (Up in the Air), twice for
+ * the words later in it (Don't Look Up, Prison Break), once for a title that only starts with the
+ * text (Upgrade, Breaking Bad, which still leads "break" on its votes); then those off the list,
+ * as [SearchText] ordered them (copies, then rating); then the words inside other words (Once Upon
+ * a Time for "up"), then titles that only contain the text, each by votes, then the rest of them.
  */
 object PopularOrder {
     fun <T> apply(items: List<T>, q: String, list: Popularity?, title: (T) -> String, year: (T) -> Int?, ids: (T) -> Collection<String>): List<T> {
         if (list == null || list.size == 0 || items.size < 2) return items
         return items.withIndex().map { (i, x) ->
-            val group = when (SearchText.rank(SearchText.index(title(x)), q)) {
-                0 -> 0
+            val rank = SearchText.rank(SearchText.index(title(x)), q)
+            val votes = list.votes(ids(x), title(x), year(x))
+            val tier = when {
+                rank == 0 -> 0
+                rank in 1..3 -> if (votes != null) 1 else 2
+                rank == 4 -> 3
                 // No rank: the title only contains the text ("erman" in Superman).
-                null -> 2
-                else -> 1
+                else -> 4
             }
-            Triple(group, list.votes(ids(x), title(x), year(x)) ?: -1, i) to x
-        }.sortedWith(compareBy<Pair<Triple<Int, Int, Int>, T>> { it.first.first }.thenByDescending { it.first.second }.thenBy { it.first.third }).map { it.second }
+            val weight = when (rank) { 1 -> 3L; 2 -> 2L; else -> 1L }
+            Triple(tier, votes?.let { it * weight } ?: -1L, i) to x
+        }.sortedWith(compareBy<Pair<Triple<Int, Long, Int>, T>> { it.first.first }.thenByDescending { it.first.second }.thenBy { it.first.third }).map { it.second }
     }
 }
