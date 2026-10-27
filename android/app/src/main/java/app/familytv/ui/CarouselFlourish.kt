@@ -143,9 +143,10 @@ private fun ease(p: Float): Float = p * p * (3 - 2 * p)
 private fun rise(p: Float): Float = minOf(1f, p / 0.2f, (1f - p) / 0.33f).coerceIn(0f, 1f)
 
 /**
- * Counts the app's frames while [block] runs, and how many of them took longer than a refresh:
- * the window's own frame times where Android reports them (what `dumpsys gfxinfo` counts as janky),
- * else the gaps between frames.
+ * Counts the app's frames while [block] runs, and how many of them were late: a frame that came a
+ * refresh or more after the one it should have followed (a skipped vsync, as `dumpsys gfxinfo`
+ * counts jank), or that took over two refreshes to finish. Android's own frame times where it
+ * reports them; before Android 7, the gaps between frames.
  */
 internal suspend fun timeFrames(ctx: Context, block: suspend () -> Unit): Pair<Int, Int> {
     @Suppress("DEPRECATION")
@@ -155,9 +156,17 @@ internal suspend fun timeFrames(ctx: Context, block: suspend () -> Unit): Pair<I
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && window != null) {
         val frames = AtomicInteger()
         val late = AtomicInteger()
+        var last = 0L
         val listener = Window.OnFrameMetricsAvailableListener { _, m, _ ->
+            // One thread delivers them all, in order.
+            val skipped = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val vsync = m.getMetric(FrameMetrics.INTENDED_VSYNC_TIMESTAMP)
+                (last != 0L && vsync - last > refresh * 3 / 2).also { last = vsync }
+            } else {
+                false
+            }
             frames.incrementAndGet()
-            if (m.getMetric(FrameMetrics.TOTAL_DURATION) > refresh + 1_000_000) late.incrementAndGet()
+            if (skipped || m.getMetric(FrameMetrics.TOTAL_DURATION) > refresh * 2) late.incrementAndGet()
         }
         window.addOnFrameMetricsAvailableListener(listener, metrics)
         try {
