@@ -19,7 +19,7 @@ class RiveArtTest {
 
     @Test
     fun theRiveFilesShip() {
-        for (raw in listOf(R.raw.family_tv_appearance_switch, R.raw.family_tv_splash, R.raw.family_tv_loading, R.raw.family_tv_transition, R.raw.family_tv_nav_icons)) {
+        for (raw in listOf(R.raw.family_tv_appearance_switch, R.raw.family_tv_splash, R.raw.family_tv_transition, R.raw.family_tv_nav_icons)) {
             val magic = ctx.resources.openRawResource(raw).use { String(it.readNBytes(4)) }
             assertEquals("RIVE", magic)
         }
@@ -29,8 +29,7 @@ class RiveArtTest {
     fun withoutRivesLibraryTheFallbacksAreUsed() {
         // The JVM has no Rive library for Android, as an x86 emulator has none in the APK.
         assertFalse(RiveArt.ready(ctx))
-        // The player keeps its own spinner and pages swap without the wipe then.
-        assertNull(RiveLoader.create(ctx))
+        // Pages swap without the wipe then.
         assertNull(RiveTransition.create(ctx))
     }
 }

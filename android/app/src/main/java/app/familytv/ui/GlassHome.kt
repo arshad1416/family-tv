@@ -70,6 +70,7 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalContext
@@ -318,7 +319,10 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
                 // Over the carousel's art the bar and the weather hint keep light text in either look, on the art's dark shades.
                 // One provider either way, so the bar (and its focus) stays put when the tab changes.
                 val barPalette = if (backdropOn && hasSlide) GlassPalette.Dark else palette
-                if (!barHidden.value) {
+                // Hidden on a page with its own header, the bar stays composed, measured but never placed (so never drawn
+                // or focused): its Rive tab icons are made once, not thrown away and made again for every film or show
+                // page (a Rive view's surface release crashed the Fire Stick, Oct 27).
+                Box(if (barHidden.value) Modifier.layout { m, c -> m.measure(c); layout(0, 0) {} } else Modifier) {
                     CompositionLocalProvider(LocalGlassPalette provides barPalette, LocalContentColor provides barPalette.text) {
                         GlassTopBar(
                             tab, settings, tabFocus, settingsFocus,
@@ -332,8 +336,8 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
                             onViewers = { picking = true }.takeIf { hasViewers },
                         )
                     }
-                    Spacer(Modifier.height(16.gx))
                 }
+                if (!barHidden.value) Spacer(Modifier.height(16.gx))
                 Box(Modifier.weight(1f).fillMaxWidth().onPlaced { pageTop.floatValue = it.positionInRoot().y }) {
                     Box(Modifier.fillMaxSize().focusRequester(pageFocus).restoresFocus(entry).graphicsLayer { alpha = fade.value; translationY = (1f - fade.value) * rise }) {
                         pages.SaveableStateProvider(if (shownSettings) "settings" else shownTab.name) {

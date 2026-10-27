@@ -1,6 +1,7 @@
 package app.familytv.ui
 
 import android.content.Context
+import android.util.Log
 import android.view.View
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
@@ -37,6 +38,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import app.familytv.BuildConfig
 import app.familytv.R
 import app.rive.runtime.kotlin.RiveAnimationView
 import app.rive.runtime.kotlin.controllers.RiveFileController
@@ -54,46 +56,19 @@ private fun riveView(ctx: Context, raw: Int, stateMachine: String, fit: Fit): Ri
             isClickable = false
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
             setRiveResource(raw, stateMachineName = stateMachine, fit = fit)
+            riveLog("$stateMachine made")
         }
     }.getOrNull()
 }
 
-/**
- * The "TV" pill loader (family_tv_loading.riv, state machine "Loading", bool "active"). It stays
- * mounted: [loading] shows it after [LOADER_WAIT_MS], so a quick load never flashes it, and fades it
- * out again; it holds still (paused) while hidden. It stays with reduced motion too, as it shows
- * that something is happening.
- */
-internal class RiveLoader private constructor(val view: RiveAnimationView) {
-    private var want = false
-    private var shown = false
-    private val show = Runnable { shown = true; runCatching { view.play(LOADING, isStateMachine = true); view.setBooleanState(LOADING, "active", true) } }
-    private val rest = Runnable { runCatching { view.pause() } }
-
-    init { view.postDelayed(rest, LOADER_FADE_MS) }
-
-    fun loading(on: Boolean) {
-        if (on == want) return
-        want = on
-        view.removeCallbacks(show)
-        view.removeCallbacks(rest)
-        if (on) view.postDelayed(show, LOADER_WAIT_MS)
-        else if (shown) {
-            shown = false
-            runCatching { view.setBooleanState(LOADING, "active", false) }
-            view.postDelayed(rest, LOADER_FADE_MS)
-        }
-    }
-
-    companion object {
-        /** Null where Rive can't run; the caller keeps its own spinner then. */
-        fun create(ctx: Context): RiveLoader? = riveView(ctx, R.raw.family_tv_loading, LOADING, Fit.CONTAIN)?.let(::RiveLoader)
-    }
+/** Test builds: every Rive view made and released (tag RiveViews), to check none comes and goes with each page. */
+internal fun riveLog(what: String) {
+    if (BuildConfig.DEBUG || BuildConfig.VERSION_NAME.contains("-test")) Log.i("RiveViews", what)
 }
 
 /**
- * The page and channel transition (family_tv_transition.riv, state machine "Transition": number
- * "style", trigger "go", events "covered" and "done"). Hidden when idle, it never blocks a key:
+ * The page transition (family_tv_transition.riv, state machine "Transition": number "style",
+ * trigger "go", events "covered" and "done"). Made once with the TV home and kept. Hidden when idle, it never blocks a key:
  * a [go] while one runs is refused, never queued. If an event doesn't arrive in time, the swap and
  * the end happen anyway.
  */
@@ -118,7 +93,7 @@ internal class RiveTransition private constructor(val view: RiveAnimationView) {
         })
     }
 
-    /** Starts [style] ([PAGE] or [CHANNEL]); [onCovered] runs once nothing underneath shows. False, with nothing run, unless idle. */
+    /** Starts [style] ([PAGE] or [PAGE_LIGHT]); [onCovered] runs once nothing underneath shows. False, with nothing run, unless idle. */
     fun go(style: Int, onCovered: () -> Unit = {}): Boolean {
         if (phase != Phase.IDLE) return false
         val started = runCatching {
@@ -133,7 +108,7 @@ internal class RiveTransition private constructor(val view: RiveAnimationView) {
         }
         this.onCovered = onCovered
         phase = Phase.COVERING
-        view.postDelayed(coverLate, if (style == CHANNEL) CHANNEL_COVERED_BY_MS else PAGE_COVERED_BY_MS)
+        view.postDelayed(coverLate, PAGE_COVERED_BY_MS)
         view.postDelayed(doneLate, DONE_BY_MS)
         return true
     }
@@ -158,8 +133,6 @@ internal class RiveTransition private constructor(val view: RiveAnimationView) {
     companion object {
         /** Style 0: the soft dark-glass wipe, for a new page on the dark look. */
         const val PAGE = 0
-        /** Style 1: the dim, scan-line flash and bloom, for a new channel. */
-        const val CHANNEL = 1
         /** Style 2: the light-glass wipe, for a new page on the light look; timed as [PAGE]. */
         const val PAGE_LIGHT = 2
 
@@ -185,9 +158,11 @@ internal fun RiveTabIcon(artboard: String, focused: Boolean, selected: Boolean, 
                 importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
                 runCatching { setRiveResource(R.raw.family_tv_nav_icons, artboardName = artboard, stateMachineName = ICON, fit = Fit.CONTAIN) }
                 view = this
+                riveLog("tab icon $artboard made")
             }
         },
         modifier = modifier,
+        onRelease = { riveLog("tab icon $artboard released") },
     )
     LaunchedEffect(view, focused, selected, light, presses) {
         val v = view ?: return@LaunchedEffect
@@ -304,14 +279,8 @@ private const val ICON = "Icon"
 private const val ICON_SETTLE_MS = 900L
 /** The ripple's 250 ms. */
 private const val PRESS_MS = 250
-private const val LOADING = "Loading"
 private const val TRANSITION = "Transition"
-/** How long a load runs before the loader shows. */
-private const val LOADER_WAIT_MS = 300L
-/** The loader's 200 ms fade-out, with room to spare. */
-private const val LOADER_FADE_MS = 300L
-/** "covered" comes at about 265 ms (page) and 185 ms (channel); past these the swap happens anyway. */
+/** "covered" comes at about 265 ms; past this the swap happens anyway. */
 private const val PAGE_COVERED_BY_MS = 400L
-private const val CHANNEL_COVERED_BY_MS = 300L
 /** "done" comes at about 505 ms at most; past this the overlay hides anyway. */
 private const val DONE_BY_MS = 800L
