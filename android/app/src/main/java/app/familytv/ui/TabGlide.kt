@@ -5,6 +5,9 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -86,7 +89,7 @@ internal fun rememberTabGlide(chosen: Pair<Float, Float>?, focused: Pair<Float, 
             }
         }
     }
-    glide.chosen = chosen != null
+    SideEffect { glide.chosen = chosen != null }
     glide.draw = {
         val h = size.height
         if (chosen != null && pill.placed) {
@@ -109,11 +112,19 @@ internal fun rememberTabGlide(chosen: Pair<Float, Float>?, focused: Pair<Float, 
 internal class TabGlide {
     internal val pill = GlideSpan()
     internal val pillShown = Animatable(1f)
-    internal var chosen = false
+    /** Whether a tab is chosen (none on Settings). State, like the pill's place, so labels drawn before it is known redraw. */
+    internal var chosen by mutableStateOf(false)
     var draw: DrawScope.() -> Unit = {}
     /** Where the tab row is, which the pill's spans are in. */
     var row: LayoutCoordinates? = null
     private val path = Path()
+
+    /**
+     * The pill's x and width as drawn now, or none while no tab is chosen or the pill isn't placed yet. Read in a
+     * draw, it redraws the label when any of that changes, the first placing included (the chosen tab at x 0 at start).
+     */
+    internal fun pillNow(): Pair<Float, Float>? = if (chosen && pill.placed) pill.span() else null
+
     private val paint = Paint()
 
     /**
@@ -122,11 +133,12 @@ internal class TabGlide {
      */
     fun ink(scope: ContentDrawScope, at: LayoutCoordinates?, inside: Boolean) = with(scope) {
         val row = row
-        if (!chosen || !pill.placed || at == null || row == null || !at.isAttached || !row.isAttached) {
+        val span = pillNow()
+        if (span == null || at == null || row == null || !at.isAttached || !row.isAttached) {
             if (!inside) drawContent()
             return@with
         }
-        val (x, w) = pill.span()
+        val (x, w) = span
         val a = at.localPositionOf(row, Offset(x, 0f))
         val b = at.localPositionOf(row, Offset(x + w, row.size.height.toFloat()))
         path.rewind()
@@ -165,7 +177,7 @@ internal class GlideSpan {
     private var rightward = true
     private var width = 0f
     private var cap = 0f
-    var placed = false
+    var placed by mutableStateOf(false)
         private set
 
     /** Glides to [spot] (x and width), or [jump]s there; the first call always jumps. */
