@@ -76,11 +76,11 @@ import app.familytv.data.SeriesEntity
 import app.familytv.data.displayName
 import app.familytv.data.searchMovies
 import app.familytv.data.searchSeries
+import app.familytv.iptv.CatalogWork
 import app.familytv.iptv.SeriesTitles
 import app.familytv.perf.Perf
 import app.familytv.portal.Profile
 import app.familytv.sync.PlaybackStatus
-import app.familytv.trailer.TmdbHit
 import app.familytv.trakt.ProgressRules
 import app.familytv.usage.Usage
 import app.familytv.user.ProgressEntity
@@ -746,26 +746,29 @@ private fun VodSearch(profile: Profile, kind: String, q: String, marks: VodMarks
     val cats = categories(profile, kind)
     val keys = remember(cats) { categoryKeys(cats) }
     var results by remember { mutableStateOf<List<VodItem>?>(null) }
+    var resultsFor by remember { mutableStateOf<String?>(null) }
     var picking by remember { mutableStateOf(false) }
-    LaunchedEffect(q, keys) {
-        delay(300) // let typing settle
+    // Searched again for the same words when the most-voted lists arrive or a list load ends, so a
+    // search made during a load or before the lists were read doesn't stay as it was.
+    val voted by app.mostVoted.lists.collectAsState()
+    val loads by CatalogWork.listsLoaded.collectAsState()
+    LaunchedEffect(q, keys, voted, loads) {
+        val again = resultsFor == q
+        // Never under a viewer already moving through the results.
+        if (again && picking) return@LaunchedEffect
+        if (!again) delay(300) // let typing settle
         val tv = kind != Kind.MOVIE
-        fun popular(items: List<VodItem>, hits: List<TmdbHit>) = PopularOrder.apply(items, q, hits, { it.title }, { it.year }, { it.tmdbIds })
+        val popular = app.mostVoted.ready()?.of(tv)
         val found = if (kind == Kind.MOVIE) {
             // Copies in other languages are one result: group, then count.
             groupMovies(dao.searchMovies(q, SEARCH_LIMIT * 4).filter { (it.sourceId to it.categoryId) in keys }).take(SEARCH_LIMIT).map { VodItem.Movie(it) }
         } else {
             groupSeries(dao.searchSeries(q, SEARCH_LIMIT * 4).filter { (it.sourceId to it.categoryId) in keys }).take(SEARCH_LIMIT).map { VodItem.Show(it) }
         }
-        // In TMDB's order of how well known they are; until TMDB answers, as the line has them.
-        val known = TmdbSearch.kept(q, tv)
-        results = known?.let { popular(found, it) } ?: found
-        found.size.let { Usage.log(if (it == 0) Usage.Action.SEARCH_EMPTY else Usage.Action.SEARCH_SUBMIT, it) }
-        if (known != null || found.size < 2) return@LaunchedEffect
-        delay(100)
-        val hits = TmdbSearch.hits(app, q, tv) ?: return@LaunchedEffect
-        // Never under a viewer already moving through the results.
-        if (!picking) results = popular(found, hits)
+        // In order of how well known the titles are; without the lists (no TMDB key yet), as the line has them.
+        results = PopularOrder.apply(found, q, popular, { it.title }, { it.year }, { it.tmdbIds })
+        resultsFor = q
+        if (!again) found.size.let { Usage.log(if (it == 0) Usage.Action.SEARCH_EMPTY else Usage.Action.SEARCH_SUBMIT, it) }
     }
     val shown = results
     when {

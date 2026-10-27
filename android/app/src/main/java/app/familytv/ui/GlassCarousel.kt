@@ -227,10 +227,15 @@ internal object Backdrops {
 @Composable
 internal fun BoxScope.HomeBackdrop(slide: State<Slide?>, show: Boolean, covers: MutableState<Boolean>? = null, pageTop: FloatState? = null, slot: FloatState? = null) {
     val ctx = LocalContext.current
-    val target = slide.value.takeIf { show }
     val still = LocalReducedMotion.current
     // The slide in front with its decoded art, and the one it is fading in over (none once the fade ends).
     var front by remember { mutableStateOf<Shown?>(null) }
+    // Back on Home, the carousel only names its slide once it is composed again, a frame or more in:
+    // until then the art it left on stays up, so Home's first frame is never the bare page (Movies to
+    // Home, Oct 27). For [ARRIVING_MS] at most, in case Home comes back without a carousel.
+    var arriving by remember(show) { mutableStateOf(show) }
+    LaunchedEffect(show) { if (show) { delay(ARRIVING_MS); arriving = false } }
+    val target = slide.value?.takeIf { show } ?: front?.slide?.takeIf { show && arriving }
     // Back on Home with the slide it left on, the art is up at once (no fade in from the page).
     val back = target != null && target.key == front?.slide?.key
     val fadeIn by animateFloatAsState(if (target != null) 1f else 0f, tween(if (still || back) 0 else 400), label = "backdrop")
@@ -318,6 +323,9 @@ internal fun BoxScope.HomeBackdrop(slide: State<Slide?>, show: Boolean, covers: 
         )
     }
 }
+
+/** How long the art Home left on waits for the carousel to come back with it. */
+private const val ARRIVING_MS = 1_000L
 
 /** The shade under Home's rows while the carousel shows: the dark look's page colour. */
 private val INK = GlassPalette.Dark.middle

@@ -5,6 +5,8 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import app.familytv.app
 import app.familytv.diag.DiagnosisReport
+import app.familytv.core.Http
+import app.familytv.iptv.CatalogWork
 import app.familytv.iptv.ServerSwitch
 import app.familytv.perf.Perf
 import app.familytv.portal.DeviceConfig
@@ -12,6 +14,7 @@ import app.familytv.portal.LatestApp
 import app.familytv.portal.PortalException
 import app.familytv.portal.Profile
 import app.familytv.sync.PlaybackStatus
+import app.familytv.trailer.Tmdb
 import app.familytv.update.Updater
 import app.familytv.usage.Usage
 import kotlinx.coroutines.CancellationException
@@ -99,6 +102,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         app.sharedProgress.soon(0)
         // Recount the episodes waiting on favourite shows once Trakt's watched marks have had a moment.
         app.scope.launch { delay(60_000); runCatching { app.newEpisodes.checkIfDue(profile) } }
+        // TMDB's most-voted lists for the search order, weekly, well clear of the start; the fade timing waits it out.
+        app.scope.launch {
+            delay(MOST_VOTED_AFTER_MS)
+            val key = app.portal.cachedConfig?.tmdbApiKey?.trim()?.takeIf { it.isNotEmpty() } ?: return@launch
+            runCatching { CatalogWork.during { app.mostVoted.refreshIfDue(Tmdb(key, Http.client)) } }
+        }
         app.commands.runAll(config.commands, profile)
         offerUpdate(config.latestApp)
     }
@@ -150,3 +159,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
 private suspend fun app.familytv.data.AppDb.clearAllTablesSafely() =
     kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { clearAllTables() }
+
+/** How long after the start TMDB's most-voted lists may be fetched (100 small requests, once a week). */
+private const val MOST_VOTED_AFTER_MS = 3 * 60_000L

@@ -20,6 +20,8 @@ import app.familytv.sync.PlaybackStatus
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import okhttp3.Request
@@ -40,6 +42,13 @@ object CatalogWork {
     /** How many loads have started in this run, to tell one overlapped a measurement. */
     @Volatile var started = 0
         private set
+
+    private val listLoads = MutableStateFlow(0)
+
+    /** Counts the list loads finished in this run (done or not), so a search made during one runs again after it. */
+    val listsLoaded: StateFlow<Int> = listLoads
+
+    internal fun listsDone() { listLoads.value++ }
 
     /** Milliseconds since the last load ended, or -1 while one runs. */
     fun quietFor(): Long = if (running.get() > 0) -1 else SystemClock.elapsedRealtime() - quietSince
@@ -96,7 +105,11 @@ class Catalog(private val db: AppDb, private val marks: SharedPreferences? = nul
      */
     val complete: Boolean get() = marks?.let { it.getBoolean(COMPLETE, false) && it.getInt(FORMAT_KEY, 0) == FORMAT } ?: true
 
-    suspend fun refresh(profile: Profile, onProgress: (Progress) -> Unit = {}) = CatalogWork.during { refreshNow(profile, onProgress) }
+    suspend fun refresh(profile: Profile, onProgress: (Progress) -> Unit = {}) = try {
+        CatalogWork.during { refreshNow(profile, onProgress) }
+    } finally {
+        CatalogWork.listsDone()
+    }
 
     private suspend fun refreshNow(profile: Profile, onProgress: (Progress) -> Unit) = withContext(Dispatchers.IO) {
         marks?.edit()?.putBoolean(COMPLETE, false)?.apply()
