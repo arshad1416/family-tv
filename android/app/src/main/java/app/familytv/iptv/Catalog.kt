@@ -491,8 +491,9 @@ class Catalog(private val db: AppDb, private val marks: SharedPreferences? = nul
          * How lists are stored and matched: raise it with any change to search text or guide
          * matching, so TVs updated over an existing install load their lists again once.
          * 2: search on clean titles and guide links for regional stations (Oct 26).
+         * 3: no guide from another station's id (Global National, Peterborough on BC 1's) (Oct 26).
          */
-        const val FORMAT = 2
+        const val FORMAT = 3
         const val GUIDE_RETRY_MS = 20_000L
         /** Thin channels with no extra guide, listed for the admin (the portal keeps a few KB of status). */
         const val MAX_REPORTED = 30
