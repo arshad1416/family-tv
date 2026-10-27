@@ -142,7 +142,7 @@ fun FocusBox(
     val grow = if (animated) animateFloatAsState(if (focused && !still) scale else 1f, if (still) snap() else spring(dampingRatio = 0.8f, stiffness = 700f), label = "grow") else null
     val chosen = if (bubble) animateFloatAsState(if (selected) 1f else 0f, if (still) snap() else tween(CHOSEN_FADE_MS), label = "chosen") else null
     val accent = LocalGlassShell.current?.glow
-    // OK on a glass card also starts the Rive press ripple over it ([PressRipple]); the click never waits for it.
+    // OK on a glass card also starts the press ripple over it ([PressRipple]); the click never waits for it.
     val press = LocalPress.current?.takeIf { glass }
     val placed = remember { arrayOfNulls<LayoutCoordinates>(1) }
     val click: () -> Unit = if (press == null) onClick else { { placed[0]?.let { press.press(it, shape) }; onClick() } }

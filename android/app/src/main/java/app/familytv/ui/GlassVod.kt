@@ -346,6 +346,8 @@ private fun VodHome(
         back != null && featured?.first?.group == back -> "hero"
         back != null -> rows.firstNotNullOfOrNull { (t, l) -> l.firstOrNull { it.group == back }?.let { "shelf/$t/${it.key}" } } ?: homeKeys.firstOrNull()
         opened != null && opened in homeKeys -> opened
+        // The highlights' newest card opens "recent" (films) or "new" (shows).
+        (opened == "recent" || opened == "new") && "newest" in homeKeys -> "newest"
         else -> homeKeys.firstOrNull()
     }
     // Until it's toggled, the chips are open only when coming back from a category page, so focus can land on its chip.

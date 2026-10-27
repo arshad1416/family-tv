@@ -2,10 +2,14 @@ package app.familytv.ui
 
 import android.content.Context
 import android.view.View
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CornerBasedShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -13,16 +17,21 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.drawOutline
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.findRootCoordinates
 import androidx.compose.ui.layout.onPlaced
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
@@ -195,7 +204,7 @@ internal fun RiveTabIcon(artboard: String, focused: Boolean, selected: Boolean, 
 }
 
 /**
- * Where OK lands on the TV home's glass cards, for one shared Rive press ripple ([PressRipple])
+ * Where OK lands on the TV home's glass cards, for one shared press ripple ([PressRipple])
  * laid over the pressed card. Cards under [minWidth] by [minHeight] px (pills, tabs, icon
  * buttons) and cards in another window (dialogs) get none.
  */
@@ -222,46 +231,79 @@ internal data class PressSpot(val offset: IntOffset, val size: IntSize, val shap
 internal val LocalPress = staticCompositionLocalOf<PressHost?> { null }
 
 /**
- * The press ripple (family_tv_press.riv, state machine "Press": trigger "press", number "radius")
- * over [host]'s latest pressed card, clipped to its shape. Hidden and still between presses; the
- * press never waits for it.
+ * The press ripple over [host]'s latest pressed card, clipped to its shape, after the Rive design
+ * (rive/press: a glass ripple growing from the centre, a soft core flash and a bright rim, 250 ms).
+ * Drawn here as layers that only scale and fade: the Rive view it was had its surface remade for
+ * every card's size, and the Kitchen's Fire Stick crashed tearing those surfaces down (Oct 27).
+ * Nothing is composed between presses; the press never waits for it.
  */
 @Composable
 internal fun PressRipple(host: PressHost, modifier: Modifier = Modifier) {
-    val ctx = LocalContext.current
-    val view = remember { riveView(ctx, R.raw.family_tv_press, PRESS, Fit.FILL)?.apply { visibility = View.INVISIBLE } } ?: return
-    val hide = remember { Runnable { view.visibility = View.INVISIBLE; runCatching { view.pause() } } }
     val density = LocalDensity.current
     val spot = host.spot
+    val at = remember { Animatable(1f) }
     Box(modifier.onPlaced { host.coords = it }) {
-        AndroidView(
-            { view },
-            if (spot == null) Modifier.size(0.dp)
-            else with(density) { Modifier.offset { spot.offset }.size(spot.size.width.toDp(), spot.size.height.toDp()).clip(spot.shape) },
-        )
+        if (spot != null && at.value < 1f) {
+            val shape = spot.shape
+            with(density) {
+                Box(Modifier.offset { spot.offset }.size(spot.size.width.toDp(), spot.size.height.toDp()).clip(shape)) {
+                    // The ripple: a ring of light in the card's proportions, growing from a point past the card's edges.
+                    Spacer(
+                        Modifier.fillMaxSize().graphicsLayer {
+                            val p = at.value
+                            val grow = 0.12f + 0.88f * (1f - (1f - p) * (1f - p))
+                            scaleX = grow
+                            scaleY = grow * size.height / size.width
+                            alpha = minOf(1f, p / 0.2f, (1f - p) / 0.5f).coerceIn(0f, 1f)
+                        }.drawWithCache {
+                            val r = size.width * 0.66f
+                            val ring = Brush.radialGradient(
+                                0f to Color.Transparent, 0.45f to Color(0x0DFFFFFF), 0.74f to Color(0x33FFFFFF), 0.86f to Color(0x4CFFFFFF),
+                                0.94f to Color(0x1FFFFFFF), 1f to Color.Transparent, radius = r,
+                            )
+                            onDrawBehind { drawCircle(ring, r) }
+                        },
+                    )
+                    // A soft flash at the centre, gone by the ripple's middle.
+                    Spacer(
+                        Modifier.fillMaxSize().graphicsLayer {
+                            val p = at.value
+                            scaleY = size.height / size.width
+                            alpha = minOf(1f, p / 0.15f, (0.6f - p) / 0.45f).coerceIn(0f, 1f)
+                        }.drawWithCache {
+                            val r = size.width * 0.25f
+                            val core = Brush.radialGradient(0f to Color(0x38FFFFFF), 0.6f to Color(0x1AFFFFFF), 1f to Color.Transparent, radius = r)
+                            onDrawBehind { drawCircle(core, r) }
+                        },
+                    )
+                    // The rim flashes around the card's edge, brighter at the top.
+                    Spacer(
+                        Modifier.fillMaxSize().graphicsLayer {
+                            val p = at.value
+                            alpha = minOf(1f, p / 0.3f, (1f - p) / 0.7f).coerceIn(0f, 1f)
+                        }.drawWithCache {
+                            val w = 3.dp.toPx()
+                            val edge = shape.createOutline(Size(size.width - w, size.height - w), layoutDirection, this)
+                            val ink = Brush.verticalGradient(0f to Color(0xF2FFFFFF), 1f to Color(0x66FFFFFF))
+                            onDrawBehind { translate(w / 2, w / 2) { drawOutline(edge, ink, style = Stroke(w)) } }
+                        },
+                    )
+                }
+            }
+        }
     }
     LaunchedEffect(spot) {
-        val s = spot ?: return@LaunchedEffect
-        // Once the view has its new size.
-        withFrameNanos { }
-        val corner = (s.shape as? CornerBasedShape)?.topStart?.toPx(Size(s.size.width.toFloat(), s.size.height.toFloat()), density) ?: 0f
-        view.removeCallbacks(hide)
-        view.visibility = View.VISIBLE
-        runCatching {
-            view.play(PRESS, isStateMachine = true)
-            view.setNumberState(PRESS, "radius", (corner * 240f / s.size.height).coerceIn(0f, 100f))
-            view.fireState(PRESS, "press")
-        }
-        view.postDelayed(hide, PRESS_MS)
+        if (spot == null) return@LaunchedEffect
+        at.snapTo(0f)
+        at.animateTo(1f, tween(PRESS_MS, easing = LinearEasing))
     }
 }
 
 private const val ICON = "Icon"
-private const val PRESS = "Press"
 /** An icon's focus move takes about 0.7 s and its press 0.18 s. */
 private const val ICON_SETTLE_MS = 900L
-/** The ripple's 250 ms, with room to spare. */
-private const val PRESS_MS = 350L
+/** The ripple's 250 ms. */
+private const val PRESS_MS = 250
 private const val LOADING = "Loading"
 private const val TRANSITION = "Transition"
 /** How long a load runs before the loader shows. */
