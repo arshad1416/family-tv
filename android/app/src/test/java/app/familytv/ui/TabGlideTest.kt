@@ -160,6 +160,19 @@ class TabGlideTest {
     }
 
     @Test
+    fun aCrossedIconIsWholeInTheInkOfItsCentresSide() {
+        // Round 14: split through a clip, the onn lost the Home icon for a frame as the pill left it. Now it is drawn
+        // whole: the pill's ink while its centre is on the pill, the bar's once it isn't.
+        val core = iconCore(Size(36f, 36f)).translate(Offset(11f, 2f))
+        val atRest = RoundRect(0f, 0f, 120f, 40f, CornerRadius(20f))
+        assertTrue(iconOnPill(atRest, core))
+        assertTrue(iconOnPill(RoundRect(25f, 0f, 145f, 40f, CornerRadius(20f)), core))
+        assertFalse(iconOnPill(RoundRect(31f, 0f, 151f, 40f, CornerRadius(20f)), core))
+        assertFalse(iconOnPill(RoundRect(147f, 0f, 267f, 40f, CornerRadius(20f)), core))
+        assertFalse(iconOnPill(null, core))
+    }
+
+    @Test
     fun aLookChangeTintsTheIconAndEndsUntinted() = inkTest {
         // Into or out of Home by day, or into Settings: the bar's look flips; the icon's own ink takes 180 ms.
         val ink = IconInk(chosen = true, light = false)

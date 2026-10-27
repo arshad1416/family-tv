@@ -160,23 +160,15 @@ internal class TabGlide {
     private fun outline(pill: RoundRect): Path = path.apply { rewind(); addRoundRect(pill) }
 
     /**
-     * Draws a tab's Rive icon placed at [at], whose own ink is [shown] (the selected ink or not): the part on the pill
-     * in [over] and the rest in [under] wherever the icon's ink is wrong for it ([iconTint]), so the icon splits at the
-     * pill's edge as the labels do. The icon is one Rive view drawn once or twice through clips, never a second view.
+     * Draws a tab's Rive icon placed at [at], whose own ink is [shown] (the selected ink or not), whole and unclipped
+     * in the ink of the side its centre is on ([iconOnPill]): [over] on the pill, [under] off it, wherever its own ink
+     * is wrong for that ([iconTint]). One Rive view drawn once, never a second view. Round 14: split through a clip at
+     * the pill's edge, the onn lost the Home icon for a frame as the pill left it.
      */
     fun iconInk(scope: ContentDrawScope, at: LayoutCoordinates?, shown: Boolean, cover: Float, under: Color, over: Color) = with(scope) {
-        val pill = pillIn(at)
         // By the icon itself, not the glow's margin around it, which overhangs the pill's round ends at rest.
-        val core = iconCore(size)
-        when {
-            pill == null || !pill.touches(core) -> tinted(scope, iconTint(false, shown, cover), under)
-            pill.covers(core) -> tinted(scope, iconTint(true, shown, cover), over)
-            else -> {
-                val path = outline(pill)
-                clipPath(path, ClipOp.Difference) { tinted(scope, iconTint(false, shown, cover), under) }
-                clipPath(path) { tinted(scope, iconTint(true, shown, cover), over) }
-            }
-        }
+        val onPill = iconOnPill(pillIn(at), iconCore(size))
+        tinted(scope, iconTint(onPill, shown, cover), if (onPill) over else under)
     }
 
     /** The content as it is, cross-faded to it tinted all in [color] by [t] (0 none, 1 all). */
@@ -234,6 +226,10 @@ private fun RoundRect.covers(box: Rect) = contains(box.topLeft) && contains(box.
  */
 internal fun iconCore(size: Size): Rect = Rect(Offset.Zero, size).deflate(minOf(size.width, size.height) * ICON_MARGIN)
 
+/** Whether an icon's [core] counts as on [pill] (none: not drawn): all of it, or its centre while the pill's edge crosses it. */
+internal fun iconOnPill(pill: RoundRect?, core: Rect): Boolean =
+    pill != null && (pill.covers(core) || (pill.touches(core) && pill.contains(core.center)))
+
 /**
  * Whether [pill] (none: not drawn) is clear of an icon's [core]: all over it when [chosen], else off it. Round 13:
  * judged by the whole view, the glow's margin poked past the pill's round ends, so a chosen icon was never "clear",
@@ -249,8 +245,8 @@ internal fun pillClear(pill: RoundRect?, core: Rect, chosen: Boolean): Boolean =
 internal fun iconTint(inside: Boolean, shown: Boolean, cover: Float): Float = if (inside != shown) 1f else cover
 
 /**
- * A tab's Rive icon ([icon], given the selected ink to show and the modifier for its view) split at the gliding pill's
- * edge like its label. The icon's own ink changes over [ICON_INK_MS], so it is told the tab is [chosen] only once the
+ * A tab's Rive icon ([icon], given the selected ink to show and the modifier for its view) in the gliding pill's ink
+ * while its centre is on it, else the bar's, as its label is either side of the pill's edge. The icon's own ink changes over [ICON_INK_MS], so it is told the tab is [chosen] only once the
  * pill is clear of its edges ([TabGlide.clear]); until then, and while its ink changes (for that, or for the bar's look
  * turning [light] or dark), the tint draws the right ink over it ([IconInk]). Settled, it is drawn as it is.
  */

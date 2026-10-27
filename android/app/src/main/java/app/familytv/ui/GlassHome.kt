@@ -134,8 +134,8 @@ internal fun GlassBarHidden() {
 }
 
 /**
- * Keeps the dark look while this is composed: Settings, the TV guide and the film and show pages
- * are still drawn for it. Does nothing off the TV's glass home.
+ * Keeps the dark look while this is composed: the TV guide and the film and show pages are still
+ * drawn for it (Settings is read from the page shown). Does nothing off the TV's glass home.
  */
 @Composable
 internal fun GlassDarkPage() {
@@ -200,9 +200,6 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
     val shell = remember { GlassShell(queries, glow, barHidden, darkPages, mutableStateOf(null), saverState) }
     val shown by animateColorAsState(glow.value, tween(500), label = "glow")
     val lightness = rememberLightness(appearance, weather.forecast)
-    // Kids get the bright look.
-    val t = if (darkPages.intValue > 0) 0f else if (profile.kidsOnly) 1f else lightness
-    val palette = remember(t) { GlassPalette.lerp(GlassPalette.Dark, GlassPalette.Light, t) }
     LaunchedEffect(backHome) {
         if (backHome == 0) return@LaunchedEffect
         // Once Home's rows are back on screen.
@@ -231,6 +228,11 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
     val ctx = LocalContext.current
     val wipe = remember { if (still) null else RiveTransition.create(ctx) }
     var onPage by remember { mutableStateOf(tab to settings) }
+    // Kids get the bright look. Settings keeps the dark look from the frame its page is up to the frame it goes, read
+    // here rather than counted by [GlassDarkPage], whose count lands a frame late: opening it flashed the bar light for a
+    // frame, and Back left it dark for one (round 14).
+    val t = if (onPage.second || darkPages.intValue > 0) 0f else if (profile.kidsOnly) 1f else lightness
+    val palette = remember(t) { GlassPalette.lerp(GlassPalette.Dark, GlassPalette.Light, t) }
     val pageKey = if (settings) "settings" else tab.name
     val fade = remember { Animatable(1f) }
     val rise = with(LocalDensity.current) { 10.dp.toPx() }
@@ -348,7 +350,6 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
                             if (shownSettings) {
                                 TrackScreen(Usage.Screen.SETTINGS)
                                 GlassGlow(Color(0xFF7A8BA8))
-                                GlassDarkPage()
                                 SettingsScreen(vm, config)
                             } else {
                                 TrackScreen(shownTab.usage)
