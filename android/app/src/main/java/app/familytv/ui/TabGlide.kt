@@ -6,6 +6,8 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -150,13 +152,10 @@ internal class TabGlide {
      * the icon can change its own ink under the tint without any edge crossing it.
      */
     fun clear(at: LayoutCoordinates?, chosen: Boolean): Boolean {
-        val pill = pillIn(at)
-        val box = Rect(Offset.Zero, at?.size?.let { Size(it.width.toFloat(), it.height.toFloat()) } ?: return false)
-        return if (chosen) pill != null && pill.covers(box) else pill == null || !pill.touches(box)
+        val size = at?.size ?: return false
+        return pillClear(pillIn(at), iconCore(Size(size.width.toFloat(), size.height.toFloat())), chosen)
     }
 
-    private fun RoundRect.touches(box: Rect) = Rect(left, top, right, bottom).overlaps(box)
-    private fun RoundRect.covers(box: Rect) = contains(box.topLeft) && contains(box.topRight) && contains(box.bottomLeft) && contains(box.bottomRight)
 
     private fun outline(pill: RoundRect): Path = path.apply { rewind(); addRoundRect(pill) }
 
@@ -167,10 +166,11 @@ internal class TabGlide {
      */
     fun iconInk(scope: ContentDrawScope, at: LayoutCoordinates?, shown: Boolean, cover: Float, under: Color, over: Color) = with(scope) {
         val pill = pillIn(at)
-        val box = Rect(Offset.Zero, size)
+        // By the icon itself, not the glow's margin around it, which overhangs the pill's round ends at rest.
+        val core = iconCore(size)
         when {
-            pill == null || !pill.touches(box) -> tinted(scope, iconTint(false, shown, cover), under)
-            pill.covers(box) -> tinted(scope, iconTint(true, shown, cover), over)
+            pill == null || !pill.touches(core) -> tinted(scope, iconTint(false, shown, cover), under)
+            pill.covers(core) -> tinted(scope, iconTint(true, shown, cover), over)
             else -> {
                 val path = outline(pill)
                 clipPath(path, ClipOp.Difference) { tinted(scope, iconTint(false, shown, cover), under) }
@@ -225,6 +225,23 @@ internal class TabGlide {
     }
 }
 
+private fun RoundRect.touches(box: Rect) = Rect(left, top, right, bottom).overlaps(box)
+private fun RoundRect.covers(box: Rect) = contains(box.topLeft) && contains(box.topRight) && contains(box.bottomLeft) && contains(box.bottomRight)
+
+/**
+ * The icon itself in a Rive tab icon's view of [size]: the artboard is 80 with the 48 icon at its centre, the rest
+ * being room for its glow (nav-icons spec).
+ */
+internal fun iconCore(size: Size): Rect = Rect(Offset.Zero, size).deflate(minOf(size.width, size.height) * ICON_MARGIN)
+
+/**
+ * Whether [pill] (none: not drawn) is clear of an icon's [core]: all over it when [chosen], else off it. Round 13:
+ * judged by the whole view, the glow's margin poked past the pill's round ends, so a chosen icon was never "clear",
+ * never told it was selected (no glow or dot), and kept the tint for good.
+ */
+internal fun pillClear(pill: RoundRect?, core: Rect, chosen: Boolean): Boolean =
+    if (chosen) pill != null && pill.covers(core) else pill == null || !pill.touches(core)
+
 /**
  * How much of a Rive tab icon's part ([inside] the pill or off it) is drawn tinted, when its own ink is [shown]: all of
  * it where that ink is wrong for the part, else [cover], the tint still over the icon while its own ink changes.
@@ -234,15 +251,17 @@ internal fun iconTint(inside: Boolean, shown: Boolean, cover: Float): Float = if
 /**
  * A tab's Rive icon ([icon], given the selected ink to show and the modifier for its view) split at the gliding pill's
  * edge like its label. The icon's own ink changes over [ICON_INK_MS], so it is told the tab is [chosen] only once the
- * pill is clear of its edges ([TabGlide.clear]); until then, and while its ink changes, the tint draws the right ink
- * over it ([IconInk]). Settled, it is drawn as it is.
+ * pill is clear of its edges ([TabGlide.clear]); until then, and while its ink changes (for that, or for the bar's look
+ * turning [light] or dark), the tint draws the right ink over it ([IconInk]). Settled, it is drawn as it is.
  */
 @Composable
-internal fun GlideIcon(glide: TabGlide, chosen: Boolean, under: Color, over: Color, icon: @Composable (selected: Boolean, modifier: Modifier) -> Unit) {
+internal fun GlideIcon(glide: TabGlide, chosen: Boolean, light: Boolean, under: Color, over: Color, icon: @Composable (selected: Boolean, modifier: Modifier) -> Unit) {
     // State, so a first placing re-checks whether the pill is clear of it.
     var at by remember { mutableStateOf<LayoutCoordinates?>(null) }
-    val ink = remember { IconInk(chosen) }
+    val ink = remember { IconInk(chosen, light) }
     val chosenNow by rememberUpdatedState(chosen)
+    val scope = rememberCoroutineScope()
+    SideEffect { ink.look(scope, light) }
     LaunchedEffect(glide, ink) {
         snapshotFlow { chosenNow.let { it to glide.clear(at, it) } }.collect { (now, clear) -> ink.update(this, now, clear) }
     }
@@ -254,8 +273,11 @@ internal fun GlideIcon(glide: TabGlide, chosen: Boolean, under: Color, over: Col
  * still over all of it while that ink changes. Only a change of [shown] starts the tint, which then always fades out;
  * nothing else stops it, so a settled icon has none.
  */
-internal class IconInk(chosen: Boolean) {
+internal class IconInk(chosen: Boolean, light: Boolean) {
     var shown by mutableStateOf(chosen)
+        private set
+    /** The look the icon is told it is on ("light"), which also changes its ink over [ICON_INK_MS]. */
+    var light = light
         private set
     var cover by mutableFloatStateOf(0f)
         private set
@@ -264,10 +286,24 @@ internal class IconInk(chosen: Boolean) {
     /** The tab is [chosen] or not now; [clear]: the pill is clear of the icon's edges, so its ink may change. */
     fun update(scope: CoroutineScope, chosen: Boolean, clear: Boolean) {
         if (chosen == shown || !clear) return
+        shown = chosen
+        tint(scope)
+    }
+
+    /**
+     * The bar's look is now [light]: the labels take its ink at once, so the tint covers the icon while it changes
+     * its own. Called in the frame the look changes (a SideEffect), so no frame shows the icon in the old look's ink.
+     */
+    fun look(scope: CoroutineScope, light: Boolean) {
+        if (light == this.light) return
+        this.light = light
+        tint(scope)
+    }
+
+    private fun tint(scope: CoroutineScope) {
         fade?.cancel()
         // In the same frame as the new ink, so no frame shows the old one changing without the tint.
         cover = 1f
-        shown = chosen
         fade = scope.launch {
             delay(ICON_INK_MS)
             animate(1f, 0f, animationSpec = tween(ICON_UNTINT_MS)) { v, _ -> cover = v }
@@ -333,6 +369,8 @@ private const val GLIDE_STRETCH = 1.15f
 private const val TAB_GROW = 1.06f
 /** How long a Rive tab icon takes to change its own ink for "selected" (nav-icons spec: 180 ms), with a frame or two spare. */
 private const val ICON_INK_MS = 220L
+/** The glow's room around a Rive tab icon, each side, as a part of the view: (80 - 48) / 2 / 80. */
+private const val ICON_MARGIN = 0.2f
 /** Then the tint over it fades, showing the icon's own selected glow and dot. */
 private const val ICON_UNTINT_MS = 150
 /** With reduced motion: the jump's fade. */

@@ -3,6 +3,11 @@ package app.familytv.ui
 import android.app.Application
 import androidx.compose.runtime.MonotonicFrameClock
 import androidx.compose.runtime.snapshots.Snapshot
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.geometry.Size
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.TestScope
@@ -87,7 +92,7 @@ class TabGlideTest {
 
     @Test
     fun aChosenIconIsUntintedOnceSettled() = inkTest {
-        val ink = IconInk(chosen = false)
+        val ink = IconInk(chosen = false, light = false)
         // Mid-glide the pill crosses its edges: its ink stays put, the tint does the split.
         ink.update(this, chosen = true, clear = false)
         assertFalse(ink.shown)
@@ -104,7 +109,7 @@ class TabGlideTest {
 
     @Test
     fun anIconLeftIsUntintedOnceThePillHasGone() = inkTest {
-        val ink = IconInk(chosen = true)
+        val ink = IconInk(chosen = true, light = false)
         ink.update(this, chosen = false, clear = true)
         runCurrent()
         assertEquals(1f, ink.cover)
@@ -115,7 +120,7 @@ class TabGlideTest {
 
     @Test
     fun anIconNeverChosenIsNeverTinted() = inkTest {
-        val ink = IconInk(chosen = false)
+        val ink = IconInk(chosen = false, light = false)
         repeat(5) { ink.update(this, chosen = false, clear = it % 2 == 0) }
         advanceUntilIdle()
         assertUntinted(ink, onPill = false)
@@ -123,13 +128,56 @@ class TabGlideTest {
 
     @Test
     fun aNewChangeMidFadeEndsUntintedToo() = inkTest {
-        val ink = IconInk(chosen = false)
+        val ink = IconInk(chosen = false, light = false)
         ink.update(this, chosen = true, clear = true)
         advanceTimeBy(300)
         ink.update(this, chosen = false, clear = true)
         assertEquals(1f, ink.cover)
         advanceUntilIdle()
         assertUntinted(ink, onPill = false)
+    }
+
+    @Test
+    fun aChosenIconAtRestIsClearSoItIsToldItIsSelected() {
+        // The onn's chosen Home tab at rest: a 40-high pill from x 0, the icon's 36 view overhanging its 22 box from
+        // x 11 and y 2, so the glow's corners poke past the pill's round end. Round 13: judged by the view, it was never
+        // clear, so Rive never got "selected" (no glow or dot) and the tint stayed.
+        val pill = RoundRect(0f, 0f, 120f, 40f, CornerRadius(20f))
+        val view = Rect(Offset(11f, 2f), Size(36f, 36f))
+        assertFalse(pill.contains(view.topLeft))
+        val core = iconCore(Size(36f, 36f)).translate(view.topLeft)
+        assertTrue(pillClear(pill, core, chosen = true))
+        assertFalse(pillClear(pill, core, chosen = false))
+        // Mid-glide, the pill's edge on the icon: not clear either way.
+        val crossing = RoundRect(25f, 0f, 145f, 40f, CornerRadius(20f))
+        assertFalse(pillClear(crossing, core, chosen = true))
+        assertFalse(pillClear(crossing, core, chosen = false))
+        // The next tab's icon, 8 past the pill, and no pill at all (Settings): clear when not chosen.
+        val next = iconCore(Size(36f, 36f)).translate(Offset(139f, 2f))
+        assertTrue(pillClear(pill, next, chosen = false))
+        assertTrue(pillClear(null, core, chosen = false))
+        assertFalse(pillClear(null, core, chosen = true))
+    }
+
+    @Test
+    fun aLookChangeTintsTheIconAndEndsUntinted() = inkTest {
+        // Into or out of Home by day, or into Settings: the bar's look flips; the icon's own ink takes 180 ms.
+        val ink = IconInk(chosen = true, light = false)
+        ink.look(this, light = true)
+        assertEquals(1f, ink.cover)
+        ink.look(this, light = true)
+        advanceUntilIdle()
+        assertTrue(ink.shown)
+        assertUntinted(ink, onPill = true)
+    }
+
+    @Test
+    fun theBarTakesTheDarkLookWithHomesArtNotTheTab() {
+        // Both looks, whatever the hour: over the art the bar is dark, off it the page's own look.
+        for (page in listOf(GlassPalette.Light, GlassPalette.Dark)) {
+            assertEquals(page, barPalette(0f, page))
+            assertEquals(GlassPalette.Dark, barPalette(1f, page))
+        }
     }
 
     @Test

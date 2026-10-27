@@ -40,7 +40,6 @@ import androidx.compose.runtime.MutableFloatState
 import androidx.compose.runtime.MutableIntState
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableFloatStateOf
@@ -279,6 +278,8 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
         }
     }
     val backdropCovers = remember { mutableStateOf(false) }
+    // How much of Home's art is up behind the top bar now (0 to 1), set by the backdrop as it draws it.
+    val backdropUnder = remember { mutableFloatStateOf(0f) }
     // Where the page starts under the top bar: the carousel's shade under the first row is measured from it.
     val pageTop = remember { mutableFloatStateOf(0f) }
     CompositionLocalProvider(
@@ -311,14 +312,17 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
           ) {
             val (shownTab, shownSettings) = onPage
             val backdropOn = shownTab == GlassTab.Home && !shownSettings && !barHidden.value && darkPages.intValue == 0
-            HomeBackdrop(shell.backdrop, show = backdropOn, covers = backdropCovers, pageTop = pageTop, slot = shell.slot)
-            // Only whether there is a slide, so the home doesn't recompose on every one.
-            val hasSlide by remember { derivedStateOf { shell.backdrop.value != null } }
+            // Unless the page is in the dark look, the bar's ink flips with Home's art, so the art cuts in and out with it (round 13).
+            HomeBackdrop(
+                shell.backdrop, show = backdropOn, covers = backdropCovers, pageTop = pageTop, slot = shell.slot,
+                cut = palette.text != GlassPalette.Dark.text, under = backdropUnder,
+            )
             // Inside the TV's overscan safe zone (48 dp across, 27 dp at the top and bottom).
             Column(Modifier.fillMaxSize().padding(start = 48.dp, end = 48.dp, top = 27.dp, bottom = 18.dp).onFocusChanged { anyFocused = it.hasFocus }) {
-                // Over the carousel's art the bar and the weather hint keep light text in either look, on the art's dark shades.
+                // Over the carousel's art the bar and the weather hint keep light text in either look, on the art's dark shades:
+                // by the art as drawn this frame, not by the tab, so the ink and what's behind it change together.
                 // One provider either way, so the bar (and its focus) stays put when the tab changes.
-                val barPalette = if (backdropOn && hasSlide) GlassPalette.Dark else palette
+                val barPalette = barPalette(backdropUnder.floatValue, palette)
                 // Hidden on a page with its own header, the bar stays composed, measured but never placed (so never drawn
                 // or focused): its Rive tab icons are made once, not thrown away and made again for every film or show
                 // page (a Rive view's surface release crashed the Fire Stick, Oct 27).
@@ -465,7 +469,7 @@ private fun GlassTopBar(
                             // The art has room around the icon for its glow, so it overhangs the icon's box. Its ink splits
                             // at the gliding pill's edge, as the label's does.
                             Box(Modifier.size(22.gx), contentAlignment = Alignment.Center) {
-                                GlideIcon(glide, chosen, if (focused) Glass.Text else Glass.Dim, Glass.OnSelected) { selected, m ->
+                                GlideIcon(glide, chosen, light, if (focused) Glass.Text else Glass.Dim, Glass.OnSelected) { selected, m ->
                                     RiveTabIcon(t.label, focused, selected, light, presses[t] ?: 0, Modifier.requiredSize(36.gx).then(m))
                                 }
                             }
@@ -485,6 +489,9 @@ private fun GlassTopBar(
         }
     }
 }
+
+/** The top bar's look over Home's art up by [artUnder] (0 to 1) on a page in [page]: the dark look once the art is mostly up. */
+internal fun barPalette(artUnder: Float, page: GlassPalette): GlassPalette = if (artUnder >= 0.5f) GlassPalette.Dark else page
 
 /** "Exit Family TV?" over the dimmed home: Stay (focused) or Exit. Back again stays; focus can't wander off it. */
 @Composable

@@ -25,6 +25,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.FloatState
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableFloatState
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.State
@@ -222,10 +223,21 @@ internal object Backdrops {
  * the scrims sit in one cached layer; a plain cut when the system asks for less motion, or on a box
  * that can't keep up with the fade ([SlideFade]). Where the fades keep up, a flourish of light
  * plays over the art as it fades ([CarouselFlourish]: a sweep for films, a glow for shows, streaks
- * for events), under the text's shade. No zoom or pan.
+ * for events), under the text's shade. No zoom or pan. [under]: how much of the art is up behind the top bar now, set
+ * in the same composition, so the bar takes the dark look's ink in the frame the art is drawn. With [cut] (the page's
+ * own look is light, so the bar's ink flips with the art) the art comes and goes in one frame, not a fade, so no
+ * frame has the bar's labels in one look's ink over the other look.
  */
 @Composable
-internal fun BoxScope.HomeBackdrop(slide: State<Slide?>, show: Boolean, covers: MutableState<Boolean>? = null, pageTop: FloatState? = null, slot: FloatState? = null) {
+internal fun BoxScope.HomeBackdrop(
+    slide: State<Slide?>,
+    show: Boolean,
+    covers: MutableState<Boolean>? = null,
+    pageTop: FloatState? = null,
+    slot: FloatState? = null,
+    cut: Boolean = false,
+    under: MutableFloatState? = null,
+) {
     val ctx = LocalContext.current
     val still = LocalReducedMotion.current
     // The slide in front with its decoded art, and the one it is fading in over (none once the fade ends).
@@ -239,7 +251,7 @@ internal fun BoxScope.HomeBackdrop(slide: State<Slide?>, show: Boolean, covers: 
     // Back on Home with the slide it left on, the art is up at once (no fade in from the page).
     val back = target != null && target.key == front?.slide?.key
     val fadeIn by animateFloatAsState(if (target != null) 1f else 0f, tween(if (still || back) 0 else 400), label = "backdrop")
-    val shown = if (back) 1f else fadeIn
+    val shown = if (back || cut) (if (target != null) 1f else 0f) else fadeIn
     var behind by remember { mutableStateOf<Shown?>(null) }
     val fade = remember { Animatable(1f) }
     // The flourish only on a box whose plain fades passed (never on the onn, which cuts); nothing of it is
@@ -284,6 +296,7 @@ internal fun BoxScope.HomeBackdrop(slide: State<Slide?>, show: Boolean, covers: 
     // While the art is fully up it covers the whole screen, so the page background under it isn't drawn.
     val covered = shown == 1f && front != null
     if (covers != null) SideEffect { covers.value = covered }
+    under?.floatValue = if (front != null) shown else 0f
     if (shown == 0f || front == null) return
     val density = LocalDensity.current
     val fullSlot = with(density) { CAROUSEL_HEIGHT.gx.toPx() }
