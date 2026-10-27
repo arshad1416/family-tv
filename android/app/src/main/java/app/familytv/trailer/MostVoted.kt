@@ -18,7 +18,7 @@ import java.io.File
  * ([app.familytv.data.PopularOrder]). Only these lists come from TMDB: nothing typed goes to it.
  */
 class MostVoted(private val file: File) {
-    class Lists(val at: Long, val movies: Popularity, val shows: Popularity) {
+    class Lists(val at: Long, val movies: Popularity, val shows: Popularity, val pages: Int = PAGES) {
         fun of(tv: Boolean) = if (tv) shows else movies
     }
 
@@ -40,11 +40,13 @@ class MostVoted(private val file: File) {
 
     /** Fetches the lists when the kept ones are [MAX_AGE_MS] old or missing; a failed fetch keeps them as they are. */
     suspend fun refreshIfDue(tmdb: Tmdb, now: Long = System.currentTimeMillis()) {
-        ready()?.let { if (now - it.at in 0 until MAX_AGE_MS) return }
+        // Lists kept from a build that fetched fewer pages are fetched again at once.
+        ready()?.let { if (it.pages >= PAGES && now - it.at in 0 until MAX_AGE_MS) return }
         val movies = fetch(tmdb, tv = false) ?: return
         val shows = fetch(tmdb, tv = true) ?: return
         val text = JsonObject().apply {
             addProperty("at", now)
+            addProperty("pages", PAGES)
             add("movies", json(movies))
             add("shows", json(shows))
         }.toString()
@@ -76,12 +78,15 @@ class MostVoted(private val file: File) {
             val a = e.asJsonArray
             TmdbVotes(a[0].asString, a[1].asString, a[2].takeIf { !it.isJsonNull }?.asInt, a[3].asInt)
         }
-        return Lists(o.get("at").asLong, Popularity(titles("movies")), Popularity(titles("shows")))
+        return Lists(o.get("at").asLong, Popularity(titles("movies")), Popularity(titles("shows")), o.get("pages")?.asInt ?: 0)
     }
 
     companion object {
-        /** 1,000 of each. */
-        const val PAGES = 50
+        /**
+         * 3,000 of each: with 1,000, Up in the Air ranked as off the list on the Kitchen (Oct 27).
+         * About 300 small requests a week.
+         */
+        const val PAGES = 150
         const val MAX_AGE_MS = 7 * 24 * 3_600_000L
     }
 }

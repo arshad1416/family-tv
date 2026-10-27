@@ -1,5 +1,6 @@
 package app.familytv.ui
 
+import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -36,10 +37,13 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -49,9 +53,9 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.focusRestorer
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -66,6 +70,7 @@ import androidx.compose.ui.unit.dp
 import androidx.tv.material3.Icon
 import androidx.tv.material3.LocalContentColor
 import androidx.tv.material3.Text
+import app.familytv.BuildConfig
 import app.familytv.app
 import app.familytv.data.CatalogDao
 import app.familytv.data.CategoryEntity
@@ -86,11 +91,11 @@ import app.familytv.usage.Usage
 import app.familytv.user.ProgressEntity
 import app.familytv.user.ProgressKey
 import coil.compose.AsyncImage
+import java.text.NumberFormat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
-import java.text.NumberFormat
 
 /** A movie or a show on the glass pages, so one grid can hold both (a provider's A to Z). */
 internal sealed interface VodItem {
@@ -219,6 +224,9 @@ private const val FOR_YOU_CATEGORIES = 3
 internal fun VodTab(vm: MainViewModel, profile: Profile, kind: String, tab: GlassTab = if (kind == Kind.MOVIE) GlassTab.Movies else GlassTab.Series) {
     var path by rememberSaveable { mutableStateOf("") }
     var opened by rememberSaveable { mutableStateOf<String?>(null) }
+    // The home's card that last had focus ("hero" or "shelf/<row>/<card>"), so Back from its page lands on
+    // that very card: the highlights' first card is often the same film as Continue watching's (Oct 27).
+    val lastCard = rememberSaveable { mutableStateOf<String?>(null) }
     val query = glassQuery(tab).trim()
     val nav = rememberSeriesNav()
     val home = rememberLazyListState()
@@ -239,7 +247,7 @@ internal fun VodTab(vm: MainViewModel, profile: Profile, kind: String, tab: Glas
         when {
             path.isNotEmpty() -> VodPage(profile, kind, path, movieCats, seriesCats, marks, pages, nav, open) { path = parentOf(path) }
             query.length >= 2 -> VodSearch(profile, kind, query, marks)
-            else -> VodHome(profile, kind, movieCats, seriesCats, marks, opened, home, open, carousel = tab == GlassTab.Home)
+            else -> VodHome(profile, kind, movieCats, seriesCats, marks, opened, lastCard, home, open, carousel = tab == GlassTab.Home)
         }
     }
 }
@@ -254,6 +262,7 @@ private fun VodHome(
     seriesCats: List<CategoryEntity>,
     marks: VodMarks,
     opened: String?,
+    lastCard: MutableState<String?>,
     list: LazyListState,
     open: (String) -> Unit,
     carousel: Boolean = false,
@@ -328,7 +337,12 @@ private fun VodHome(
         cats.forEach { add("cat/${it.chipKey}") }
         if (hasAdult) add("adult")
     }
+    val heroShows = { g: String -> slides.isNotEmpty() || featured?.first?.group == g }
+    val left = lastCard.value
     val target = when {
+        // The card it was opened from, when it is still there with that film or show.
+        back != null && left == "hero" && heroShows(back) -> "hero"
+        back != null && left != null && rows.any { (t, l) -> l.any { it.group == back && left == "shelf/$t/${it.key}" } } -> left
         back != null && featured?.first?.group == back -> "hero"
         back != null -> rows.firstNotNullOfOrNull { (t, l) -> l.firstOrNull { it.group == back }?.let { "shelf/$t/${it.key}" } } ?: homeKeys.firstOrNull()
         opened != null && opened in homeKeys -> opened
@@ -340,7 +354,8 @@ private fun VodHome(
     fun LazyListScope.shelf(title: String, items: List<VodItem>) = item("shelf/$title") {
         GlassShelf(title) {
             items(items, key = { it.key }) { x ->
-                VodCard(x, marks, entryPoint(target == "shelf/$title/${x.key}"), POSTER_W, barOf(x, title), continuing = title == CONTINUE_WATCHING, caption = leftOf(x, title))
+                val k = "shelf/$title/${x.key}"
+                VodCard(x, marks, entryPoint(target == k).onFocusChanged { if (it.hasFocus) lastCard.value = k }, POSTER_W, barOf(x, title), continuing = title == CONTINUE_WATCHING, caption = leftOf(x, title))
             }
         }
     }
@@ -386,11 +401,12 @@ private fun VodHome(
         ) {
             // Always the first item, so the highlights loading in after the rest don't land above the scroll position.
             item("hero") {
-                if (slides.isNotEmpty()) HomeCarousel(slides, marks, Modifier.height(heroHeight).onFocusChanged { heroFocused = it.hasFocus }, entry = entryPoint(target == "hero"), compact = heroHeight < CAROUSEL_COMPACT.gx)
+                if (slides.isNotEmpty()) HomeCarousel(slides, marks, Modifier.height(heroHeight).onFocusChanged { heroFocused = it.hasFocus; if (it.hasFocus) lastCard.value = "hero" }, entry = entryPoint(target == "hero"), compact = heroHeight < CAROUSEL_COMPACT.gx)
                 else if (featured != null) Row(Modifier.fillMaxWidth().height(190.gx).padding(horizontal = FOCUS_ROOM), horizontalArrangement = Arrangement.spacedBy(20.gx)) {
                     val (item, from) = featured
                     HeroCard(
-                        item.title, listOf(if (movies) "Movie" else "TV show", from).joinToString("  ·  "), item.poster, HERO_MAIN, 2.2f, entryPoint(target == "hero"),
+                        item.title, listOf(if (movies) "Movie" else "TV show", from).joinToString("  ·  "), item.poster, HERO_MAIN, 2.2f,
+                        entryPoint(target == "hero").onFocusChanged { if (it.hasFocus) lastCard.value = "hero" },
                     ) {
                         when (item) {
                             is VodItem.Movie -> nav?.movie = item.g to marks.movieKeys
@@ -747,6 +763,9 @@ private fun VodSearch(profile: Profile, kind: String, q: String, marks: VodMarks
     val keys = remember(cats) { categoryKeys(cats) }
     var results by remember { mutableStateOf<List<VodItem>?>(null) }
     var resultsFor by remember { mutableStateOf<String?>(null) }
+    // A new grid for each new set of results: a kept one holds on to the card at its top, so "up" after
+    // "upp" opened scrolled down to Uppercut, past Up (Oct 27).
+    var shownSet by remember { mutableIntStateOf(0) }
     var picking by remember { mutableStateOf(false) }
     // Searched again for the same words when the most-voted lists arrive or a list load ends, so a
     // search made during a load or before the lists were read doesn't stay as it was.
@@ -768,6 +787,11 @@ private fun VodSearch(profile: Profile, kind: String, q: String, marks: VodMarks
         // In order of how well known the titles are; without the lists (no TMDB key yet), as the line has them.
         results = PopularOrder.apply(found, q, popular, { it.title }, { it.year }, { it.tmdbIds })
         resultsFor = q
+        shownSet++
+        if (BuildConfig.DEBUG || BuildConfig.VERSION_NAME.contains("-test")) {
+            // Test builds: the top of the order and each title's votes on the list, to check it on the TV (titles only).
+            Log.i("VodSearch", "most-voted ${popular?.size ?: "not read"}; " + results.orEmpty().take(12).joinToString { "${it.title} (${it.year ?: "-"}): ${popular?.votes(it.tmdbIds, it.title, it.year) ?: "off"}" })
+        }
         if (!again) found.size.let { Usage.log(if (it == 0) Usage.Action.SEARCH_EMPTY else Usage.Action.SEARCH_SUBMIT, it) }
     }
     val shown = results
@@ -775,8 +799,10 @@ private fun VodSearch(profile: Profile, kind: String, q: String, marks: VodMarks
         shown == null -> Unit
         shown.isEmpty() -> EmptyState("No matches for \"$q\".")
         else -> Box(Modifier.onFocusChanged { picking = it.hasFocus }) {
-            PosterGrid(shown, { it.key }, nav?.back?.let { b -> shown.firstOrNull { it.group == b }?.key }) { x, mod, _ ->
-                VodCard(x, marks, mod, null) { Usage.log(Usage.Action.SEARCH_PICK, shown.indexOf(x)) }
+            key(shownSet) {
+                PosterGrid(shown, { it.key }, nav?.back?.let { b -> shown.firstOrNull { it.group == b }?.key }) { x, mod, _ ->
+                    VodCard(x, marks, mod, null) { Usage.log(Usage.Action.SEARCH_PICK, shown.indexOf(x)) }
+                }
             }
         }
     }

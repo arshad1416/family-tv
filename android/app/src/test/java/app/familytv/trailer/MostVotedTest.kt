@@ -74,4 +74,16 @@ class MostVotedTest {
         assertEquals(20_000, next.lists.value!!.of(tv = false).votes(emptyList(), "Up", null))
         assertEquals(10 * day, MostVoted(file).ready()!!.at)
     }
+
+    @Test
+    fun listsFromAShorterFetchAreFetchedAgainAtOnce() = runBlocking {
+        val file = tmp.root.resolve("most_voted.json")
+        // As 0.2.x before Oct 27 kept them: 50 pages, no page count in the file.
+        file.writeText("""{"at":1000,"movies":[["22947","Up in the Air",2009,4800]],"shows":[]}""")
+        val lists = MostVoted(file)
+        assertEquals(0, lists.ready()!!.pages)
+        lists.refreshIfDue(tmdb, now = 2000)
+        assertEquals(5, server.requestCount)
+        assertEquals(MostVoted.PAGES, MostVoted(file).ready()!!.pages)
+    }
 }
