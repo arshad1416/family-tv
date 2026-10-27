@@ -30,6 +30,31 @@ import java.util.Locale
 import java.util.zip.GZIPInputStream
 
 /**
+ * Whether lists or guides are loading now, and how long it has been quiet since: the carousel only
+ * times its fades on an idle box ([app.familytv.ui.SlideFade]), never against a load.
+ */
+object CatalogWork {
+    private val running = java.util.concurrent.atomic.AtomicInteger()
+    @Volatile private var quietSince = SystemClock.elapsedRealtime()
+
+    /** How many loads have started in this run, to tell one overlapped a measurement. */
+    @Volatile var started = 0
+        private set
+
+    /** Milliseconds since the last load ended, or -1 while one runs. */
+    fun quietFor(): Long = if (running.get() > 0) -1 else SystemClock.elapsedRealtime() - quietSince
+
+    suspend fun <T> during(work: suspend () -> T): T {
+        running.incrementAndGet(); started++
+        try {
+            return work()
+        } finally {
+            if (running.decrementAndGet() == 0) quietSince = SystemClock.elapsedRealtime()
+        }
+    }
+}
+
+/**
  * Keeps the local catalog (channels, movies, series, guide) in step with the profile's sources.
  * Lists are streamed straight from the network into SQLite in batches, so memory stays flat
  * no matter how big the provider's lists are.
@@ -71,7 +96,9 @@ class Catalog(private val db: AppDb, private val marks: SharedPreferences? = nul
      */
     val complete: Boolean get() = marks?.let { it.getBoolean(COMPLETE, false) && it.getInt(FORMAT_KEY, 0) == FORMAT } ?: true
 
-    suspend fun refresh(profile: Profile, onProgress: (Progress) -> Unit = {}) = withContext(Dispatchers.IO) {
+    suspend fun refresh(profile: Profile, onProgress: (Progress) -> Unit = {}) = CatalogWork.during { refreshNow(profile, onProgress) }
+
+    private suspend fun refreshNow(profile: Profile, onProgress: (Progress) -> Unit) = withContext(Dispatchers.IO) {
         marks?.edit()?.putBoolean(COMPLETE, false)?.apply()
         dao.dropSourcesExcept(profile.sources.map { it.id }.ifEmpty { listOf("") })
         dao.dropOrphanChannels(); dao.dropOrphanMovies(); dao.dropOrphanSeries(); dao.dropOrphanCategories()

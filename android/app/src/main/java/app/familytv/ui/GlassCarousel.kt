@@ -30,6 +30,7 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -61,6 +62,7 @@ import androidx.lifecycle.compose.currentStateAsState
 import androidx.tv.material3.Text
 import app.familytv.BuildConfig
 import app.familytv.app
+import app.familytv.iptv.CatalogWork
 import coil.compose.AsyncImage
 import coil.imageLoader
 import coil.request.CachePolicy
@@ -240,6 +242,9 @@ internal fun BoxScope.HomeBackdrop(slide: State<Slide?>, show: Boolean, covers: 
     // composed between changes.
     remember { SlideFade.cuts(ctx) }
     val fxOn by rememberUpdatedState(SlideFade.effects.value && !still)
+    // Since when Home has been showing: fades are only timed once it has settled.
+    val homeSince = remember { mutableLongStateOf(0L) }
+    LaunchedEffect(show) { if (show) homeSince.longValue = android.os.SystemClock.elapsedRealtime() }
     var flourish by remember { mutableStateOf<Flourish?>(null) }
     val flourishAt = remember { Animatable(0f) }
     LaunchedEffect(target) {
@@ -263,7 +268,7 @@ internal fun BoxScope.HomeBackdrop(slide: State<Slide?>, show: Boolean, covers: 
                 }
             }
             try {
-                SlideFade.watch(ctx, withFx) {
+                SlideFade.watch(ctx, withFx, homeSince.longValue) {
                     coroutineScope {
                         if (withFx) launch { flourishAt.animateTo(1f, tween(FLOURISH_MS, easing = LinearEasing)) }
                         fade.animateTo(1f, tween(SLIDE_FADE_MS))
@@ -290,7 +295,8 @@ internal fun BoxScope.HomeBackdrop(slide: State<Slide?>, show: Boolean, covers: 
                 BackdropArt(s, if (s === front && behind != null) Modifier.graphicsLayer { alpha = fade.value; compositingStrategy = CompositingStrategy.ModulateAlpha } else Modifier)
             }
         }
-        flourish?.let { CarouselFlourish(it) { flourishAt.value } }
+        // Never on a box that cuts.
+        flourish?.takeIf { !SlideFade.cuts(ctx) }?.let { CarouselFlourish(it) { flourishAt.value } }
         // Dark behind the text on the left whatever the look; below the carousel, the page's own colour.
         Spacer(
             Modifier.fillMaxSize().graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }.drawWithCache {
@@ -320,7 +326,8 @@ internal fun BoxScope.HomeBackdrop(slide: State<Slide?>, show: Boolean, covers: 
 /**
  * How this box changes the carousel's slides, decided on the box, not from a list of models:
  *  - a low-RAM device cuts from the start;
- *  - otherwise the first [TRIED] fades are timed, and when [BAD] of them miss more than
+ *  - otherwise the first [TRIED] fades on an idle box ([SETTLED_MS] of Home and no load: [CatalogWork])
+ *    are timed, and when [BAD] of them miss more than
  *    [LATE_SHARE] of their frames (the onn, 5-40%) it cuts from then on;
  *  - a box whose fades pass gets the flourish over them ([effects], [CarouselFlourish]), and
  *    those fades are timed again: [BAD] of [TRIED] missing frames turns the flourish off, the
@@ -331,6 +338,8 @@ internal object SlideFade {
     private const val TRIED = 3
     private const val BAD = 2
     private const val LATE_SHARE = 0.1
+    /** How long Home must have shown, and loads been quiet, before a fade is timed. */
+    private const val SETTLED_MS = 5_000L
     private const val CUT = "slideCut"
     private const val OK = "slideOk"
     private const val FX_OFF = "slideFxOff"
@@ -371,10 +380,19 @@ internal object SlideFade {
      * Runs [fade] ([withFx]: with the flourish over it) while counting frames that took longer than a
      * refresh ([timeFrames]), while that kind of fade is still being timed.
      */
-    suspend fun watch(ctx: android.content.Context, withFx: Boolean, fade: suspend () -> Unit) {
+    suspend fun watch(ctx: android.content.Context, withFx: Boolean, homeSince: Long, fade: suspend () -> Unit) {
         load(ctx)
         if (if (withFx) fxOk || fxTried >= TRIED else ok || tried >= TRIED) return fade()
+        // Only on an idle box: Home up for a while and no list, guide or carousel load running or just
+        // finished (the Kitchen missed 40 of 42 frames under the launch's list load, 0-1 idle).
+        val now = android.os.SystemClock.elapsedRealtime()
+        val loads = CatalogWork.started
+        if (CatalogWork.quietFor() < SETTLED_MS || homeSince == 0L || now - homeSince < SETTLED_MS) return fade()
         val (frames, missed) = timeFrames(ctx, fade)
+        if (CatalogWork.started != loads || CatalogWork.quietFor() < 0) {
+            android.util.Log.i("SlideFade", "fade not counted: a load ran during it")
+            return
+        }
         val slow = frames >= 5 && missed > frames * LATE_SHARE
         if (withFx) {
             fxTried++

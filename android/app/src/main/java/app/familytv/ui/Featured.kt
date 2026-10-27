@@ -7,6 +7,7 @@ import app.familytv.data.CategoryEntity
 import app.familytv.data.ChannelEntity
 import app.familytv.data.Names
 import app.familytv.data.ProgrammeEntity
+import app.familytv.iptv.CatalogWork
 import app.familytv.iptv.SeriesTitles
 import app.familytv.iptv.releaseYear
 import app.familytv.trailer.Tmdb
@@ -77,6 +78,9 @@ internal object Featured {
      * those very objects come back, so a refresh doesn't restart the carousel.
      */
     suspend fun load(app: FamilyTvApp, owner: Any, movies: List<CategoryEntity>, shows: List<CategoryEntity>, live: List<CategoryEntity>, now: Long = System.currentTimeMillis()): List<Slide> =
+        CatalogWork.during { loadNow(app, owner, movies, shows, live, now) }
+
+    private suspend fun loadNow(app: FamilyTvApp, owner: Any, movies: List<CategoryEntity>, shows: List<CategoryEntity>, live: List<CategoryEntity>, now: Long): List<Slide> =
         withContext(Dispatchers.Default) {
             val made = make(app, movies, shows, live, now)
             val before = cached(owner)

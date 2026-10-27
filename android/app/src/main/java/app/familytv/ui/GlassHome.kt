@@ -236,7 +236,10 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
     val rise = with(LocalDensity.current) { 10.dp.toPx() }
     var firstPage by remember { mutableStateOf(true) }
     LaunchedEffect(pageKey) {
-        val w = wipe?.takeIf { !instant && !firstPage }
+        // Not to or from Home: its carousel art is full screen behind the page, and the wipe's glass panel
+        // over it read as an empty panel before the carousel (Kitchen, Oct 26). Home fades in instead.
+        val home = GlassTab.Home to false
+        val w = wipe?.takeIf { !instant && !firstPage && onPage != home && (tab to settings) != home }
         instant = false
         // While the wipe covers, its swap picks up this page too; once it reveals, a new page swaps at once.
         if (w != null && w.phase != RiveTransition.Phase.REVEALING) {

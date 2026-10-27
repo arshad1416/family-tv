@@ -70,6 +70,7 @@ import app.familytv.app
 import app.familytv.data.CatalogDao
 import app.familytv.data.CategoryEntity
 import app.familytv.data.Kind
+import app.familytv.data.PopularOrder
 import app.familytv.data.SearchText
 import app.familytv.data.SeriesEntity
 import app.familytv.data.displayName
@@ -79,6 +80,7 @@ import app.familytv.iptv.SeriesTitles
 import app.familytv.perf.Perf
 import app.familytv.portal.Profile
 import app.familytv.sync.PlaybackStatus
+import app.familytv.trailer.TmdbHit
 import app.familytv.trakt.ProgressRules
 import app.familytv.usage.Usage
 import app.familytv.user.ProgressEntity
@@ -97,12 +99,17 @@ internal sealed interface VodItem {
     val title: String
     /** The line's copies of it (languages, qualities): how well known it is, for search. */
     val copyCount: Int
+    /** Its year and TMDB ids, to find it among TMDB's search results. */
+    val year: Int?
+    val tmdbIds: List<String>
 
     class Movie(val g: MovieGroup) : VodItem {
         override val key get() = "m/${g.key}"
         override val group get() = g.key
         override val title get() = g.title
         override val copyCount get() = g.copies.size
+        override val year get() = g.year
+        override val tmdbIds get() = g.copies.mapNotNull { it.tmdb }
     }
 
     class Show(val g: SeriesGroup) : VodItem {
@@ -110,6 +117,8 @@ internal sealed interface VodItem {
         override val group get() = g.key
         override val title get() = g.title
         override val copyCount get() = g.copies.size
+        override val year get() = g.copies.firstNotNullOfOrNull { it.year }
+        override val tmdbIds get() = g.copies.mapNotNull { it.tmdb }
     }
 }
 
@@ -731,28 +740,41 @@ private fun AdultPage(profile: Profile, kind: String, catKey: String, nav: Serie
 /** The top bar's search on Movies or TV Shows: this kind only, hidden and locked categories left out. */
 @Composable
 private fun VodSearch(profile: Profile, kind: String, q: String, marks: VodMarks) {
-    val dao = LocalContext.current.app.db.catalog()
+    val app = LocalContext.current.app
+    val dao = app.db.catalog()
     val nav = LocalSeriesNav.current
     val cats = categories(profile, kind)
     val keys = remember(cats) { categoryKeys(cats) }
     var results by remember { mutableStateOf<List<VodItem>?>(null) }
+    var picking by remember { mutableStateOf(false) }
     LaunchedEffect(q, keys) {
         delay(300) // let typing settle
+        val tv = kind != Kind.MOVIE
+        fun popular(items: List<VodItem>, hits: List<TmdbHit>) = PopularOrder.apply(items, q, hits, { it.title }, { it.year }, { it.tmdbIds })
         val found = if (kind == Kind.MOVIE) {
             // Copies in other languages are one result: group, then count.
             groupMovies(dao.searchMovies(q, SEARCH_LIMIT * 4).filter { (it.sourceId to it.categoryId) in keys }).take(SEARCH_LIMIT).map { VodItem.Movie(it) }
         } else {
             groupSeries(dao.searchSeries(q, SEARCH_LIMIT * 4).filter { (it.sourceId to it.categoryId) in keys }).take(SEARCH_LIMIT).map { VodItem.Show(it) }
         }
-        results = found
+        // In TMDB's order of how well known they are; until TMDB answers, as the line has them.
+        val known = TmdbSearch.kept(q, tv)
+        results = known?.let { popular(found, it) } ?: found
         found.size.let { Usage.log(if (it == 0) Usage.Action.SEARCH_EMPTY else Usage.Action.SEARCH_SUBMIT, it) }
+        if (known != null || found.size < 2) return@LaunchedEffect
+        delay(100)
+        val hits = TmdbSearch.hits(app, q, tv) ?: return@LaunchedEffect
+        // Never under a viewer already moving through the results.
+        if (!picking) results = popular(found, hits)
     }
     val shown = results
     when {
         shown == null -> Unit
         shown.isEmpty() -> EmptyState("No matches for \"$q\".")
-        else -> PosterGrid(shown, { it.key }, nav?.back?.let { b -> shown.firstOrNull { it.group == b }?.key }) { x, mod, _ ->
-            VodCard(x, marks, mod, null) { Usage.log(Usage.Action.SEARCH_PICK, shown.indexOf(x)) }
+        else -> Box(Modifier.onFocusChanged { picking = it.hasFocus }) {
+            PosterGrid(shown, { it.key }, nav?.back?.let { b -> shown.firstOrNull { it.group == b }?.key }) { x, mod, _ ->
+                VodCard(x, marks, mod, null) { Usage.log(Usage.Action.SEARCH_PICK, shown.indexOf(x)) }
+            }
         }
     }
 }

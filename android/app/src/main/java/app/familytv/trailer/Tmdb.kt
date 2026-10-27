@@ -27,6 +27,9 @@ data class TmdbTitle(
     val rating: Double?,
 )
 
+/** A film or show TMDB's search found: its id, title and year. */
+data class TmdbHit(val id: String, val title: String, val year: Int?)
+
 /** One season from TMDB: what it is about, its YouTube videos and its episodes' stills and overviews. */
 data class SeasonMeta(val overview: String?, val videos: List<Trailers.Video>, val episodes: Map<Int, EpisodeMeta>)
 
@@ -55,6 +58,10 @@ class Tmdb(private val key: String, private val client: OkHttpClient, private va
 
     suspend fun searchTv(title: String, year: Int?): String? =
         get("search/tv", listOfNotNull("query" to title, year?.let { "first_air_date_year" to it.toString() }))?.let(TmdbParse::firstId)
+
+    /** TMDB's own search for [query] among films ([tv] false) or shows: its first page, in its order (best known first). */
+    suspend fun search(query: String, tv: Boolean): List<TmdbHit> =
+        get("search/${if (tv) "tv" else "movie"}", listOf("query" to query, "include_adult" to "false"))?.let { TmdbParse.hits(it, tv) }.orEmpty()
 
     /** This week's top films ([tv] false) or shows, in TMDB's order. */
     suspend fun trending(tv: Boolean): List<TmdbTitle> = get("trending/${if (tv) "tv" else "movie"}/week", emptyList())?.let { TmdbParse.titles(it, tv) }.orEmpty()
@@ -141,6 +148,16 @@ object TmdbParse {
         val logos = o.array("logos").mapNotNull { it.obj() }.filter { it.str("file_path") != null }
         fun best(lang: String?) = logos.filter { it.str("iso_639_1") == lang }.maxByOrNull { it.get("vote_average")?.takeIf { v -> v.isJsonPrimitive }?.asDouble ?: 0.0 }
         return (best("en") ?: best(null))?.str("file_path")?.let { Tmdb.LOGO_BASE + it }
+    }
+
+    /** A search's results as [TmdbHit]s, adult titles left out. */
+    fun hits(o: JsonObject, tv: Boolean): List<TmdbHit> = o.array("results").mapNotNull { it.obj() }.mapNotNull { r ->
+        if (r.get("adult")?.takeIf { it.isJsonPrimitive }?.asBoolean == true) return@mapNotNull null
+        TmdbHit(
+            id = r.get("id")?.takeIf { it.isJsonPrimitive }?.asString ?: return@mapNotNull null,
+            title = r.str(if (tv) "name" else "title") ?: return@mapNotNull null,
+            year = r.str(if (tv) "first_air_date" else "release_date")?.take(4)?.toIntOrNull(),
+        )
     }
 
     fun firstId(o: JsonObject): String? = o.array("results").firstNotNullOfOrNull { it.obj()?.get("id")?.takeIf { id -> id.isJsonPrimitive }?.asString }
