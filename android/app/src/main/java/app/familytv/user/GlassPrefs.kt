@@ -14,9 +14,19 @@ data class WeatherPlace(val name: String, val country: String, val lat: Double, 
 /** One world clock: the city shown, its country and its time zone. */
 data class WorldClock(val city: String, val country: String, val zone: String)
 
+/** Where the screensaver's pictures come from, in the order Settings lists them. */
+enum class SaverSource(val label: String) {
+    LIBRARY("Your library art"),
+    PHOTOS("Google Photos"),
+    TITLES("Movie and show art"),
+    SEASONS("Seasonal scenes"),
+    SPACE("Space and Earth"),
+    CLOCK("Clock only"),
+}
+
 /**
- * The TV home's own choices: Appearance, the weather's city and the world clocks (off until
- * chosen, at most [MAX_CLOCKS]). Kept on this TV, through sign-outs, like Stream quality.
+ * The TV home's own choices: Appearance, the weather's city, the world clocks (off until
+ * chosen, at most [MAX_CLOCKS]) and the screensaver's start and pictures. Kept on this TV, through sign-outs, like Stream quality.
  */
 class GlassPrefs(app: FamilyTvApp) {
     private val prefs = app.getSharedPreferences("glass", Context.MODE_PRIVATE)
@@ -74,6 +84,23 @@ class GlassPrefs(app: FamilyTvApp) {
         _clocks.value = kept
     }
 
+    private val _saverMinutes = MutableStateFlow(prefs.getInt(SAVER_MINUTES, 5).takeIf { it in SAVER_CHOICES } ?: 5)
+    /** Minutes without a key before the screensaver starts on the home; 0 is off. */
+    val saverMinutes: StateFlow<Int> = _saverMinutes
+
+    fun setSaverMinutes(minutes: Int) {
+        prefs.edit().putInt(SAVER_MINUTES, minutes).apply()
+        _saverMinutes.value = minutes
+    }
+
+    private val _saverSource = MutableStateFlow(prefs.getString(SAVER_SOURCE, null)?.let { n -> SaverSource.entries.firstOrNull { it.name == n } } ?: SaverSource.LIBRARY)
+    val saverSource: StateFlow<SaverSource> = _saverSource
+
+    fun setSaverSource(s: SaverSource) {
+        prefs.edit().putString(SAVER_SOURCE, s.name).apply()
+        _saverSource.value = s
+    }
+
     /** The last Open-Meteo answer for [place] and when it came, so the panel opens at once and asks at most every 30 minutes. */
     fun cachedWeather(): Pair<Long, String>? {
         val body = prefs.getString(WEATHER, null) ?: return null
@@ -86,6 +113,8 @@ class GlassPrefs(app: FamilyTvApp) {
 
     companion object {
         const val MAX_CLOCKS = 4
+        /** The screensaver's start-after choices, in minutes; 0 is off. */
+        val SAVER_CHOICES = listOf(0, 5, 10, 15)
         val TORONTO = WeatherPlace("Toronto", "Canada", 43.65, -79.38)
         /** Ticked when the chooser first opens: the family's own countries, as in the mockup. */
         val DEFAULT_CLOCKS = listOf(
@@ -101,6 +130,8 @@ class GlassPrefs(app: FamilyTvApp) {
         private const val CLOCKS = "clocks"
         private const val WEATHER = "weather_body"
         private const val WEATHER_AT = "weather_at"
+        private const val SAVER_MINUTES = "saver_minutes"
+        private const val SAVER_SOURCE = "saver_source"
         private const val SEP = "\u001f"
         private const val ROW = "\u001e"
     }

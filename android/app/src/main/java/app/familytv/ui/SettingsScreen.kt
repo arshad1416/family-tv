@@ -59,6 +59,8 @@ import app.familytv.portal.Profile
 import app.familytv.start.OpenOnStart
 import app.familytv.sync.PlaybackStatus
 import app.familytv.usage.Usage
+import app.familytv.user.GlassPrefs
+import app.familytv.user.SaverSource
 import app.familytv.user.Viewers
 import java.text.DateFormat
 import java.util.Date
@@ -97,6 +99,7 @@ fun SettingsScreen(vm: MainViewModel, config: DeviceConfig) {
                     CheckPanel(vm)
                     AboutPanel(config)
                     OpenOnStartPanel(profile)
+                    ScreensaverPanel()
                     AddonsPanel(config)
                 }
             }
@@ -237,6 +240,52 @@ private fun OpenOnStartPanel(profile: Profile?) {
         }
     }
 }
+
+/**
+ * The TV home's screensaver: when it starts (or Off) and what it shows. Google Photos is listed but
+ * waits on the portal's sign-in, so for now it only says so. TV home only, and kept on this TV.
+ */
+@Composable
+private fun ScreensaverPanel() {
+    if (!LocalGlass.current) return
+    val prefs = LocalContext.current.app.glassPrefs
+    val menus = LocalItemMenus.current
+    val minutes by prefs.saverMinutes.collectAsState()
+    val source by prefs.saverSource.collectAsState()
+    Panel {
+        Text("Screensaver", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        Text("Shows on the home screen when nobody has pressed a button for a while. Never during a video.", fontSize = 14.sp, color = Tv.Muted)
+        TvButton("Starts after: ${saverMinutesLabel(minutes)}", {
+            menus.open = ItemMenu(
+                "Screensaver starts after",
+                GlassPrefs.SAVER_CHOICES.map { m ->
+                    (if (m == minutes) "✓  ${saverMinutesLabel(m)}" else saverMinutesLabel(m)) to { prefs.setSaverMinutes(m); Usage.log(Usage.Action.SETTING_CHANGE, Usage.Word.SCREENSAVER) }
+                },
+            )
+        })
+        TvButton("Pictures: ${source.label}", {
+            menus.open = ItemMenu(
+                "Screensaver pictures",
+                SaverSource.entries.map { s ->
+                    val label = if (s == SaverSource.PHOTOS) "${s.label} (not set up yet)" else s.label
+                    (if (s == source) "✓  $label" else label) to {
+                        if (s == SaverSource.PHOTOS) {
+                            menus.open = ItemMenu(
+                                "Google Photos needs a setup on the portal first. It isn't ready yet.",
+                                listOf("OK" to {}),
+                            )
+                        } else {
+                            prefs.setSaverSource(s)
+                            Usage.log(Usage.Action.SETTING_CHANGE, Usage.Word.SCREENSAVER)
+                        }
+                    }
+                },
+            )
+        })
+    }
+}
+
+private fun saverMinutesLabel(m: Int) = if (m == 0) "Off" else "$m minutes"
 
 /**
  * Who watches on this TV (backlog items 17 and 18): add someone by name, as a kids viewer when the

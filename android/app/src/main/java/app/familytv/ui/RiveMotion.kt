@@ -1,11 +1,16 @@
 package app.familytv.ui
 
 import android.content.Context
+import android.util.Log
 import android.view.View
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CornerBasedShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -13,28 +18,33 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.drawOutline
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.findRootCoordinates
 import androidx.compose.ui.layout.onPlaced
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import app.familytv.BuildConfig
 import app.familytv.R
 import app.rive.runtime.kotlin.RiveAnimationView
 import app.rive.runtime.kotlin.controllers.RiveFileController
 import app.rive.runtime.kotlin.core.Fit
 import app.rive.runtime.kotlin.core.RiveEvent
 import kotlin.math.roundToInt
-import kotlinx.coroutines.delay
 
 /** A Rive view that never takes focus, touch or a screen reader's attention, or null where Rive can't run or [raw] won't load. */
 private fun riveView(ctx: Context, raw: Int, stateMachine: String, fit: Fit): RiveAnimationView? {
@@ -45,46 +55,19 @@ private fun riveView(ctx: Context, raw: Int, stateMachine: String, fit: Fit): Ri
             isClickable = false
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
             setRiveResource(raw, stateMachineName = stateMachine, fit = fit)
+            riveLog("$stateMachine made")
         }
     }.getOrNull()
 }
 
-/**
- * The "TV" pill loader (family_tv_loading.riv, state machine "Loading", bool "active"). It stays
- * mounted: [loading] shows it after [LOADER_WAIT_MS], so a quick load never flashes it, and fades it
- * out again; it holds still (paused) while hidden. It stays with reduced motion too, as it shows
- * that something is happening.
- */
-internal class RiveLoader private constructor(val view: RiveAnimationView) {
-    private var want = false
-    private var shown = false
-    private val show = Runnable { shown = true; runCatching { view.play(LOADING, isStateMachine = true); view.setBooleanState(LOADING, "active", true) } }
-    private val rest = Runnable { runCatching { view.pause() } }
-
-    init { view.postDelayed(rest, LOADER_FADE_MS) }
-
-    fun loading(on: Boolean) {
-        if (on == want) return
-        want = on
-        view.removeCallbacks(show)
-        view.removeCallbacks(rest)
-        if (on) view.postDelayed(show, LOADER_WAIT_MS)
-        else if (shown) {
-            shown = false
-            runCatching { view.setBooleanState(LOADING, "active", false) }
-            view.postDelayed(rest, LOADER_FADE_MS)
-        }
-    }
-
-    companion object {
-        /** Null where Rive can't run; the caller keeps its own spinner then. */
-        fun create(ctx: Context): RiveLoader? = riveView(ctx, R.raw.family_tv_loading, LOADING, Fit.CONTAIN)?.let(::RiveLoader)
-    }
+/** Test builds: every Rive view made and released (tag RiveViews), to check none comes and goes with each page. */
+internal fun riveLog(what: String) {
+    if (BuildConfig.DEBUG || BuildConfig.VERSION_NAME.contains("-test")) Log.i("RiveViews", what)
 }
 
 /**
- * The page and channel transition (family_tv_transition.riv, state machine "Transition": number
- * "style", trigger "go", events "covered" and "done"). Hidden when idle, it never blocks a key:
+ * The page transition (family_tv_transition.riv, state machine "Transition": number "style",
+ * trigger "go", events "covered" and "done"). Made once with the TV home and kept. Hidden when idle, it never blocks a key:
  * a [go] while one runs is refused, never queued. If an event doesn't arrive in time, the swap and
  * the end happen anyway.
  */
@@ -109,7 +92,7 @@ internal class RiveTransition private constructor(val view: RiveAnimationView) {
         })
     }
 
-    /** Starts [style] ([PAGE] or [CHANNEL]); [onCovered] runs once nothing underneath shows. False, with nothing run, unless idle. */
+    /** Starts [style] ([PAGE] or [PAGE_LIGHT]); [onCovered] runs once nothing underneath shows. False, with nothing run, unless idle. */
     fun go(style: Int, onCovered: () -> Unit = {}): Boolean {
         if (phase != Phase.IDLE) return false
         val started = runCatching {
@@ -124,7 +107,7 @@ internal class RiveTransition private constructor(val view: RiveAnimationView) {
         }
         this.onCovered = onCovered
         phase = Phase.COVERING
-        view.postDelayed(coverLate, if (style == CHANNEL) CHANNEL_COVERED_BY_MS else PAGE_COVERED_BY_MS)
+        view.postDelayed(coverLate, PAGE_COVERED_BY_MS)
         view.postDelayed(doneLate, DONE_BY_MS)
         return true
     }
@@ -149,8 +132,6 @@ internal class RiveTransition private constructor(val view: RiveAnimationView) {
     companion object {
         /** Style 0: the soft dark-glass wipe, for a new page on the dark look. */
         const val PAGE = 0
-        /** Style 1: the dim, scan-line flash and bloom, for a new channel. */
-        const val CHANNEL = 1
         /** Style 2: the light-glass wipe, for a new page on the light look; timed as [PAGE]. */
         const val PAGE_LIGHT = 2
 
@@ -162,7 +143,8 @@ internal class RiveTransition private constructor(val view: RiveAnimationView) {
 /**
  * A tab's Rive icon (family_tv_nav_icons.riv, artboard [artboard], state machine "Icon"): it plays
  * its own move once on focus, a squash on each new [presses], and follows [selected] and [light]
- * for its ink. Still when idle: paused once its move is over.
+ * for its ink. Never paused or played again from here: each input change starts it, and it stops drawing once
+ * its state machine settles. Paused and played again, the onn's surface came back blank for a frame (round 15).
  */
 @Composable
 internal fun RiveTabIcon(artboard: String, focused: Boolean, selected: Boolean, light: Boolean, presses: Int, modifier: Modifier = Modifier) {
@@ -176,26 +158,25 @@ internal fun RiveTabIcon(artboard: String, focused: Boolean, selected: Boolean, 
                 importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
                 runCatching { setRiveResource(R.raw.family_tv_nav_icons, artboardName = artboard, stateMachineName = ICON, fit = Fit.CONTAIN) }
                 view = this
+                riveLog("tab icon $artboard made")
             }
         },
         modifier = modifier,
+        onRelease = { riveLog("tab icon $artboard released") },
     )
     LaunchedEffect(view, focused, selected, light, presses) {
         val v = view ?: return@LaunchedEffect
         runCatching {
-            v.play(ICON, isStateMachine = true)
             v.setBooleanState(ICON, "light", light)
             v.setBooleanState(ICON, "selected", selected)
             v.setBooleanState(ICON, "focused", focused)
             if (presses != fired[0]) { fired[0] = presses; v.fireState(ICON, "press") }
         }
-        delay(ICON_SETTLE_MS)
-        runCatching { v.pause() }
     }
 }
 
 /**
- * Where OK lands on the TV home's glass cards, for one shared Rive press ripple ([PressRipple])
+ * Where OK lands on the TV home's glass cards, for one shared press ripple ([PressRipple])
  * laid over the pressed card. Cards under [minWidth] by [minHeight] px (pills, tabs, icon
  * buttons) and cards in another window (dialogs) get none.
  */
@@ -222,54 +203,79 @@ internal data class PressSpot(val offset: IntOffset, val size: IntSize, val shap
 internal val LocalPress = staticCompositionLocalOf<PressHost?> { null }
 
 /**
- * The press ripple (family_tv_press.riv, state machine "Press": trigger "press", number "radius")
- * over [host]'s latest pressed card, clipped to its shape. Hidden and still between presses; the
- * press never waits for it.
+ * The press ripple over [host]'s latest pressed card, clipped to its shape, after the Rive design
+ * (rive/press: a glass ripple growing from the centre, a soft core flash and a bright rim, 250 ms).
+ * Drawn here as layers that only scale and fade: the Rive view it was had its surface remade for
+ * every card's size, and the Kitchen's Fire Stick crashed tearing those surfaces down (Oct 27).
+ * Nothing is composed between presses; the press never waits for it.
  */
 @Composable
 internal fun PressRipple(host: PressHost, modifier: Modifier = Modifier) {
-    val ctx = LocalContext.current
-    val view = remember { riveView(ctx, R.raw.family_tv_press, PRESS, Fit.FILL)?.apply { visibility = View.INVISIBLE } } ?: return
-    val hide = remember { Runnable { view.visibility = View.INVISIBLE; runCatching { view.pause() } } }
     val density = LocalDensity.current
     val spot = host.spot
+    val at = remember { Animatable(1f) }
     Box(modifier.onPlaced { host.coords = it }) {
-        AndroidView(
-            { view },
-            if (spot == null) Modifier.size(0.dp)
-            else with(density) { Modifier.offset { spot.offset }.size(spot.size.width.toDp(), spot.size.height.toDp()).clip(spot.shape) },
-        )
+        if (spot != null && at.value < 1f) {
+            val shape = spot.shape
+            with(density) {
+                Box(Modifier.offset { spot.offset }.size(spot.size.width.toDp(), spot.size.height.toDp()).clip(shape)) {
+                    // The ripple: a ring of light in the card's proportions, growing from a point past the card's edges.
+                    Spacer(
+                        Modifier.fillMaxSize().graphicsLayer {
+                            val p = at.value
+                            val grow = 0.12f + 0.88f * (1f - (1f - p) * (1f - p))
+                            scaleX = grow
+                            scaleY = grow * size.height / size.width
+                            alpha = minOf(1f, p / 0.2f, (1f - p) / 0.5f).coerceIn(0f, 1f)
+                        }.drawWithCache {
+                            val r = size.width * 0.66f
+                            val ring = Brush.radialGradient(
+                                0f to Color.Transparent, 0.45f to Color(0x0DFFFFFF), 0.74f to Color(0x33FFFFFF), 0.86f to Color(0x4CFFFFFF),
+                                0.94f to Color(0x1FFFFFFF), 1f to Color.Transparent, radius = r,
+                            )
+                            onDrawBehind { drawCircle(ring, r) }
+                        },
+                    )
+                    // A soft flash at the centre, gone by the ripple's middle.
+                    Spacer(
+                        Modifier.fillMaxSize().graphicsLayer {
+                            val p = at.value
+                            scaleY = size.height / size.width
+                            alpha = minOf(1f, p / 0.15f, (0.6f - p) / 0.45f).coerceIn(0f, 1f)
+                        }.drawWithCache {
+                            val r = size.width * 0.25f
+                            val core = Brush.radialGradient(0f to Color(0x38FFFFFF), 0.6f to Color(0x1AFFFFFF), 1f to Color.Transparent, radius = r)
+                            onDrawBehind { drawCircle(core, r) }
+                        },
+                    )
+                    // The rim flashes around the card's edge, brighter at the top.
+                    Spacer(
+                        Modifier.fillMaxSize().graphicsLayer {
+                            val p = at.value
+                            alpha = minOf(1f, p / 0.3f, (1f - p) / 0.7f).coerceIn(0f, 1f)
+                        }.drawWithCache {
+                            val w = 3.dp.toPx()
+                            val edge = shape.createOutline(Size(size.width - w, size.height - w), layoutDirection, this)
+                            val ink = Brush.verticalGradient(0f to Color(0xF2FFFFFF), 1f to Color(0x66FFFFFF))
+                            onDrawBehind { translate(w / 2, w / 2) { drawOutline(edge, ink, style = Stroke(w)) } }
+                        },
+                    )
+                }
+            }
+        }
     }
     LaunchedEffect(spot) {
-        val s = spot ?: return@LaunchedEffect
-        // Once the view has its new size.
-        withFrameNanos { }
-        val corner = (s.shape as? CornerBasedShape)?.topStart?.toPx(Size(s.size.width.toFloat(), s.size.height.toFloat()), density) ?: 0f
-        view.removeCallbacks(hide)
-        view.visibility = View.VISIBLE
-        runCatching {
-            view.play(PRESS, isStateMachine = true)
-            view.setNumberState(PRESS, "radius", (corner * 240f / s.size.height).coerceIn(0f, 100f))
-            view.fireState(PRESS, "press")
-        }
-        view.postDelayed(hide, PRESS_MS)
+        if (spot == null) return@LaunchedEffect
+        at.snapTo(0f)
+        at.animateTo(1f, tween(PRESS_MS, easing = LinearEasing))
     }
 }
 
 private const val ICON = "Icon"
-private const val PRESS = "Press"
-/** An icon's focus move takes about 0.7 s and its press 0.18 s. */
-private const val ICON_SETTLE_MS = 900L
-/** The ripple's 250 ms, with room to spare. */
-private const val PRESS_MS = 350L
-private const val LOADING = "Loading"
+/** The ripple's 250 ms. */
+private const val PRESS_MS = 250
 private const val TRANSITION = "Transition"
-/** How long a load runs before the loader shows. */
-private const val LOADER_WAIT_MS = 300L
-/** The loader's 200 ms fade-out, with room to spare. */
-private const val LOADER_FADE_MS = 300L
-/** "covered" comes at about 265 ms (page) and 185 ms (channel); past these the swap happens anyway. */
+/** "covered" comes at about 265 ms; past this the swap happens anyway. */
 private const val PAGE_COVERED_BY_MS = 400L
-private const val CHANNEL_COVERED_BY_MS = 300L
 /** "done" comes at about 505 ms at most; past this the overlay hides anyway. */
 private const val DONE_BY_MS = 800L

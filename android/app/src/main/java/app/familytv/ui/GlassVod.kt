@@ -1,5 +1,6 @@
 package app.familytv.ui
 
+import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -34,9 +35,15 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -46,29 +53,35 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.focusRestorer
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.Icon
+import androidx.tv.material3.LocalContentColor
 import androidx.tv.material3.Text
+import app.familytv.BuildConfig
 import app.familytv.app
 import app.familytv.data.CatalogDao
 import app.familytv.data.CategoryEntity
 import app.familytv.data.Kind
+import app.familytv.data.PopularOrder
 import app.familytv.data.SearchText
 import app.familytv.data.SeriesEntity
 import app.familytv.data.displayName
 import app.familytv.data.searchMovies
 import app.familytv.data.searchSeries
+import app.familytv.iptv.CatalogWork
 import app.familytv.iptv.SeriesTitles
 import app.familytv.perf.Perf
 import app.familytv.portal.Profile
@@ -78,28 +91,39 @@ import app.familytv.usage.Usage
 import app.familytv.user.ProgressEntity
 import app.familytv.user.ProgressKey
 import coil.compose.AsyncImage
+import java.text.NumberFormat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
-import java.text.NumberFormat
 
 /** A movie or a show on the glass pages, so one grid can hold both (a provider's A to Z). */
 internal sealed interface VodItem {
     val key: String
     val group: String
     val title: String
+    /** The line's copies of it (languages, qualities): how well known it is, for search. */
+    val copyCount: Int
+    /** Its year and TMDB ids, to find it among TMDB's search results. */
+    val year: Int?
+    val tmdbIds: List<String>
 
     class Movie(val g: MovieGroup) : VodItem {
         override val key get() = "m/${g.key}"
         override val group get() = g.key
         override val title get() = g.title
+        override val copyCount get() = g.copies.size
+        override val year get() = g.year
+        override val tmdbIds get() = g.copies.mapNotNull { it.tmdb }
     }
 
     class Show(val g: SeriesGroup) : VodItem {
         override val key get() = "s/${g.key}"
         override val group get() = g.key
         override val title get() = g.title
+        override val copyCount get() = g.copies.size
+        override val year get() = g.copies.firstNotNullOfOrNull { it.year }
+        override val tmdbIds get() = g.copies.mapNotNull { it.tmdb }
     }
 }
 
@@ -159,9 +183,11 @@ private fun parentOf(path: String) = if (path.startsWith("adult/")) "adult" else
 @Composable
 private fun rememberForYou(kind: String, visible: List<CategoryEntity>, seen: List<String>?): List<VodItem> {
     val dao = LocalContext.current.app.db.catalog()
-    var rows by remember { mutableStateOf(emptyList<VodItem>()) }
+    val key = "forYou/$kind"
+    var rows by remember { mutableStateOf(Kept.get(key, visible to (seen ?: Unit)) ?: emptyList<VodItem>()) }
     LaunchedEffect(kind, visible, seen) {
         rows = if (seen.isNullOrEmpty()) emptyList() else withContext(Dispatchers.IO) { forYou(dao, kind, categoryKeys(visible), seen) }
+        Kept.put(key, visible to (seen ?: Unit), rows)
     }
     return rows
 }
@@ -198,6 +224,9 @@ private const val FOR_YOU_CATEGORIES = 3
 internal fun VodTab(vm: MainViewModel, profile: Profile, kind: String, tab: GlassTab = if (kind == Kind.MOVIE) GlassTab.Movies else GlassTab.Series) {
     var path by rememberSaveable { mutableStateOf("") }
     var opened by rememberSaveable { mutableStateOf<String?>(null) }
+    // The home's card that last had focus ("hero" or "shelf/<row>/<card>"), so Back from its page lands on
+    // that very card: the highlights' first card is often the same film as Continue watching's (Oct 27).
+    val lastCard = rememberSaveable { mutableStateOf<String?>(null) }
     val query = glassQuery(tab).trim()
     val nav = rememberSeriesNav()
     val home = rememberLazyListState()
@@ -218,7 +247,7 @@ internal fun VodTab(vm: MainViewModel, profile: Profile, kind: String, tab: Glas
         when {
             path.isNotEmpty() -> VodPage(profile, kind, path, movieCats, seriesCats, marks, pages, nav, open) { path = parentOf(path) }
             query.length >= 2 -> VodSearch(profile, kind, query, marks)
-            else -> VodHome(profile, kind, movieCats, seriesCats, marks, opened, home, open)
+            else -> VodHome(profile, kind, movieCats, seriesCats, marks, opened, lastCard, home, open, carousel = tab == GlassTab.Home)
         }
     }
 }
@@ -233,14 +262,21 @@ private fun VodHome(
     seriesCats: List<CategoryEntity>,
     marks: VodMarks,
     opened: String?,
+    lastCard: MutableState<String?>,
     list: LazyListState,
     open: (String) -> Unit,
+    carousel: Boolean = false,
 ) {
     val nav = LocalSeriesNav.current
     val movies = kind == Kind.MOVIE
     val cats = if (movies) movieCats else seriesCats
     if (movieCats.isEmpty() && seriesCats.isEmpty()) {
-        return EmptyState(PlaybackStatus.lastRefreshError?.let { "Couldn't load the line: $it. Open Settings and run a check." } ?: "Nothing here yet.")
+        val error = PlaybackStatus.lastRefreshError
+        // The categories come a moment after the page opens: say there is nothing only once they
+        // have had time to load, so "Nothing here yet." never flashes on the way back to Home.
+        val waited by produceState(error != null) { delay(EMPTY_AFTER_MS); value = true }
+        if (!waited) return
+        return EmptyState(error?.let { "Couldn't load the line: $it. Open Settings and run a check." } ?: "Nothing here yet.")
     }
     // The first frame with rows on it ends a cold start (see Perf).
     LaunchedEffect(Unit) { withFrameNanos { }; Perf.firstScreen() }
@@ -276,30 +312,42 @@ private fun VodHome(
     // For you comes right after it, for the picked viewer.
     val rows = listOf(CONTINUE_WATCHING, FOR_YOU, "Favourites").mapNotNull { t -> (if (t == FOR_YOU) forYou.ifEmpty { null } else shelves[t])?.let { t to it } }
     val providers = remember(movieCats, seriesCats) { Provider.entries.filter { p -> movieCats.any { p.matches(it.name) } || seriesCats.any { p.matches(it.name) } } }
-    val groups = remember(movieCats, seriesCats) { LanguageGroup.entries.filter { g -> movieCats.any { g.matches(it.name) } || seriesCats.any { g.matches(it.name) } } }
-    val (regions, languages) = groups.partition { it.region }
+    val languages = remember(movieCats, seriesCats) { LanguageGroup.entries.filter { g -> movieCats.any { g.matches(it.name) } || seriesCats.any { g.matches(it.name) } } }
     // The category chip wall starts folded away behind "Show all categories".
     var allCats by rememberSaveable(kind) { mutableStateOf<Boolean?>(null) }
     val ctx = LocalContext.current
     val all by remember(kind) { ctx.app.db.catalog().categories(kind) }.collectAsState(initial = emptyList())
     val mine by ctx.app.myCategoryOrder.order.collectAsState()
     val hasAdult = remember(all, profile, mine) { adultCategories(all, profile, mine[kind].orEmpty()).isNotEmpty() }
+    // Home's carousel (TMDB's top titles the line has, and upcoming events); the highlights row stands in until it loads, or without it.
+    val liveCats = categories(profile, Kind.LIVE)
+    // The last slides made for this viewer show at once when Home comes back; they refresh behind.
+    val slides by produceState(remember(profile, carousel) { if (carousel) Featured.cached(profile) else emptyList() }, carousel, movieCats, seriesCats, liveCats) {
+        if (carousel && (movieCats.isNotEmpty() || seriesCats.isNotEmpty())) value = runCatching { Featured.load(ctx.app, profile, movieCats, seriesCats, liveCats) }.getOrDefault(value)
+    }
 
     // Where focus lands: the poster whose page just closed, else the tile that opened the last page, else the first.
     val back = nav?.back
     val homeKeys = buildSet {
-        if (featured != null) add("hero")
+        if (featured != null || slides.isNotEmpty()) add("hero")
         if (shelves[newest] != null) add("newest")
         if (shelves["Top rated"] != null) add("top")
         providers.forEach { add("provider/${it.name}") }
-        groups.forEach { add("language/${it.name}") }
+        languages.forEach { add("language/${it.name}") }
         cats.forEach { add("cat/${it.chipKey}") }
         if (hasAdult) add("adult")
     }
+    val heroShows = { g: String -> slides.isNotEmpty() || featured?.first?.group == g }
+    val left = lastCard.value
     val target = when {
+        // The card it was opened from, when it is still there with that film or show.
+        back != null && left == "hero" && heroShows(back) -> "hero"
+        back != null && left != null && rows.any { (t, l) -> l.any { it.group == back && left == "shelf/$t/${it.key}" } } -> left
         back != null && featured?.first?.group == back -> "hero"
         back != null -> rows.firstNotNullOfOrNull { (t, l) -> l.firstOrNull { it.group == back }?.let { "shelf/$t/${it.key}" } } ?: homeKeys.firstOrNull()
         opened != null && opened in homeKeys -> opened
+        // The highlights' newest card opens "recent" (films) or "new" (shows).
+        (opened == "recent" || opened == "new") && "newest" in homeKeys -> "newest"
         else -> homeKeys.firstOrNull()
     }
     // Until it's toggled, the chips are open only when coming back from a category page, so focus can land on its chip.
@@ -308,58 +356,97 @@ private fun VodHome(
     fun LazyListScope.shelf(title: String, items: List<VodItem>) = item("shelf/$title") {
         GlassShelf(title) {
             items(items, key = { it.key }) { x ->
-                VodCard(x, marks, entryPoint(target == "shelf/$title/${x.key}"), POSTER_W, barOf(x, title), continuing = title == CONTINUE_WATCHING, caption = leftOf(x, title))
+                val k = "shelf/$title/${x.key}"
+                VodCard(x, marks, entryPoint(target == k).onFocusChanged { if (it.hasFocus) lastCard.value = k }, POSTER_W, barOf(x, title), continuing = title == CONTINUE_WATCHING, caption = leftOf(x, title))
             }
         }
     }
 
-    LazyColumn(state = list, verticalArrangement = Arrangement.spacedBy(22.gx), contentPadding = PaddingValues(bottom = 40.dp)) {
-        // Always the first item, so the highlights loading in after the rest don't land above the scroll position.
-        item("hero") {
-            if (featured != null) Row(Modifier.fillMaxWidth().height(190.gx).padding(horizontal = FOCUS_ROOM), horizontalArrangement = Arrangement.spacedBy(20.gx)) {
-                val (item, from) = featured
-                HeroCard(
-                    item.title, listOf(if (movies) "Movie" else "TV show", from).joinToString("  ·  "), item.poster, HERO_MAIN, 2.2f, entryPoint(target == "hero"),
-                ) {
-                    when (item) {
-                        is VodItem.Movie -> nav?.movie = item.g to marks.movieKeys
-                        is VodItem.Show -> nav?.open = item.g
+    // Like Apple TV's: Down from the carousel scrolls it away whole, so the first row sits right under the top bar
+    // (and the art fades out with it); Up to the carousel brings the page back to the top.
+    var heroFocused by remember { mutableStateOf(false) }
+    var listFocused by remember { mutableStateOf(false) }
+    LaunchedEffect(heroFocused, listFocused, slides.isNotEmpty()) {
+        if (slides.isEmpty()) return@LaunchedEffect
+        when {
+            heroFocused -> if (list.firstVisibleItemIndex != 0 || list.firstVisibleItemScrollOffset != 0) list.animateScrollToItem(0)
+            listFocused && list.firstVisibleItemIndex == 0 -> list.animateScrollToItem(1)
+        }
+    }
+
+    // Like Apple TV's, the first row (Continue watching) shows whole at rest, over the bottom of the carousel's art
+    // (Arshad, Oct 26): the carousel takes what the page has left above it, between its least and its full height.
+    // The row's height is its tallest card's (two-line titles and the time left included), plus a little room below.
+    val shell = LocalGlassShell.current
+    val slot = shell?.slot ?: remember { mutableFloatStateOf(0f) }
+    val density = LocalDensity.current
+    val most = with(density) { CAROUSEL_HEIGHT.gx.toPx() }
+    val least = with(density) { CAROUSEL_MIN.gx.toPx() }
+    val gap = with(density) { (ROW_GAP + ROW_ROOM).gx.toPx() }
+    val fits by remember(list, most, least, gap) {
+        derivedStateOf {
+            val info = list.layoutInfo
+            info.visibleItemsInfo.firstOrNull { it.index == 1 }?.let { (info.viewportSize.height - it.size - gap).coerceIn(least, most) }
+        }
+    }
+    LaunchedEffect(fits, slides.isNotEmpty()) { if (slides.isNotEmpty()) fits?.let { slot.floatValue = it } }
+    val heroHeight = slot.floatValue.takeIf { it > 0f }?.let { with(density) { it.toDp() } } ?: CAROUSEL_HEIGHT.gx
+    // While the art is up the rows sit on its dark shade, so they keep light text in either look.
+    val onArt by remember(shell) { derivedStateOf { shell?.backdrop?.value != null } }
+    val page = LocalGlassPalette.current
+    val rowPalette = if (carousel && onArt) GlassPalette.Dark else page
+
+    CompositionLocalProvider(LocalGlassPalette provides rowPalette, LocalContentColor provides rowPalette.text) {
+        LazyColumn(
+            Modifier.onFocusChanged { listFocused = it.hasFocus },
+            state = list, verticalArrangement = Arrangement.spacedBy(ROW_GAP.gx), contentPadding = PaddingValues(bottom = 40.dp),
+        ) {
+            // Always the first item, so the highlights loading in after the rest don't land above the scroll position.
+            item("hero") {
+                if (slides.isNotEmpty()) HomeCarousel(slides, marks, Modifier.height(heroHeight).onFocusChanged { heroFocused = it.hasFocus; if (it.hasFocus) lastCard.value = "hero" }, entry = entryPoint(target == "hero"), compact = heroHeight < CAROUSEL_COMPACT.gx)
+                else if (featured != null) Row(Modifier.fillMaxWidth().height(190.gx).padding(horizontal = FOCUS_ROOM), horizontalArrangement = Arrangement.spacedBy(20.gx)) {
+                    val (item, from) = featured
+                    HeroCard(
+                        item.title, listOf(if (movies) "Movie" else "TV show", from).joinToString("  ·  "), item.poster, HERO_MAIN, 2.2f,
+                        entryPoint(target == "hero").onFocusChanged { if (it.hasFocus) lastCard.value = "hero" },
+                    ) {
+                        when (item) {
+                            is VodItem.Movie -> nav?.movie = item.g to marks.movieKeys
+                            is VodItem.Show -> nav?.open = item.g
+                        }
                     }
+                    shelves[newest]?.let { l -> HeroCard(newest, null, l.first().poster, HERO_NEW, 1f, entryPoint(target == "newest")) { open(if (movies) "recent" else "new") } }
+                    shelves["Top rated"]?.let { l -> HeroCard("Top rated", null, l.first().poster, HERO_TOP, 1f, entryPoint(target == "top")) { open("top") } }
                 }
-                shelves[newest]?.let { l -> HeroCard(newest, null, l.first().poster, HERO_NEW, 1f, entryPoint(target == "newest")) { open(if (movies) "recent" else "new") } }
-                shelves["Top rated"]?.let { l -> HeroCard("Top rated", null, l.first().poster, HERO_TOP, 1f, entryPoint(target == "top")) { open("top") } }
             }
-        }
-        rows.filter { it.first == CONTINUE_WATCHING || it.first == FOR_YOU }.forEach { (title, items) -> shelf(title, items) }
-        if (providers.isNotEmpty()) item("providers") {
-            Column(verticalArrangement = Arrangement.spacedBy(10.gx)) {
-                GlassHeading("Providers", Modifier.padding(start = FOCUS_ROOM))
-                ProvidersShelf(providers, target) { open("provider/${it.name}") }
-            }
-        }
-        // Languages and regions are separate rows (backlog item 26).
-        listOf("Languages" to languages, "Regions" to regions).forEach { (heading, pills) ->
-            if (pills.isNotEmpty()) item(heading) {
+            rows.filter { it.first == CONTINUE_WATCHING || it.first == FOR_YOU }.forEach { (title, items) -> shelf(title, items) }
+            if (providers.isNotEmpty()) item("providers") {
                 Column(verticalArrangement = Arrangement.spacedBy(10.gx)) {
-                    GlassHeading(heading, Modifier.padding(start = FOCUS_ROOM))
+                    GlassHeading("Providers", Modifier.padding(start = FOCUS_ROOM))
+                    ProvidersShelf(providers, target) { open("provider/${it.name}") }
+                }
+            }
+            if (languages.isNotEmpty()) item("Languages") {
+                Column(verticalArrangement = Arrangement.spacedBy(10.gx)) {
+                    GlassHeading("Languages", Modifier.padding(start = FOCUS_ROOM))
                     PillRow {
-                        items(pills, key = { it.name }) { g ->
+                        items(languages, key = { it.name }) { g ->
                             BigPill(g.label, entryPoint(target == "language/${g.name}")) { open("language/${g.name}") }
                         }
                     }
                 }
             }
-        }
-        rows.filter { it.first != CONTINUE_WATCHING && it.first != FOR_YOU }.forEach { (title, items) -> shelf(title, items) }
-        if (cats.isNotEmpty()) item("categories") {
-            Column(Modifier.padding(horizontal = FOCUS_ROOM), verticalArrangement = Arrangement.spacedBy(10.gx)) {
-                GlassHeading("All categories")
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(10.gx), verticalArrangement = Arrangement.spacedBy(10.gx)) {
-                    // The toggle stays put, so focus never drops when the chips open or close.
-                    BigPill(if (catsOpen) "Hide categories" else "Show all categories (${cats.size + if (hasAdult) 1 else 0})") { allCats = !catsOpen }
-                    if (catsOpen) {
-                        cats.forEach { c -> BigPill(c.displayName, entryPoint(target == "cat/${c.chipKey}")) { open("cat/${c.chipKey}") } }
-                        if (hasAdult) BigPill(ADULT_CONTENT, entryPoint(target == "adult"), lock = true) { open("adult") }
+            rows.filter { it.first != CONTINUE_WATCHING && it.first != FOR_YOU }.forEach { (title, items) -> shelf(title, items) }
+            if (cats.isNotEmpty()) item("categories") {
+                Column(Modifier.padding(horizontal = FOCUS_ROOM), verticalArrangement = Arrangement.spacedBy(10.gx)) {
+                    GlassHeading("All categories")
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(10.gx), verticalArrangement = Arrangement.spacedBy(10.gx)) {
+                        // The toggle stays put, so focus never drops when the chips open or close.
+                        BigPill(if (catsOpen) "Hide categories" else "Show all categories (${cats.size + if (hasAdult) 1 else 0})") { allCats = !catsOpen }
+                        if (catsOpen) {
+                            cats.forEach { c -> BigPill(c.displayName, entryPoint(target == "cat/${c.chipKey}")) { open("cat/${c.chipKey}") } }
+                            if (hasAdult) BigPill(ADULT_CONTENT, entryPoint(target == "adult"), lock = true) { open("adult") }
+                        }
                     }
                 }
             }
@@ -368,6 +455,11 @@ private fun VodHome(
 }
 
 private const val ADULT_CONTENT = "Adult Content"
+/** Room left under Home's first row at rest, past its own focus room, so nothing of it touches the page's end. */
+private const val ROW_ROOM = 8
+
+/** How long Home waits for its categories before saying there are none. */
+private const val EMPTY_AFTER_MS = 1500L
 private val HERO_MAIN = listOf(Color(0xFF3B4A6B), Color(0xFF1D2638), Color(0xFF0F1420))
 private val HERO_NEW = listOf(Color(0xFF5A3D2B), Color(0xFF1F1612))
 private val HERO_TOP = listOf(Color(0xFF2B4A5A), Color(0xFF121C22))
@@ -560,7 +652,11 @@ private fun CollectionPage(
             val m = movies.map { VodItem.Movie(it) }
             val s = shows.map { VodItem.Show(it) }
             val all = (m + s).sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.title })
-            if (q.length >= 2) all.filter { SearchText.matches(it.title, q) } else when (view) {
+            // Best match first (exact title, then starts with it, then any word), the better known (more copies) first within each, else A to Z.
+            if (q.length >= 2) {
+                all.mapNotNull { x -> SearchText.rank(SearchText.index(x.title), q)?.let { Triple(x, SearchText.group(it), SearchText.known(it, x.copyCount)) } }
+                    .sortedWith(compareBy<Triple<VodItem, Int, Int>> { it.second }.thenByDescending { it.third }).map { it.first }
+            } else when (view) {
                 View.Movies -> m
                 View.Shows -> s
                 View.Recent -> movies.sortedByDescending { g -> g.copies.maxOf { it.added } }.map { VodItem.Movie(it) }
@@ -662,27 +758,54 @@ private fun AdultPage(profile: Profile, kind: String, catKey: String, nav: Serie
 /** The top bar's search on Movies or TV Shows: this kind only, hidden and locked categories left out. */
 @Composable
 private fun VodSearch(profile: Profile, kind: String, q: String, marks: VodMarks) {
-    val dao = LocalContext.current.app.db.catalog()
+    val app = LocalContext.current.app
+    val dao = app.db.catalog()
     val nav = LocalSeriesNav.current
     val cats = categories(profile, kind)
     val keys = remember(cats) { categoryKeys(cats) }
     var results by remember { mutableStateOf<List<VodItem>?>(null) }
-    LaunchedEffect(q, keys) {
-        delay(300) // let typing settle
+    var resultsFor by remember { mutableStateOf<String?>(null) }
+    // A new grid for each new set of results: a kept one holds on to the card at its top, so "up" after
+    // "upp" opened scrolled down to Uppercut, past Up (Oct 27).
+    var shownSet by remember { mutableIntStateOf(0) }
+    var picking by remember { mutableStateOf(false) }
+    // Searched again for the same words when the most-voted lists arrive or a list load ends, so a
+    // search made during a load or before the lists were read doesn't stay as it was.
+    val voted by app.mostVoted.lists.collectAsState()
+    val loads by CatalogWork.listsLoaded.collectAsState()
+    LaunchedEffect(q, keys, voted, loads) {
+        val again = resultsFor == q
+        // Never under a viewer already moving through the results.
+        if (again && picking) return@LaunchedEffect
+        if (!again) delay(300) // let typing settle
+        val tv = kind != Kind.MOVIE
+        val popular = app.mostVoted.ready()?.of(tv)
         val found = if (kind == Kind.MOVIE) {
-            groupMovies(dao.searchMovies(q, SEARCH_LIMIT * 3).filter { (it.sourceId to it.categoryId) in keys }.take(SEARCH_LIMIT)).map { VodItem.Movie(it) }
+            // Copies in other languages are one result: group, then count.
+            groupMovies(dao.searchMovies(q, SEARCH_LIMIT * 4).filter { (it.sourceId to it.categoryId) in keys }).take(SEARCH_LIMIT).map { VodItem.Movie(it) }
         } else {
-            groupSeries(dao.searchSeries(q, SEARCH_LIMIT * 3).filter { (it.sourceId to it.categoryId) in keys }.take(SEARCH_LIMIT)).map { VodItem.Show(it) }
+            groupSeries(dao.searchSeries(q, SEARCH_LIMIT * 4).filter { (it.sourceId to it.categoryId) in keys }).take(SEARCH_LIMIT).map { VodItem.Show(it) }
         }
-        results = found
-        found.size.let { Usage.log(if (it == 0) Usage.Action.SEARCH_EMPTY else Usage.Action.SEARCH_SUBMIT, it) }
+        // In order of how well known the titles are; without the lists (no TMDB key yet), as the line has them.
+        results = PopularOrder.apply(found, q, popular, { it.title }, { it.year }, { it.tmdbIds })
+        resultsFor = q
+        shownSet++
+        if (BuildConfig.DEBUG || BuildConfig.VERSION_NAME.contains("-test")) {
+            // Test builds: the top of the order and each title's votes on the list, to check it on the TV (titles only).
+            Log.i("VodSearch", "most-voted ${popular?.size ?: "not read"}; " + results.orEmpty().take(12).joinToString { "${it.title} (${it.year ?: "-"}): ${popular?.votes(it.tmdbIds, it.title, it.year) ?: "off"}" })
+        }
+        if (!again) found.size.let { Usage.log(if (it == 0) Usage.Action.SEARCH_EMPTY else Usage.Action.SEARCH_SUBMIT, it) }
     }
     val shown = results
     when {
         shown == null -> Unit
         shown.isEmpty() -> EmptyState("No matches for \"$q\".")
-        else -> PosterGrid(shown, { it.key }, nav?.back?.let { b -> shown.firstOrNull { it.group == b }?.key }) { x, mod, _ ->
-            VodCard(x, marks, mod, null) { Usage.log(Usage.Action.SEARCH_PICK, shown.indexOf(x)) }
+        else -> Box(Modifier.onFocusChanged { picking = it.hasFocus }) {
+            key(shownSet) {
+                PosterGrid(shown, { it.key }, nav?.back?.let { b -> shown.firstOrNull { it.group == b }?.key }) { x, mod, _ ->
+                    VodCard(x, marks, mod, null) { Usage.log(Usage.Action.SEARCH_PICK, shown.indexOf(x)) }
+                }
+            }
         }
     }
 }

@@ -135,9 +135,11 @@ private fun RiveSwitch(value: Appearance, focused: Boolean, modifier: Modifier) 
                 isFocusable = false
                 setRiveResource(R.raw.family_tv_appearance_switch, stateMachineName = SWITCH, fit = Fit.CONTAIN)
                 view = this
+                riveLog("appearance switch made")
             }
         },
         modifier = modifier,
+        onRelease = { riveLog("appearance switch released") },
     )
     LaunchedEffect(view, value, focused) {
         val v = view ?: return@LaunchedEffect

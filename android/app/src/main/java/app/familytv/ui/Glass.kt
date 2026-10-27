@@ -34,6 +34,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
 import androidx.tv.material3.LocalContentColor
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.ReadOnlyComposable
@@ -240,14 +241,15 @@ fun Modifier.glass(shape: Shape): Modifier = glass(shape, Glass.Fill, Glass.Line
 
 /** The radial gradient with [glow] softly lighting the top right. */
 @Composable
-internal fun GlassBackground(glow: Color, modifier: Modifier = Modifier, content: @Composable BoxScope.() -> Unit) {
+internal fun GlassBackground(glow: Color, modifier: Modifier = Modifier, hidden: State<Boolean>? = null, content: @Composable BoxScope.() -> Unit) {
     val p = LocalGlassPalette.current
     val top = lerp(p.top, glow, 0.16f)
     Box(modifier.fillMaxSize()) {
         // Its own cached layer: focus moving or a preview playing above never repaints the two
         // full-screen gradients (on the onn box every frame used to); only a glow or look change does.
         Box(
-            Modifier.fillMaxSize().graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }.drawWithCache {
+            // [hidden] (art covering the whole screen) is read here, so it only flips the layer, never recomposes.
+            Modifier.fillMaxSize().graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen; alpha = if (hidden?.value == true) 0f else 1f }.drawWithCache {
                 val base = Brush.radialGradient(0f to top, 0.45f to p.middle, 1f to p.bottom, center = Offset(size.width * 0.22f, 0f), radius = size.width * 1.1f)
                 val light = Brush.radialGradient(listOf(glow.copy(alpha = p.glow), glow.copy(alpha = p.glow / 3), Color.Transparent), center = Offset(size.width * 0.78f, size.height * 0.04f), radius = size.width * 0.42f)
                 onDrawBehind { drawRect(base); drawRect(light) }
@@ -272,6 +274,7 @@ internal fun GlassPill(
     icon: (@Composable (focused: Boolean) -> Unit)? = null,
     onFocus: () -> Unit = {},
     slid: Boolean = false,
+    glide: TabGlide? = null,
 ) {
     // Backlog item 8: the chosen one is the filled pill, without a ring; focus raises the glass bubble.
     // [slid]: the row draws the chosen pill and the focus bubble behind its pills, gliding between them
@@ -287,11 +290,15 @@ internal fun GlassPill(
         Row(Modifier.padding(horizontal = padH, vertical = padV), verticalAlignment = Alignment.CenterVertically) {
             icon?.let { it(focused); Spacer(Modifier.width(10.gx)) }
             // Labels never wrap: one line, centred in the pill.
-            Text(
-                text, fontSize = fontSize, maxLines = 1, softWrap = false, textAlign = TextAlign.Center,
-                fontWeight = if (selected || focused) FontWeight.SemiBold else FontWeight.Medium,
-                color = when { selected -> Glass.OnSelected; focused -> Glass.Text; else -> Glass.Dim },
-            )
+            val label = @Composable { color: Color, m: Modifier ->
+                Text(
+                    text, m, fontSize = fontSize, maxLines = 1, softWrap = false, textAlign = TextAlign.Center,
+                    fontWeight = if (selected || focused) FontWeight.SemiBold else FontWeight.Medium, color = color,
+                )
+            }
+            // On a gliding tab row the dark ink follows the pill, not [selected].
+            if (glide != null) GlideInk(glide, if (focused) Glass.Text else Glass.Dim, Glass.OnSelected, label)
+            else label(when { selected -> Glass.OnSelected; focused -> Glass.Text; else -> Glass.Dim }, Modifier)
         }
     }
 }
@@ -447,11 +454,15 @@ internal fun AppButtons() {
             fill = Glass.Raised, border = true, fontSize = 15.gsp, padH = 16.gx, padV = 13.gx,
             icon = { PlayMark(Color(0xFFFF0033), Color.White) },
         )
-        GlassPill(
-            "JustWatch", { openApp(ctx, "JustWatch", JUSTWATCH, "https://www.justwatch.com") },
-            fill = Glass.Raised, border = true, fontSize = 15.gsp, padH = 16.gx, padV = 13.gx,
-            icon = { PlayMark(Color(0xFFFBC500), Color(0xFF0B0F18)) },
-        )
+        // Fire OS has no JustWatch app, and its Silk browser lands on an Appstore page instead of the site.
+        val justWatch = remember { !isFireTv(ctx) || installed(ctx, JUSTWATCH) }
+        if (justWatch) {
+            GlassPill(
+                "JustWatch", { openApp(ctx, "JustWatch", JUSTWATCH, "https://www.justwatch.com") },
+                fill = Glass.Raised, border = true, fontSize = 15.gsp, padH = 16.gx, padV = 13.gx,
+                icon = { PlayMark(Color(0xFFFBC500), Color(0xFF0B0F18)) },
+            )
+        }
     }
 }
 
@@ -474,10 +485,17 @@ private fun PlayMark(back: Color, mark: Color) {
 internal val YOUTUBE = listOf("com.google.android.youtube.tv", "com.amazon.firetv.youtube", "com.google.android.youtube")
 internal val JUSTWATCH = listOf("com.justwatch.justwatch")
 
+internal fun isFireTv(ctx: Context): Boolean = ctx.packageManager.hasSystemFeature("amazon.hardware.fire_tv")
+
+/** True when one of [packages] can be launched here. */
+internal fun installed(ctx: Context, packages: List<String>): Boolean = packages.any { launchIntent(ctx, it) != null }
+
+private fun launchIntent(ctx: Context, pkg: String): Intent? =
+    runCatching { ctx.packageManager.getLeanbackLaunchIntentForPackage(pkg) ?: ctx.packageManager.getLaunchIntentForPackage(pkg) }.getOrNull()
+
 /** Opens the first of [packages] installed, else [web] in the browser; says so when the TV can do neither. */
 internal fun openApp(ctx: Context, name: String, packages: List<String>, web: String) {
-    val pm = ctx.packageManager
-    val app = packages.firstNotNullOfOrNull { runCatching { pm.getLeanbackLaunchIntentForPackage(it) ?: pm.getLaunchIntentForPackage(it) }.getOrNull() }
+    val app = packages.firstNotNullOfOrNull { launchIntent(ctx, it) }
     val intent = (app ?: Intent(Intent.ACTION_VIEW, Uri.parse(web))).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     try {
         ctx.startActivity(intent)

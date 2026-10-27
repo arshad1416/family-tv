@@ -36,8 +36,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
@@ -123,6 +125,15 @@ class SeriesNav {
     var movie by mutableStateOf<Pair<MovieGroup, Set<Pair<String, String>>>?>(null)
 }
 
+/** True once something is this page's entry point, checking every [REFOCUS_STEP_MS] for up to a second. */
+private suspend fun PageEntry.composedSoon(): Boolean {
+    repeat(REFOCUS_TRIES) { delay(REFOCUS_STEP_MS); if (attached > 0) return true }
+    return false
+}
+
+private const val REFOCUS_STEP_MS = 50L
+private const val REFOCUS_TRIES = 20
+
 /** The [SeriesNav] a poster sits under, so a movie poster can open its details page there. */
 val LocalSeriesNav = staticCompositionLocalOf<SeriesNav?> { null }
 
@@ -134,6 +145,9 @@ fun rememberSeriesNav() = remember { SeriesNav() }
 fun SeriesNav.Host(vm: MainViewModel, profile: Profile, content: @Composable () -> Unit) {
     val entry = pageEntry()
     val visible = categories(profile, Kind.SERIES)
+    // The page under keeps its saved state (a grid's scroll) while a show or film is open, so Back can
+    // land on a poster in row 4 or 5 of Top rated, not on the first one (Oct 27).
+    val under = rememberSaveableStateHolder()
     val o = open
     val m = movie
     if (o != null) {
@@ -143,13 +157,15 @@ fun SeriesNav.Host(vm: MainViewModel, profile: Profile, content: @Composable () 
         GlassDarkPage()
         MoviePage(profile, m.first, m.second) { back = m.first.key; refocus = true; movie = null }
     } else {
-        CompositionLocalProvider(LocalSeriesNav provides this) { content() }
+        under.SaveableStateProvider("under") { CompositionLocalProvider(LocalSeriesNav provides this) { content() } }
         LaunchedEffect(Unit) {
             if (!refocus) return@LaunchedEffect
             refocus = false
-            delay(80)
-            // The poster may not be composed any more (its row scrolled away); fall back to the page's entry.
-            if (entry.attached == 0) { back = null; delay(80) }
+            // The page comes back over several frames on a slow box (Back from a film landed on the Home tab, Oct 27):
+            // wait for the poster. It may not be composed at all (its row scrolled away); then the page's entry.
+            if (!entry.composedSoon()) { back = null; entry.composedSoon() }
+            // A frame for it to be placed before it can take focus.
+            withFrameNanos { }
             entry.focus()
             back = null
         }

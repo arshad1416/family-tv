@@ -182,7 +182,7 @@ fun PackageSorterPanel(profile: Profile?) {
     Panel {
         Text("Arrange your package", fontSize = 20.sp, fontWeight = FontWeight.Bold)
         Text(
-            (if (touch) "Open the link" else "Scan the QR code with your phone, or type the link") +
+            (if (touch) "Open the link" else "Scan the QR code with your phone") +
                 " to choose and order the channels on your line. Then press Reload channels.",
             fontSize = 14.sp, color = Tv.Muted,
         )
@@ -191,12 +191,17 @@ fun PackageSorterPanel(profile: Profile?) {
                 if (links.size > 1) Text(name, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                 val qr = remember(url) { qrImage(url, 300) }
                 Image(qr, contentDescription = "QR code for the package sorter", modifier = Modifier.size(if (touch) 160.dp else 200.dp))
-                Text(url, fontSize = 12.sp, color = Tv.Muted, maxLines = 4, overflow = TextOverflow.Ellipsis)
+                // The link carries the line's private token: only the site shows, the QR holds the rest.
+                Text(sorterSite(url), fontSize = 12.sp, color = Tv.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 if (touch) TvButton("Open the sorter", { openLink(ctx, url) })
             }
         }
     }
 }
+
+/** A sorter link as shown on screen: its site only ("sorter.example.com/…"), never the token in its path or query. */
+internal fun sorterSite(url: String): String =
+    runCatching { java.net.URI(url.trim()).host }.getOrNull()?.takeIf { it.isNotBlank() }?.let { "$it/…" } ?: "Link in the QR code"
 
 private fun openLink(ctx: Context, url: String) {
     try {

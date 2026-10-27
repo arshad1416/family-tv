@@ -22,6 +22,8 @@ android {
         // CI passes -PversionCode/-PversionName for each published build.
         versionCode = (project.findProperty("versionCode") as String?)?.toInt() ?: 1
         versionName = (project.findProperty("versionName") as String?) ?: "0.1.0"
+        // -PtestCopy builds app.familytv.test, which installs beside the real app on a TV for measuring.
+        if (project.hasProperty("testCopy")) applicationIdSuffix = ".test"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 

@@ -23,6 +23,7 @@ import app.familytv.sync.PlaybackStatus
 import app.familytv.sync.SyncWorker
 import app.familytv.sync.TvLock
 import app.familytv.trailer.MediaExtras
+import app.familytv.trailer.MostVoted
 import app.familytv.trakt.Trakt
 import app.familytv.usage.Usage
 import app.familytv.user.Favourites
@@ -39,12 +40,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
+import java.io.File
 import java.util.concurrent.TimeUnit
 
 class FamilyTvApp : Application(), ImageLoaderFactory {
     val db by lazy { AppDb.create(this) }
     val portal by lazy { PortalClient(this) }
-    val catalog by lazy { Catalog(db) }
+    val catalog by lazy { Catalog(db, getSharedPreferences("catalog", MODE_PRIVATE)) }
     val diagnoser by lazy { Diagnoser(this, db, portal) }
     val commands by lazy { CommandRunner(this) }
     /** Favourites, resume points and watched marks; kept apart from the catalog so reloads never touch them. */
@@ -65,6 +67,8 @@ class FamilyTvApp : Application(), ImageLoaderFactory {
     val lastChannels by lazy { LastChannels(this) }
     val liveScores by lazy { LiveScores(portal) }
     val viewers by lazy { Viewers(this) }
+    /** TMDB's most-voted films and shows, for the order of search results. */
+    val mostVoted by lazy { MostVoted(File(filesDir, "most_voted.json")) }
     /** The parental PIN was entered (Settings or Adult Content): adult content opens without it until the app restarts. */
     val adultUnlocked = MutableStateFlow(false)
 

@@ -18,8 +18,8 @@ class SplashTest {
 
     @Test
     fun theNookOnlyOnTheAirbnbProfile() {
-        assertEquals(R.raw.the_nook_splash_fall, Splash.video(Splash.NOOK, 10))
-        assertEquals(R.raw.family_tv_splash_fall, Splash.video(null, 10))
+        assertEquals(R.raw.the_nook_splash_halloween, Splash.video(Splash.NOOK, 10))
+        assertEquals(R.raw.family_tv_splash_fall, Splash.video(null, 11))
         assertEquals(R.raw.family_tv_splash_winter, Splash.video("something-else", 1))
         assertEquals(R.raw.the_nook_splash_summer, Splash.video(Splash.NOOK, 7))
     }
@@ -31,9 +31,9 @@ class SplashTest {
         assertEquals(Splash.Choice(Season.FALL, nook = true), Splash.choice(Splash.NOOK, 11))
         // The Rive file's "season" input counts 0 spring to 3 winter, then 4 Halloween.
         assertEquals(listOf(0, 1, 2, 3, 4), listOf(Season.SPRING, Season.SUMMER, Season.FALL, Season.WINTER, Season.HALLOWEEN).map { it.ordinal })
-        // No Halloween video: October's stand-in is fall's.
-        assertEquals(R.raw.the_nook_splash_fall, Splash.choice(Splash.NOOK, 10).video)
-        assertEquals(R.raw.family_tv_splash_fall, Splash.choice(null, 10).video)
+        // October plays the Halloween video too.
+        assertEquals(R.raw.the_nook_splash_halloween, Splash.choice(Splash.NOOK, 10).video)
+        assertEquals(R.raw.family_tv_splash_halloween, Splash.choice(null, 10).video)
         // Its stand-in video is the one the month and profile would have played.
         assertEquals(R.raw.the_nook_splash_summer, Splash.choice(Splash.NOOK, 7).video)
         assertEquals(R.raw.family_tv_splash_spring, Splash.choice(null, 4).video)

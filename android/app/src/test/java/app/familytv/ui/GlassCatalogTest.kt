@@ -32,16 +32,15 @@ class GlassCatalogTest {
         assertTrue(LanguageGroup.English.matches("ENGLISH SERIES"))
         assertTrue(LanguageGroup.Hindi.matches("IN - BOLLYWOOD"))
         assertTrue(LanguageGroup.Hindi.matches("INDIA MOVIES"))
-        assertTrue(LanguageGroup.Pakistani.matches("PK - DRAMA"))
-        assertTrue(LanguageGroup.Pakistani.matches("PAKISTAN DRAMAS"))
-        assertTrue(LanguageGroup.Persian.matches("PERSIAN MOVIES"))
-        assertTrue(LanguageGroup.Philippines.matches("PH - TAGALOG"))
-        assertTrue(LanguageGroup.Quebec.matches("QC - FILMS"))
+        assertTrue(LanguageGroup.French.matches("FR - FILMS"))
+        assertTrue(LanguageGroup.Bengali.matches("BN - NATOK"))
+        assertTrue(LanguageGroup.Bengali.matches("BD - MOVIES"))
+        assertTrue(LanguageGroup.Bengali.matches("BANGLADESH DRAMA"))
+        assertTrue(LanguageGroup.Japanese.matches("JP - ANIME"))
         assertFalse(LanguageGroup.English.matches("NETFLIX ENGLISH"))
         assertFalse(LanguageGroup.Hindi.matches("INDEPENDENT FILMS"))
-        // Places are regions, with place names; languages are languages.
-        assertEquals(listOf("Pakistan", "Philippines", "Québec", "Africa", "Asia"), LanguageGroup.entries.filter { it.region }.map { it.label })
-        assertFalse(LanguageGroup.Hindi.region)
+        // Only these five, in this order: the rest stay under "Show all categories".
+        assertEquals(listOf("English", "French", "Bengali", "Hindi", "Japanese"), LanguageGroup.entries.map { it.label })
     }
 
     @Test

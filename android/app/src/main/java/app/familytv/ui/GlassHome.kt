@@ -36,11 +36,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableFloatState
 import androidx.compose.runtime.MutableIntState
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -51,6 +53,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.FocusDirection
@@ -66,11 +69,13 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -104,6 +109,12 @@ internal class GlassShell(
     val barHidden: MutableState<Boolean>,
     /** How many pages that keep the dark look (Settings, the guide, a film or show) are open. */
     val darkPages: MutableIntState,
+    /** The Home carousel's slide, drawn full-bleed behind the top bar while Home's carousel is on screen. */
+    val backdrop: MutableState<Slide?>,
+    /** True while the screensaver shows. */
+    val saver: MutableState<Boolean>,
+    /** The Home carousel's height in pixels as last laid out (0 before), so the backdrop's shade lines up with the first row. */
+    val slot: MutableFloatState = mutableFloatStateOf(0f),
 )
 
 internal val LocalGlassShell = staticCompositionLocalOf<GlassShell?> { null }
@@ -123,8 +134,8 @@ internal fun GlassBarHidden() {
 }
 
 /**
- * Keeps the dark look while this is composed: Settings, the TV guide and the film and show pages
- * are still drawn for it. Does nothing off the TV's glass home.
+ * Keeps the dark look while this is composed: the TV guide and the film and show pages are still
+ * drawn for it (Settings is read from the page shown). Does nothing off the TV's glass home.
  */
 @Composable
 internal fun GlassDarkPage() {
@@ -183,12 +194,12 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
     LaunchedEffect(Unit) { delay(50); focusBar() }
     LaunchedEffect(settings) { if (!settings && barFocused) { delay(50); focusBar() } }
 
-    val shell = remember { GlassShell(queries, glow, barHidden, darkPages) }
+    // The screensaver (backlog item 16): after Settings' minutes without a key (5 unless changed), unless a preview is playing.
+    val saverState = remember { mutableStateOf(false) }
+    var saver by saverState
+    val shell = remember { GlassShell(queries, glow, barHidden, darkPages, mutableStateOf(null), saverState) }
     val shown by animateColorAsState(glow.value, tween(500), label = "glow")
     val lightness = rememberLightness(appearance, weather.forecast)
-    // Kids get the bright look.
-    val t = if (darkPages.intValue > 0) 0f else if (profile.kidsOnly) 1f else lightness
-    val palette = remember(t) { GlassPalette.lerp(GlassPalette.Dark, GlassPalette.Light, t) }
     LaunchedEffect(backHome) {
         if (backHome == 0) return@LaunchedEffect
         // Once Home's rows are back on screen.
@@ -217,12 +228,20 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
     val ctx = LocalContext.current
     val wipe = remember { if (still) null else RiveTransition.create(ctx) }
     var onPage by remember { mutableStateOf(tab to settings) }
+    // Kids get the bright look. Settings keeps the dark look from the frame its page is up to the frame it goes, read
+    // here rather than counted by [GlassDarkPage], whose count lands a frame late: opening it flashed the bar light for a
+    // frame, and Back left it dark for one (round 14).
+    val t = if (onPage.second || darkPages.intValue > 0) 0f else if (profile.kidsOnly) 1f else lightness
+    val palette = remember(t) { GlassPalette.lerp(GlassPalette.Dark, GlassPalette.Light, t) }
     val pageKey = if (settings) "settings" else tab.name
     val fade = remember { Animatable(1f) }
     val rise = with(LocalDensity.current) { 10.dp.toPx() }
     var firstPage by remember { mutableStateOf(true) }
     LaunchedEffect(pageKey) {
-        val w = wipe?.takeIf { !instant && !firstPage }
+        // Not to or from Home: its carousel art is full screen behind the page, and the wipe's glass panel
+        // over it read as an empty panel before the carousel (Kitchen, Oct 26). Home fades in instead.
+        val home = GlassTab.Home to false
+        val w = wipe?.takeIf { !instant && !firstPage && onPage != home && (tab to settings) != home }
         instant = false
         // While the wipe covers, its swap picks up this page too; once it reveals, a new page swaps at once.
         if (w != null && w.phase != RiveTransition.Phase.REVEALING) {
@@ -244,17 +263,27 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
         withFrameNanos { }
         focusManager.moveFocus(FocusDirection.Down)
     }
-    // The screensaver (backlog item 16): after 5 minutes without a key, unless a preview is playing.
-    // Counted in delays, not read in composition, so a key press never recomposes the home.
+    // The screensaver's idle time is counted in delays, not read in composition, so a key press never recomposes the home.
     val idle = remember { IdleCount() }
-    var saver by remember { mutableStateOf(false) }
+    // The screen stays on while the home is in front, so the TV's own screensaver (Fire OS starts one
+    // at 5 minutes) doesn't beat ours; after SAVER_HOLD_MS of ours, or with ours Off, the TV's own
+    // screensaver and sleep take over as usual.
+    val view = LocalView.current
+    DisposableEffect(view) { onDispose { view.keepScreenOn = false } }
     LaunchedEffect(Unit) {
         while (true) {
+            val after = prefs.saverMinutes.value * 60_000L
+            view.keepScreenOn = after > 0 && idle.ms < after + SAVER_HOLD_MS
             delay(IDLE_STEP_MS)
             idle.ms += IDLE_STEP_MS
-            if (!saver && idle.ms >= SCREENSAVER_IDLE_MS && !LivePreview.anyActive) saver = true
+            if (!saver && after > 0 && idle.ms >= after && !LivePreview.anyActive) saver = true
         }
     }
+    val backdropCovers = remember { mutableStateOf(false) }
+    // How much of Home's art is up behind the top bar now (0 to 1), set by the backdrop as it draws it.
+    val backdropUnder = remember { mutableFloatStateOf(0f) }
+    // Where the page starts under the top bar: the carousel's shade under the first row is measured from it.
+    val pageTop = remember { mutableFloatStateOf(0f) }
     CompositionLocalProvider(
         LocalGlass provides true,
         LocalReducedMotion provides still,
@@ -266,7 +295,7 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
         LocalContentColor provides palette.text,
         LocalPress provides pressHost,
     ) {
-        GlassBackground(shown) {
+        GlassBackground(shown, hidden = backdropCovers) {
           // Any key resets the idle count; while the screensaver shows, the key that wakes it (down and up) goes no further.
           Box(
             Modifier.fillMaxSize().onPreviewKeyEvent { e ->
@@ -283,30 +312,44 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
                 }
             },
           ) {
+            val (shownTab, shownSettings) = onPage
+            val backdropOn = shownTab == GlassTab.Home && !shownSettings && !barHidden.value && darkPages.intValue == 0
+            // Unless the page is in the dark look, the bar's ink flips with Home's art, so the art cuts in and out with it (round 13).
+            HomeBackdrop(
+                shell.backdrop, show = backdropOn, covers = backdropCovers, pageTop = pageTop, slot = shell.slot,
+                cut = palette.text != GlassPalette.Dark.text, under = backdropUnder,
+            )
             // Inside the TV's overscan safe zone (48 dp across, 27 dp at the top and bottom).
             Column(Modifier.fillMaxSize().padding(start = 48.dp, end = 48.dp, top = 27.dp, bottom = 18.dp).onFocusChanged { anyFocused = it.hasFocus }) {
-                if (!barHidden.value) {
-                    GlassTopBar(
-                        tab, settings, tabFocus, settingsFocus,
-                        query = queries.getValue(tab).takeIf { !settings },
-                        onTab = { tab = it; settings = false },
-                        onSettings = { settings = true },
-                        onFocused = { barFocused = it },
-                        appearance = appearance,
-                        onAppearance = prefs::setAppearance,
-                        viewer = viewer?.name ?: "Who's watching?",
-                        onViewers = { picking = true }.takeIf { hasViewers },
-                    )
-                    Spacer(Modifier.height(16.gx))
+                // Over the carousel's art the bar and the weather hint keep light text in either look, on the art's dark shades:
+                // by the art as drawn this frame, not by the tab, so the ink and what's behind it change together.
+                // One provider either way, so the bar (and its focus) stays put when the tab changes.
+                val barPalette = barPalette(backdropUnder.floatValue, palette)
+                // Hidden on a page with its own header, the bar stays composed, measured but never placed (so never drawn
+                // or focused): its Rive tab icons are made once, not thrown away and made again for every film or show
+                // page (a Rive view's surface release crashed the Fire Stick, Oct 27).
+                Box(if (barHidden.value) Modifier.layout { m, c -> m.measure(c); layout(0, 0) {} } else Modifier) {
+                    CompositionLocalProvider(LocalGlassPalette provides barPalette, LocalContentColor provides barPalette.text) {
+                        GlassTopBar(
+                            tab, settings, tabFocus, settingsFocus,
+                            query = queries.getValue(tab).takeIf { !settings },
+                            onTab = { tab = it; settings = false },
+                            onSettings = { settings = true },
+                            onFocused = { barFocused = it },
+                            appearance = appearance,
+                            onAppearance = prefs::setAppearance,
+                            viewer = viewer?.name ?: "Who's watching?",
+                            onViewers = { picking = true }.takeIf { hasViewers },
+                        )
+                    }
                 }
-                val (shownTab, shownSettings) = onPage
-                Box(Modifier.weight(1f).fillMaxWidth()) {
+                if (!barHidden.value) Spacer(Modifier.height(16.gx))
+                Box(Modifier.weight(1f).fillMaxWidth().onPlaced { pageTop.floatValue = it.positionInRoot().y }) {
                     Box(Modifier.fillMaxSize().focusRequester(pageFocus).restoresFocus(entry).graphicsLayer { alpha = fade.value; translationY = (1f - fade.value) * rise }) {
                         pages.SaveableStateProvider(if (shownSettings) "settings" else shownTab.name) {
                             if (shownSettings) {
                                 TrackScreen(Usage.Screen.SETTINGS)
                                 GlassGlow(Color(0xFF7A8BA8))
-                                GlassDarkPage()
                                 SettingsScreen(vm, config)
                             } else {
                                 TrackScreen(shownTab.usage)
@@ -327,7 +370,9 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
                 // Its own strip under the page, so it never covers the bottom row; the strip stays while the panel is open.
                 if (!settings && !barHidden.value && darkPages.intValue == 0) {
                     Box(Modifier.fillMaxWidth().height(30.gx), contentAlignment = Alignment.BottomCenter) {
-                        if (!panel) WeatherHint({ panel = true })
+                        CompositionLocalProvider(LocalGlassPalette provides barPalette, LocalContentColor provides barPalette.text) {
+                            if (!panel) WeatherHint({ panel = true })
+                        }
                     }
                 }
             }
@@ -357,6 +402,9 @@ private class IdleCount {
 }
 
 private const val IDLE_STEP_MS = 15_000L
+
+/** How long our screensaver keeps the screen on before the TV may sleep. */
+private const val SAVER_HOLD_MS = 2 * 3_600_000L
 
 /**
  * The title with the clock, YouTube and JustWatch (Movies and TV Shows), the Appearance switch and
@@ -404,24 +452,30 @@ private fun GlassTopBar(
             val spots = remember { mutableStateMapOf<GlassTab, Pair<Float, Float>>() }
             var focusedTab by remember { mutableStateOf<GlassTab?>(null) }
             val glide = rememberTabGlide(spots[tab].takeIf { !settings }, focusedTab?.let { spots[it] }, chosenFocused = focusedTab == tab && !settings)
-            // Each tab's Rive icon (its artboard is named after the label) plays its move on focus and a squash on OK; text only where Rive
-            // can't run or the system asks for less motion.
+            // Each tab's Rive icon (its artboard is named after the label) plays its move on focus and a squash on OK. Where Rive
+            // can't run (TVs) or the system asks for less motion, the same art is drawn still, with the same glow and dot.
             val ctx = LocalContext.current
-            val icons = remember { RiveArt.ready(ctx) } && !LocalReducedMotion.current
+            val reduced = LocalReducedMotion.current
+            val rive = remember { RiveArt.ready(ctx) } && !reduced
             val light = LocalGlassPalette.current.text.luminance() < 0.5f
             val presses = remember { mutableStateMapOf<GlassTab, Int>() }
-            Row(Modifier.drawBehind(glide), horizontalArrangement = Arrangement.spacedBy(8.gx), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.onPlaced { glide.row = it }.drawBehind(glide.draw), horizontalArrangement = Arrangement.spacedBy(8.gx), verticalAlignment = Alignment.CenterVertically) {
                 GlassTab.entries.forEach { t ->
                     val chosen = t == tab && !settings
                     GlassPill(
                         t.label, { presses[t] = (presses[t] ?: 0) + 1; onTab(t) },
                         Modifier.focusRequester(tabFocus.getValue(t)).onPlaced { spots[t] = it.positionInParent().x to it.size.width.toFloat() }
                             .onFocusChanged { if (it.isFocused) focusedTab = t else if (focusedTab == t) focusedTab = null },
-                        selected = chosen, slid = true,
-                        icon = if (!icons) null else { focused ->
-                            // The art has room around the icon for its glow, so it overhangs the icon's box.
+                        selected = chosen, slid = true, glide = glide,
+                        icon = { focused ->
+                            // The art has room around the icon for its glow, so it overhangs the icon's box. Its ink changes
+                            // once the gliding pill is clear of it, under a tint in the label's ink.
                             Box(Modifier.size(22.gx), contentAlignment = Alignment.Center) {
-                                RiveTabIcon(t.label, focused, chosen, light, presses[t] ?: 0, Modifier.requiredSize(36.gx))
+                                GlideIcon(glide, chosen, light, if (focused) Glass.Text else Glass.Dim, Glass.OnSelected) { selected, m ->
+                                    val art = Modifier.requiredSize(36.gx).then(m)
+                                    if (rive) RiveTabIcon(t.label, focused, selected, light, presses[t] ?: 0, art)
+                                    else StillTabIcon(t.label, focused, selected, light, reduced, art)
+                                }
                             }
                         },
                     )
@@ -439,6 +493,9 @@ private fun GlassTopBar(
         }
     }
 }
+
+/** The top bar's look over Home's art up by [artUnder] (0 to 1) on a page in [page]: the dark look once the art is mostly up. */
+internal fun barPalette(artUnder: Float, page: GlassPalette): GlassPalette = if (artUnder >= 0.5f) GlassPalette.Dark else page
 
 /** "Exit Family TV?" over the dimmed home: Stay (focused) or Exit. Back again stays; focus can't wander off it. */
 @Composable

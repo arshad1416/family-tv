@@ -105,4 +105,10 @@ class CategoryOrderTest {
         assertEquals(0, dropIndex(2, -900f, 100f, 4))
         assertEquals(-1, dropIndex(-1, 0f, 100f, 4))
     }
+
+    @Test
+    fun theSorterLinkShowsOnlyItsSite() {
+        assertEquals("sorter.example.com/…", sorterSite("https://sorter.example.com/edit/abc123secret?t=xyz"))
+        assertEquals("Link in the QR code", sorterSite("not a link"))
+    }
 }

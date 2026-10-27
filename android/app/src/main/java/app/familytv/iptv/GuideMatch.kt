@@ -37,14 +37,65 @@ object GuideMatch {
      */
     fun link(c: Channel, index: Index, pin: String?): Link? {
         if (pin != null) return if (pin in index.ids) Link(pin, How.PIN) else null
-        val id = c.epgId?.removePrefix(EXTRA_PREFIX)?.trim()?.takeIf { it.isNotEmpty() }
+        // A regional station whose id is another city's ("Global News Peterborough" on BC 1's) goes by its name alone.
+        val id = c.epgId?.removePrefix(EXTRA_PREFIX)?.trim()?.takeIf { it.isNotEmpty() && !ownIdIsAnotherStation(c) }
         if (id != null && id in index.ids) return Link(id, How.ID)
-        val country = countryOfId(id) ?: countryOfName(c.name) ?: c.category?.let(::countryOfName)
-        id?.let { unique(index, key(idName(it)), country) }?.let { return Link(it, How.ID_NAME) }
-        val name = key(c.name)
-        unique(index, name, country)?.let { return Link(it, How.NAME) }
-        NAME_ALIASES[name]?.let { unique(index, it, country) }?.let { return Link(it, How.NAME) }
+        val idCountry = countryOfId(id)
+        val nameCountry = countryOfName(c.name) ?: c.category?.let(::countryOfName)
+        // A provider's id sometimes carries the wrong country ("CTV.Edmonton.us"): the name's country is the fallback.
+        val idCountries = listOfNotNull(idCountry ?: nameCountry, nameCountry).distinct().ifEmpty { listOf(null) }
+        val nameCountries = listOfNotNull(nameCountry ?: idCountry, idCountry).distinct().ifEmpty { listOf(null) }
+        id?.let { i -> idCountries.firstNotNullOfOrNull { unique(index, key(idName(i)), it) } }?.let { return Link(it, How.ID_NAME) }
+        for (k in nameKeys(c.name)) nameCountries.firstNotNullOfOrNull { unique(index, k, it) }?.let { return Link(it, How.NAME) }
         return null
+    }
+
+    /**
+     * True when [c] is a regional station ("Global News Regina", "CTV Edmonton") whose own guide id
+     * names somewhere else: providers often point every Global or CTV feed at one city's schedule.
+     * Such a channel shows its name-matched extra guide even when the provider's schedule looks full.
+     */
+    fun ownIdIsElsewhere(c: Channel): Boolean = elsewhere(c) { _, _ -> true }
+
+    /**
+     * True when [c]'s own guide id is the same network's station in another place ("Global News
+     * National" or "Global News Peterborough" on "GlobalBC1.ca", BC 1's): that schedule is never
+     * shown, nor linked to by id; the channel takes its name-matched extra guide, or none. A
+     * network-wide id ("CBC.ca" for CBC Toronto) is not another station.
+     */
+    fun ownIdIsAnotherStation(c: Channel): Boolean =
+        elsewhere(c) { network, own -> own.startsWith(network) && own.removePrefix(network).removePrefix("news").length >= 2 }
+
+    private inline fun elsewhere(c: Channel, idIs: (network: String, own: String) -> Boolean): Boolean {
+        val id = c.epgId?.takeUnless { it.startsWith(EXTRA_PREFIX) }?.trim()?.takeIf { it.isNotEmpty() } ?: return false
+        val own = key(idName(id))
+        for (k in nameKeys(c.name)) {
+            val network = NETWORKS.firstOrNull { k.startsWith(it) } ?: continue
+            val place = k.removePrefix(network).removePrefix("news")
+            // "CTV News Channel" and "CBC News Network" are national channels, not places.
+            if (place.length < 3 || place in NOT_PLACES) continue
+            return place !in own && idIs(network, own)
+        }
+        return false
+    }
+
+    /**
+     * The keys a provider's channel name goes by, best first: the name, then without a call sign in
+     * brackets ("CTV Edmonton (CFRN)"), then the call sign itself, then how the guides name regional
+     * news feeds ("Global News Calgary" is "Global Calgary", "CTV News Montreal" is CFCF; "Global
+     * News Kingston" is CKWS).
+     */
+    internal fun nameKeys(name: String): List<String> {
+        val full = key(name)
+        val signs = ALIAS.findAll(name).map { it.groupValues[1] }.filter { CALL_SIGN.matches(it) }.map(::key).toList()
+        val bare = key(name.replace(ALIAS, " "))
+        val base = listOf(full, bare).distinct()
+        // "Global News Calgary" is "Global Calgary", "CTV News Edmonton" is "CTV Edmonton"; not "CTV News Channel".
+        val regional = base.flatMap { k ->
+            NETWORKS.mapNotNull { n -> k.removePrefix(n + "news").takeIf { k.startsWith(n + "news") && it.length >= 2 && it != "channel" && it != "network" }?.let { n + it } }
+        }
+        val renamed = (base + regional).mapNotNull { REGIONAL[it] }
+        return (base + signs + regional + renamed).distinct()
     }
 
     /** The one channel under [k] (copies that differ only by HD/SD count as one), or null. */
@@ -155,10 +206,19 @@ object GuideMatch {
     private val ALIAS = Regex("""\(([A-Z0-9][A-Z0-9-]{2,7})\)""")
     private val SUFFIX = Regex("""\.([a-zA-Z]{2})\d*$""")
     private val PREFIX = Regex("""^\s*(?:\[[^\]]{1,10}]|\([^)]{1,10}\)|[\p{L}\d]{1,8}(?:\s+\p{L}{2,3})?\s*[|:]|24/7)\s*""")
-    /** Provider names the guides spell another way, by key: "Global News BC" is the guide's "Global BC". */
-    private val NAME_ALIASES = mapOf(
-        "globalnewsbc" to "globalbc",
-        "globalnewstoronto" to "globaltoronto",
+    /** Networks whose feeds are regional stations: "Global News Regina" is Global plus a place. */
+    private val NETWORKS = listOf("citytv", "global", "ctv", "cbc")
+    private val NOT_PLACES = setOf("channel", "network")
+    /** A call sign or short code worth matching on its own: "CFRN", "CFCF-DT", "CP24". Not "EVENT". */
+    private val CALL_SIGN = Regex("""C[A-Z]{3}(-[A-Z]{2})?|[A-Z]{2,3}\d{1,3}""")
+    /** Regional stations the guides list under another name, by key (after "Global News X" became "Global X"). */
+    private val REGIONAL = mapOf(
+        "globalhalifax" to "globalmaritimes",
+        "globalkingston" to "ckws",
+        "globalpeterborough" to "chex",
+        "globalwinnipeg" to "globalmanitoba",
+        "globalvancouver" to "globalbc",
+        "ctvmontreal" to "cfcf",
     )
     private val PLACEHOLDER = Regex("""(?i)no (programme |program |epg )?(information|info|data)|to be announced|tba|tbd|no epg|off air|n/?a""")
     private val COUNTRIES = mapOf(

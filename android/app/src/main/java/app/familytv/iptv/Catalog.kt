@@ -1,5 +1,6 @@
 package app.familytv.iptv
 
+import android.content.SharedPreferences
 import android.os.SystemClock
 import android.util.Xml
 import app.familytv.core.Http
@@ -16,8 +17,11 @@ import app.familytv.perf.Perf
 import app.familytv.portal.Profile
 import app.familytv.portal.Source
 import app.familytv.sync.PlaybackStatus
+import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import okhttp3.Request
@@ -28,11 +32,43 @@ import java.util.Locale
 import java.util.zip.GZIPInputStream
 
 /**
+ * Whether lists or guides are loading now, and how long it has been quiet since: the carousel only
+ * times its fades on an idle box ([app.familytv.ui.SlideFade]), never against a load.
+ */
+object CatalogWork {
+    private val running = java.util.concurrent.atomic.AtomicInteger()
+    @Volatile private var quietSince = SystemClock.elapsedRealtime()
+
+    /** How many loads have started in this run, to tell one overlapped a measurement. */
+    @Volatile var started = 0
+        private set
+
+    private val listLoads = MutableStateFlow(0)
+
+    /** Counts the list loads finished in this run (done or not), so a search made during one runs again after it. */
+    val listsLoaded: StateFlow<Int> = listLoads
+
+    internal fun listsDone() { listLoads.value++ }
+
+    /** Milliseconds since the last load ended, or -1 while one runs. */
+    fun quietFor(): Long = if (running.get() > 0) -1 else SystemClock.elapsedRealtime() - quietSince
+
+    suspend fun <T> during(work: suspend () -> T): T {
+        running.incrementAndGet(); started++
+        try {
+            return work()
+        } finally {
+            if (running.decrementAndGet() == 0) quietSince = SystemClock.elapsedRealtime()
+        }
+    }
+}
+
+/**
  * Keeps the local catalog (channels, movies, series, guide) in step with the profile's sources.
  * Lists are streamed straight from the network into SQLite in batches, so memory stays flat
  * no matter how big the provider's lists are.
  */
-class Catalog(private val db: AppDb) {
+class Catalog(private val db: AppDb, private val marks: SharedPreferences? = null) {
     private val dao = db.catalog()
 
     /** [fraction] is 0..1 across the whole refresh; [detail] is a live count such as "12,400 channels". */
@@ -60,7 +96,23 @@ class Catalog(private val db: AppDb) {
             report(Progress(step, ((done + weight * within) / sources.coerceAtLeast(1)).coerceIn(0f, 1f), detail))
     }
 
-    suspend fun refresh(profile: Profile, onProgress: (Progress) -> Unit = {}) = withContext(Dispatchers.IO) {
+    /**
+     * False from the start of a refresh until it finishes, extra guides and all: a refresh cut off
+     * (the app closed during the first load) leaves lists without their extra guides, and the next
+     * start loads them again. False on a TV that hasn't recorded one yet, and after an update that
+     * changes how lists are stored or matched ([FORMAT]): an update over an existing install keeps
+     * its lists, which only pick up new search text and guide links when they are loaded again.
+     */
+    val complete: Boolean get() = marks?.let { it.getBoolean(COMPLETE, false) && it.getInt(FORMAT_KEY, 0) == FORMAT } ?: true
+
+    suspend fun refresh(profile: Profile, onProgress: (Progress) -> Unit = {}) = try {
+        CatalogWork.during { refreshNow(profile, onProgress) }
+    } finally {
+        CatalogWork.listsDone()
+    }
+
+    private suspend fun refreshNow(profile: Profile, onProgress: (Progress) -> Unit) = withContext(Dispatchers.IO) {
+        marks?.edit()?.putBoolean(COMPLETE, false)?.apply()
         dao.dropSourcesExcept(profile.sources.map { it.id }.ifEmpty { listOf("") })
         dao.dropOrphanChannels(); dao.dropOrphanMovies(); dao.dropOrphanSeries(); dao.dropOrphanCategories()
         val errors = mutableListOf<String>()
@@ -86,6 +138,7 @@ class Catalog(private val db: AppDb) {
         val now = System.currentTimeMillis()
         dao.pruneProgrammes(before = now - 2 * HOUR, after = now + GUIDE_HOURS * HOUR)
         if (errors.isNotEmpty() && errors.size == profile.sources.size) throw IOException(errors.joinToString("; "))
+        marks?.edit()?.putBoolean(COMPLETE, true)?.putInt(FORMAT_KEY, FORMAT)?.apply()
     }
 
     /**
@@ -234,6 +287,14 @@ class Catalog(private val db: AppDb) {
         }
     }
 
+    /** Network names whose guide links are logged (tag GuideMatch): names and guide ids only, never a URL. */
+    private val TRACED = Regex("""(?i)\b(global|ctv)\b""")
+
+    private fun trace(c: ChannelEntity, linked: String, why: String) =
+        android.util.Log.i("GuideMatch", "${c.name.take(60)} -> provider epgId ${c.epgId ?: "none"} -> linked $linked ($why)")
+
+    private fun pct(f: Float) = "${(f * 100).roundToInt()}%"
+
     private fun entity(p: XmltvProgramme, epgId: String) = ProgrammeEntity(
         epgId = epgId, start = p.start, stop = p.stop, title = p.title, description = p.description,
         subTitle = p.subTitle, season = p.season, episode = p.episode,
@@ -316,16 +377,30 @@ class Catalog(private val db: AppDb) {
         var switched = 0
         for ((i, c) in channels.withIndex()) {
             val ownId = own[i]
-            val cover = ownId?.let { GuideMatch.coverage(next[it].orEmpty(), c.name, now, day) } ?: 0f
+            // A regional station the provider points at another station's schedule never shows that one:
+            // its own extra schedule, or none ("Global News National" showed "Now: BC 1 News").
+            val another = GuideMatch.ownIdIsAnotherStation(provider[i])
+            val cover = if (another) 0f else ownId?.let { GuideMatch.coverage(next[it].orEmpty(), c.name, now, day) } ?: 0f
             val link = links[i]
             if (cover < GuideMatch.GOOD_COVERAGE) thin++
+            val traced = TRACED.containsMatchIn(c.name)
             if (link == null) {
+                if (another) dao.setChannelGuide(c.sourceId, c.streamId, null)
+                if (traced) trace(c, "none", if (another) "another station's id, guide cleared" else "own cover ${pct(cover)}")
                 val cat = cats[c.sourceId to c.categoryId]?.lowercase()
                 if (cover < GuideMatch.GOOD_COVERAGE && cat !in hidden) unmatched += (order[cat] ?: Int.MAX_VALUE) to c.name.take(60)
                 continue
             }
             val extraId = GuideMatch.EXTRA_PREFIX + link.guideId
-            if (cover >= GuideMatch.GOOD_COVERAGE) {
+            val extraCover = GuideMatch.coverage(next[extraId].orEmpty(), c.name, now, day)
+            if (another && extraCover == 0f) {
+                dao.setChannelGuide(c.sourceId, c.streamId, null)
+                if (traced) trace(c, link.guideId, "${link.how}, another station's id, extra guide empty, guide cleared")
+                continue
+            }
+            // A regional station the provider points at another city's schedule takes its own.
+            val elsewhere = link.how == GuideMatch.How.NAME && extraCover >= GuideMatch.GOOD_COVERAGE && GuideMatch.ownIdIsElsewhere(provider[i])
+            if (cover >= GuideMatch.GOOD_COVERAGE && !elsewhere) {
                 if (ownId != null && filled.add(ownId)) {
                     val changed = GuideMatch.fill(
                         dao.programmeRows(ownId, now - 2 * HOUR, now + GUIDE_HOURS * HOUR),
@@ -333,10 +408,14 @@ class Catalog(private val db: AppDb) {
                     )
                     if (changed.isNotEmpty()) dao.updateProgrammes(changed)
                 }
-            } else if (GuideMatch.coverage(next[extraId].orEmpty(), c.name, now, day) > cover) {
+            } else if (elsewhere || extraCover > cover) {
                 dao.setChannelGuide(c.sourceId, c.streamId, extraId)
                 used += extraId
                 switched++
+            }
+            if (traced) {
+                val kept = cover >= GuideMatch.GOOD_COVERAGE && !elsewhere
+                trace(c, link.guideId, "${link.how}, ${if (kept) "provider's kept" else if (elsewhere || extraCover > cover) "switched" else "provider's kept (thin)"}, own ${pct(cover)}, extra ${pct(extraCover)}${if (another) ", another station's id" else ""}")
             }
         }
         linked.map { GuideMatch.EXTRA_PREFIX + it.guideId }.distinct().filter { it !in used }.chunked(500).forEach { dao.deleteProgrammes(it) }
@@ -418,6 +497,16 @@ class Catalog(private val db: AppDb) {
         const val HOUR = 3_600_000L
         const val GUIDE_HOURS = 48L
         const val MAX_EXTRA_GUIDES = 4
+        private const val COMPLETE = "complete"
+        private const val FORMAT_KEY = "format"
+
+        /**
+         * How lists are stored and matched: raise it with any change to search text or guide
+         * matching, so TVs updated over an existing install load their lists again once.
+         * 2: search on clean titles and guide links for regional stations (Oct 26).
+         * 3: no guide from another station's id (Global National, Peterborough on BC 1's) (Oct 26).
+         */
+        const val FORMAT = 3
         const val GUIDE_RETRY_MS = 20_000L
         /** Thin channels with no extra guide, listed for the admin (the portal keeps a few KB of status). */
         const val MAX_REPORTED = 30

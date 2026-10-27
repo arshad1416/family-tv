@@ -413,7 +413,7 @@ class GlassHomeTest {
         rule.onNode(hasText("Movies") and hasClickAction()).requestFocus()
         rule.waitForIdle()
         rule.onNodeWithText("Press any button to wake").assertDoesNotExist()
-        rule.mainClock.advanceTimeBy(SCREENSAVER_IDLE_MS + 30_000)
+        rule.mainClock.advanceTimeBy(5 * 60_000L + 30_000)
         waitFor("Press any button to wake")
         // The waking key goes no further: still on Movies, nothing opened.
         press(Key.DirectionDown)

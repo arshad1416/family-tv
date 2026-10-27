@@ -29,6 +29,8 @@ export const USAGE_WORDS = [
   "server_switch",
   // setting_change and player_menu open: the player's sleep timer
   "sleep_timer",
+  // setting_change: the TV home's screensaver (when it starts, what it shows)
+  "screensaver",
 ] as const;
 
 export const USAGE_BATCH_MAX = 500;
