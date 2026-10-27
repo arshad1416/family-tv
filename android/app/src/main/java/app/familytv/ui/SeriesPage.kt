@@ -36,6 +36,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.withFrameNanos
@@ -144,6 +145,9 @@ fun rememberSeriesNav() = remember { SeriesNav() }
 fun SeriesNav.Host(vm: MainViewModel, profile: Profile, content: @Composable () -> Unit) {
     val entry = pageEntry()
     val visible = categories(profile, Kind.SERIES)
+    // The page under keeps its saved state (a grid's scroll) while a show or film is open, so Back can
+    // land on a poster in row 4 or 5 of Top rated, not on the first one (Oct 27).
+    val under = rememberSaveableStateHolder()
     val o = open
     val m = movie
     if (o != null) {
@@ -153,7 +157,7 @@ fun SeriesNav.Host(vm: MainViewModel, profile: Profile, content: @Composable () 
         GlassDarkPage()
         MoviePage(profile, m.first, m.second) { back = m.first.key; refocus = true; movie = null }
     } else {
-        CompositionLocalProvider(LocalSeriesNav provides this) { content() }
+        under.SaveableStateProvider("under") { CompositionLocalProvider(LocalSeriesNav provides this) { content() } }
         LaunchedEffect(Unit) {
             if (!refocus) return@LaunchedEffect
             refocus = false
