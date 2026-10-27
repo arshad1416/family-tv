@@ -462,9 +462,12 @@ private fun GlassTopBar(
                             .onFocusChanged { if (it.isFocused) focusedTab = t else if (focusedTab == t) focusedTab = null },
                         selected = chosen, slid = true, glide = glide,
                         icon = if (!icons) null else { focused ->
-                            // The art has room around the icon for its glow, so it overhangs the icon's box.
+                            // The art has room around the icon for its glow, so it overhangs the icon's box. Its ink splits
+                            // at the gliding pill's edge, as the label's does.
                             Box(Modifier.size(22.gx), contentAlignment = Alignment.Center) {
-                                RiveTabIcon(t.label, focused, chosen, light, presses[t] ?: 0, Modifier.requiredSize(36.gx))
+                                GlideIcon(glide, chosen, if (focused) Glass.Text else Glass.Dim, Glass.OnSelected) { selected, m ->
+                                    RiveTabIcon(t.label, focused, selected, light, presses[t] ?: 0, Modifier.requiredSize(36.gx).then(m))
+                                }
                             }
                         },
                     )

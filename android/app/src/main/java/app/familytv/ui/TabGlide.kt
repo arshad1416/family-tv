@@ -20,7 +20,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.ClipOp
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.Path
@@ -31,6 +33,8 @@ import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onPlaced
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
 /**
@@ -126,23 +130,69 @@ internal class TabGlide {
     internal fun pillNow(): Pair<Float, Float>? = if (chosen && pill.placed) pill.span() else null
 
     private val paint = Paint()
+    private val tint = Paint()
+
+    /** The pill as drawn now, in [at]'s place (as a layout placed in the row), or none. */
+    private fun pillIn(at: LayoutCoordinates?): RoundRect? {
+        val row = row
+        val (x, w) = pillNow() ?: return null
+        if (at == null || row == null || !at.isAttached || !row.isAttached) return null
+        val a = at.localPositionOf(row, Offset(x, 0f))
+        val b = at.localPositionOf(row, Offset(x + w, row.size.height.toFloat()))
+        return RoundRect(a.x, a.y, b.x, b.y, CornerRadius((b.y - a.y) / 2))
+    }
+
+    private fun outline(pill: RoundRect): Path = path.apply { rewind(); addRoundRect(pill) }
+
+    /**
+     * Draws a tab's Rive icon placed at [at], whose own ink is [shown] (the selected ink or not): the part on the pill
+     * in [over] and the rest in [under] wherever the icon's ink is wrong for it ([iconTint]), so the icon splits at the
+     * pill's edge as the labels do. The icon is one Rive view drawn once or twice through clips, never a second view.
+     */
+    fun iconInk(scope: ContentDrawScope, at: LayoutCoordinates?, shown: Boolean, cover: Float, under: Color, over: Color) = with(scope) {
+        val pill = pillIn(at)
+        val box = Rect(Offset.Zero, size)
+        when {
+            pill == null || !Rect(pill.left, pill.top, pill.right, pill.bottom).overlaps(box) -> tinted(scope, iconTint(false, shown, cover), under)
+            pill.contains(box.topLeft) && pill.contains(box.topRight) && pill.contains(box.bottomLeft) && pill.contains(box.bottomRight) ->
+                tinted(scope, iconTint(true, shown, cover), over)
+            else -> {
+                val path = outline(pill)
+                clipPath(path, ClipOp.Difference) { tinted(scope, iconTint(false, shown, cover), under) }
+                clipPath(path) { tinted(scope, iconTint(true, shown, cover), over) }
+            }
+        }
+    }
+
+    /** The content as it is, cross-faded to it tinted all in [color] by [t] (0 none, 1 all). */
+    private fun tinted(scope: ContentDrawScope, t: Float, color: Color) = with(scope) {
+        if (t <= 0f) return@with drawContent()
+        drawIntoCanvas {
+            val bounds = Rect(Offset.Zero, size)
+            if (t < 1f) {
+                paint.alpha = 1f - t
+                it.saveLayer(bounds, paint)
+                drawContent()
+                it.restore()
+            }
+            tint.alpha = t
+            tint.colorFilter = ColorFilter.tint(color, BlendMode.SrcIn)
+            it.saveLayer(bounds, tint)
+            drawContent()
+            it.restore()
+        }
+    }
 
     /**
      * Draws a label ([inside]: its dark copy) placed at [at]: the dark copy only over the pill as drawn now,
      * the light one everywhere else, each faded with the pill while it fades in.
      */
     fun ink(scope: ContentDrawScope, at: LayoutCoordinates?, inside: Boolean) = with(scope) {
-        val row = row
-        val span = pillNow()
-        if (span == null || at == null || row == null || !at.isAttached || !row.isAttached) {
+        val path = pillIn(at)?.let(::outline)
+        if (path == null) {
             if (!inside) drawContent()
             return@with
         }
-        val (x, w) = span
-        val a = at.localPositionOf(row, Offset(x, 0f))
-        val b = at.localPositionOf(row, Offset(x + w, row.size.height.toFloat()))
-        path.rewind()
-        path.addRoundRect(RoundRect(a.x, a.y, b.x, b.y, CornerRadius((b.y - a.y) / 2)))
         val shown = pillShown.value
         if (!inside) clipPath(path, ClipOp.Difference) { this@with.drawContent() }
         // Over the pill, the dark copy shows as much as the pill does and the light one the rest.
@@ -158,6 +208,35 @@ internal class TabGlide {
             }
         }
     }
+}
+
+/**
+ * How much of a Rive tab icon's part ([inside] the pill or off it) is drawn tinted, when its own ink is [shown]: all of
+ * it where that ink is wrong for the part, else [cover], the tint still over the icon while its own ink changes.
+ */
+internal fun iconTint(inside: Boolean, shown: Boolean, cover: Float): Float = if (inside != shown) 1f else cover
+
+/**
+ * A tab's Rive icon ([icon], given the selected ink to show and the modifier for its view) split at the gliding pill's
+ * edge like its label. The icon's own ink changes over [ICON_INK_MS], so it is only told the tab is [chosen] once the
+ * pill has settled; until then, and while it changes, the tint draws the right ink over it.
+ */
+@Composable
+internal fun GlideIcon(glide: TabGlide, chosen: Boolean, under: Color, over: Color, icon: @Composable (selected: Boolean, modifier: Modifier) -> Unit) {
+    val at = remember { arrayOfNulls<LayoutCoordinates>(1) }
+    var shown by remember { mutableStateOf(chosen) }
+    val cover = remember { Animatable(0f) }
+    val chosenNow by rememberUpdatedState(chosen)
+    LaunchedEffect(glide) {
+        snapshotFlow { chosenNow.takeIf { !glide.pill.moving } }.collectLatest { now ->
+            if (now == null || now == shown) return@collectLatest
+            cover.snapTo(1f)
+            shown = now
+            delay(ICON_INK_MS)
+            cover.animateTo(0f, tween(ICON_UNTINT_MS))
+        }
+    }
+    icon(shown, Modifier.onPlaced { at[0] = it }.drawWithContent { glide.iconInk(this, at[0], shown, cover.value, under, over) })
 }
 
 /** A tab label drawn twice from [label]: [under] off the gliding pill, [over] on it, split where the pill is now. */
@@ -179,6 +258,8 @@ internal class GlideSpan {
     private var cap = 0f
     var placed by mutableStateOf(false)
         private set
+    /** Whether it is gliding now (state). */
+    val moving: Boolean get() = left.isRunning || right.isRunning
 
     /** Glides to [spot] (x and width), or [jump]s there; the first call always jumps. */
     suspend fun glide(spot: Pair<Float, Float>, jump: Boolean): Unit = coroutineScope {
@@ -215,5 +296,9 @@ private val TRAIL = spring<Float>(dampingRatio = 0.85f, stiffness = 380f)
 private const val GLIDE_STRETCH = 1.15f
 /** How much a focused tab grows (its pill's scale). */
 private const val TAB_GROW = 1.06f
+/** How long a Rive tab icon takes to change its own ink for "selected" (nav-icons spec: 180 ms), with a frame or two spare. */
+private const val ICON_INK_MS = 220L
+/** Then the tint over it fades, showing the icon's own selected glow and dot. */
+private const val ICON_UNTINT_MS = 150
 /** With reduced motion: the jump's fade. */
 private const val STILL_FADE_MS = 120

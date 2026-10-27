@@ -52,6 +52,16 @@ class TabGlideTest {
     }
 
     @Test
+    fun rivePartsWithTheWrongInkAreTintedAll() {
+        // The icon still shows the old tab's ink while the pill glides: on the pill it needs the dark ink.
+        assertEquals(1f, iconTint(inside = true, shown = false, cover = 0f))
+        assertEquals(1f, iconTint(inside = false, shown = true, cover = 0f))
+        // Its own ink is right there: as it is, unless it is still changing under the tint.
+        assertEquals(0f, iconTint(inside = true, shown = true, cover = 0f))
+        assertEquals(0.4f, iconTint(inside = false, shown = false, cover = 0.4f))
+    }
+
+    @Test
     fun noPillOnSettings() {
         val glide = TabGlide()
         runBlocking { glide.pill.glide(200f to 120f, jump = true) }
