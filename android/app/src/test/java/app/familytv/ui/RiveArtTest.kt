@@ -1,14 +1,17 @@
 package app.familytv.ui
 
 import android.app.Application
+import android.content.pm.PackageManager
 import androidx.test.core.app.ApplicationProvider
 import app.familytv.R
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 
 /** The Rive files ship in the app, and where Rive's library can't load the drawn switch, the videos, the spinner and plain page swaps stand in. */
@@ -31,5 +34,13 @@ class RiveArtTest {
         assertFalse(RiveArt.ready(ctx))
         // Pages swap without the wipe then.
         assertNull(RiveTransition.create(ctx))
+    }
+
+    @Test
+    fun neverOnATv() {
+        assertTrue(RiveArt.allowed(ctx))
+        // An onn or Chromecast with Google TV (leanback), as the Fire Stick: the still tab icons, drawn switch and plain page swaps.
+        shadowOf(ctx.packageManager).setSystemFeature(PackageManager.FEATURE_LEANBACK, true)
+        assertFalse(RiveArt.allowed(ctx))
     }
 }

@@ -452,10 +452,11 @@ private fun GlassTopBar(
             val spots = remember { mutableStateMapOf<GlassTab, Pair<Float, Float>>() }
             var focusedTab by remember { mutableStateOf<GlassTab?>(null) }
             val glide = rememberTabGlide(spots[tab].takeIf { !settings }, focusedTab?.let { spots[it] }, chosenFocused = focusedTab == tab && !settings)
-            // Each tab's Rive icon (its artboard is named after the label) plays its move on focus and a squash on OK; text only where Rive
-            // can't run or the system asks for less motion.
+            // Each tab's Rive icon (its artboard is named after the label) plays its move on focus and a squash on OK. Where Rive
+            // can't run (TVs) or the system asks for less motion, the same art is drawn still, with the same glow and dot.
             val ctx = LocalContext.current
-            val icons = remember { RiveArt.ready(ctx) } && !LocalReducedMotion.current
+            val reduced = LocalReducedMotion.current
+            val rive = remember { RiveArt.ready(ctx) } && !reduced
             val light = LocalGlassPalette.current.text.luminance() < 0.5f
             val presses = remember { mutableStateMapOf<GlassTab, Int>() }
             Row(Modifier.onPlaced { glide.row = it }.drawBehind(glide.draw), horizontalArrangement = Arrangement.spacedBy(8.gx), verticalAlignment = Alignment.CenterVertically) {
@@ -466,12 +467,14 @@ private fun GlassTopBar(
                         Modifier.focusRequester(tabFocus.getValue(t)).onPlaced { spots[t] = it.positionInParent().x to it.size.width.toFloat() }
                             .onFocusChanged { if (it.isFocused) focusedTab = t else if (focusedTab == t) focusedTab = null },
                         selected = chosen, slid = true, glide = glide,
-                        icon = if (!icons) null else { focused ->
-                            // The art has room around the icon for its glow, so it overhangs the icon's box. Its ink splits
-                            // at the gliding pill's edge, as the label's does.
+                        icon = { focused ->
+                            // The art has room around the icon for its glow, so it overhangs the icon's box. Its ink changes
+                            // once the gliding pill is clear of it, under a tint in the label's ink.
                             Box(Modifier.size(22.gx), contentAlignment = Alignment.Center) {
                                 GlideIcon(glide, chosen, light, if (focused) Glass.Text else Glass.Dim, Glass.OnSelected) { selected, m ->
-                                    RiveTabIcon(t.label, focused, selected, light, presses[t] ?: 0, Modifier.requiredSize(36.gx).then(m))
+                                    val art = Modifier.requiredSize(36.gx).then(m)
+                                    if (rive) RiveTabIcon(t.label, focused, selected, light, presses[t] ?: 0, art)
+                                    else StillTabIcon(t.label, focused, selected, light, reduced, art)
                                 }
                             }
                         },
