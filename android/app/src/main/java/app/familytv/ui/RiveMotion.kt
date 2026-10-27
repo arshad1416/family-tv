@@ -45,7 +45,6 @@ import app.rive.runtime.kotlin.controllers.RiveFileController
 import app.rive.runtime.kotlin.core.Fit
 import app.rive.runtime.kotlin.core.RiveEvent
 import kotlin.math.roundToInt
-import kotlinx.coroutines.delay
 
 /** A Rive view that never takes focus, touch or a screen reader's attention, or null where Rive can't run or [raw] won't load. */
 private fun riveView(ctx: Context, raw: Int, stateMachine: String, fit: Fit): RiveAnimationView? {
@@ -144,7 +143,8 @@ internal class RiveTransition private constructor(val view: RiveAnimationView) {
 /**
  * A tab's Rive icon (family_tv_nav_icons.riv, artboard [artboard], state machine "Icon"): it plays
  * its own move once on focus, a squash on each new [presses], and follows [selected] and [light]
- * for its ink. Still when idle: paused once its move is over.
+ * for its ink. Never paused or played again from here: each input change starts it, and it stops drawing once
+ * its state machine settles. Paused and played again, the onn's surface came back blank for a frame (round 15).
  */
 @Composable
 internal fun RiveTabIcon(artboard: String, focused: Boolean, selected: Boolean, light: Boolean, presses: Int, modifier: Modifier = Modifier) {
@@ -167,14 +167,11 @@ internal fun RiveTabIcon(artboard: String, focused: Boolean, selected: Boolean, 
     LaunchedEffect(view, focused, selected, light, presses) {
         val v = view ?: return@LaunchedEffect
         runCatching {
-            v.play(ICON, isStateMachine = true)
             v.setBooleanState(ICON, "light", light)
             v.setBooleanState(ICON, "selected", selected)
             v.setBooleanState(ICON, "focused", focused)
             if (presses != fired[0]) { fired[0] = presses; v.fireState(ICON, "press") }
         }
-        delay(ICON_SETTLE_MS)
-        runCatching { v.pause() }
     }
 }
 
@@ -275,8 +272,6 @@ internal fun PressRipple(host: PressHost, modifier: Modifier = Modifier) {
 }
 
 private const val ICON = "Icon"
-/** An icon's focus move takes about 0.7 s and its press 0.18 s. */
-private const val ICON_SETTLE_MS = 900L
 /** The ripple's 250 ms. */
 private const val PRESS_MS = 250
 private const val TRANSITION = "Transition"
