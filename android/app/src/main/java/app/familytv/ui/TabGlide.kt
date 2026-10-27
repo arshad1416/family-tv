@@ -9,10 +9,24 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.ClipOp
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Paint
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.ContentDrawScope
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onPlaced
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 
@@ -23,17 +37,20 @@ import kotlinx.coroutines.launch
  * so the pill stretches a little toward the next tab (at most [GLIDE_STRETCH]) and settles; a new
  * tab mid-glide takes over from where the pill is. The bubble fades in where focus enters the row
  * and out where it leaves. With reduced motion both jump and fade in over [STILL_FADE_MS] instead.
- * [chosenFocused]: the bubble is on the white chosen pill, so it draws no face over it.
+ * [chosenFocused]: the bubble is on the white chosen pill, so it draws no face over it. Each tab's label
+ * ([GlideInk]) takes its dark ink from where the pill is drawn in that frame, so a label is never white
+ * on the white pill or dark on the bar while it glides, or while it fades in with reduced motion.
  */
 @Composable
-internal fun rememberTabGlide(chosen: Pair<Float, Float>?, focused: Pair<Float, Float>?, chosenFocused: Boolean): DrawScope.() -> Unit {
+internal fun rememberTabGlide(chosen: Pair<Float, Float>?, focused: Pair<Float, Float>?, chosenFocused: Boolean): TabGlide {
     val still = LocalReducedMotion.current
     val look = BubbleLook.current
     val selected = Glass.Selected
     val accent = LocalGlassShell.current?.glow
-    val pill = remember { GlideSpan() }
+    val glide = remember { TabGlide() }
+    val pill = glide.pill
     val bubble = remember { GlideSpan() }
-    val pillShown = remember { Animatable(1f) }
+    val pillShown = glide.pillShown
     val lit = remember { Animatable(0f) }
     val chosenNow by rememberUpdatedState(chosen)
     val focusedNow by rememberUpdatedState(focused)
@@ -69,7 +86,8 @@ internal fun rememberTabGlide(chosen: Pair<Float, Float>?, focused: Pair<Float, 
             }
         }
     }
-    return {
+    glide.chosen = chosen != null
+    glide.draw = {
         val h = size.height
         if (chosen != null && pill.placed) {
             val (x, w) = pill.span()
@@ -84,10 +102,64 @@ internal fun rememberTabGlide(chosen: Pair<Float, Float>?, focused: Pair<Float, 
             drawPillBubble(Offset(x - dx, -dy), Size(w + 2 * dx, h + 2 * dy), look, accent?.value ?: Tv.Accent, a, face = !chosenFocused)
         }
     }
+    return glide
+}
+
+/** The tab row's glide: [draw] goes behind the row, placed at [row]; its labels take their ink from it ([GlideInk]). */
+internal class TabGlide {
+    internal val pill = GlideSpan()
+    internal val pillShown = Animatable(1f)
+    internal var chosen = false
+    var draw: DrawScope.() -> Unit = {}
+    /** Where the tab row is, which the pill's spans are in. */
+    var row: LayoutCoordinates? = null
+    private val path = Path()
+    private val paint = Paint()
+
+    /**
+     * Draws a label ([inside]: its dark copy) placed at [at]: the dark copy only over the pill as drawn now,
+     * the light one everywhere else, each faded with the pill while it fades in.
+     */
+    fun ink(scope: ContentDrawScope, at: LayoutCoordinates?, inside: Boolean) = with(scope) {
+        val row = row
+        if (!chosen || !pill.placed || at == null || row == null || !at.isAttached || !row.isAttached) {
+            if (!inside) drawContent()
+            return@with
+        }
+        val (x, w) = pill.span()
+        val a = at.localPositionOf(row, Offset(x, 0f))
+        val b = at.localPositionOf(row, Offset(x + w, row.size.height.toFloat()))
+        path.rewind()
+        path.addRoundRect(RoundRect(a.x, a.y, b.x, b.y, CornerRadius((b.y - a.y) / 2)))
+        val shown = pillShown.value
+        if (!inside) clipPath(path, ClipOp.Difference) { this@with.drawContent() }
+        // Over the pill, the dark copy shows as much as the pill does and the light one the rest.
+        val over = if (inside) shown else 1f - shown
+        if (over <= 0f) return@with
+        clipPath(path) {
+            if (over >= 1f) this@with.drawContent()
+            else drawIntoCanvas {
+                paint.alpha = over
+                it.saveLayer(Rect(Offset.Zero, size), paint)
+                this@with.drawContent()
+                it.restore()
+            }
+        }
+    }
+}
+
+/** A tab label drawn twice from [label]: [under] off the gliding pill, [over] on it, split where the pill is now. */
+@Composable
+internal fun GlideInk(glide: TabGlide, under: Color, over: Color, label: @Composable (color: Color, modifier: Modifier) -> Unit) {
+    val at = remember { arrayOfNulls<LayoutCoordinates>(1) }
+    Box(Modifier.onPlaced { at[0] = it }) {
+        label(under, Modifier.drawWithContent { glide.ink(this, at[0], inside = false) })
+        label(over, Modifier.drawWithContent { glide.ink(this, at[0], inside = true) })
+    }
 }
 
 /** A span (a pill's left and right edges) that glides to each new place on two springs. */
-private class GlideSpan {
+internal class GlideSpan {
     private val left = Animatable(0f)
     private val right = Animatable(0f)
     private var rightward = true

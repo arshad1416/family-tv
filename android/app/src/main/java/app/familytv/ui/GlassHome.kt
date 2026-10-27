@@ -453,14 +453,14 @@ private fun GlassTopBar(
             val icons = remember { RiveArt.ready(ctx) } && !LocalReducedMotion.current
             val light = LocalGlassPalette.current.text.luminance() < 0.5f
             val presses = remember { mutableStateMapOf<GlassTab, Int>() }
-            Row(Modifier.drawBehind(glide), horizontalArrangement = Arrangement.spacedBy(8.gx), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.onPlaced { glide.row = it }.drawBehind(glide.draw), horizontalArrangement = Arrangement.spacedBy(8.gx), verticalAlignment = Alignment.CenterVertically) {
                 GlassTab.entries.forEach { t ->
                     val chosen = t == tab && !settings
                     GlassPill(
                         t.label, { presses[t] = (presses[t] ?: 0) + 1; onTab(t) },
                         Modifier.focusRequester(tabFocus.getValue(t)).onPlaced { spots[t] = it.positionInParent().x to it.size.width.toFloat() }
                             .onFocusChanged { if (it.isFocused) focusedTab = t else if (focusedTab == t) focusedTab = null },
-                        selected = chosen, slid = true,
+                        selected = chosen, slid = true, glide = glide,
                         icon = if (!icons) null else { focused ->
                             // The art has room around the icon for its glow, so it overhangs the icon's box.
                             Box(Modifier.size(22.gx), contentAlignment = Alignment.Center) {

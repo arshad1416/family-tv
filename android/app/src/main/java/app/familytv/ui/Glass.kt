@@ -274,6 +274,7 @@ internal fun GlassPill(
     icon: (@Composable (focused: Boolean) -> Unit)? = null,
     onFocus: () -> Unit = {},
     slid: Boolean = false,
+    glide: TabGlide? = null,
 ) {
     // Backlog item 8: the chosen one is the filled pill, without a ring; focus raises the glass bubble.
     // [slid]: the row draws the chosen pill and the focus bubble behind its pills, gliding between them
@@ -289,11 +290,15 @@ internal fun GlassPill(
         Row(Modifier.padding(horizontal = padH, vertical = padV), verticalAlignment = Alignment.CenterVertically) {
             icon?.let { it(focused); Spacer(Modifier.width(10.gx)) }
             // Labels never wrap: one line, centred in the pill.
-            Text(
-                text, fontSize = fontSize, maxLines = 1, softWrap = false, textAlign = TextAlign.Center,
-                fontWeight = if (selected || focused) FontWeight.SemiBold else FontWeight.Medium,
-                color = when { selected -> Glass.OnSelected; focused -> Glass.Text; else -> Glass.Dim },
-            )
+            val label = @Composable { color: Color, m: Modifier ->
+                Text(
+                    text, m, fontSize = fontSize, maxLines = 1, softWrap = false, textAlign = TextAlign.Center,
+                    fontWeight = if (selected || focused) FontWeight.SemiBold else FontWeight.Medium, color = color,
+                )
+            }
+            // On a gliding tab row the dark ink follows the pill, not [selected].
+            if (glide != null) GlideInk(glide, if (focused) Glass.Text else Glass.Dim, Glass.OnSelected, label)
+            else label(when { selected -> Glass.OnSelected; focused -> Glass.Text; else -> Glass.Dim }, Modifier)
         }
     }
 }
