@@ -73,6 +73,11 @@
             android:screenOrientation="landscape"
             android:launchMode="singleTop" />
 
+        <activity
+            android:name=".trailer.TrailerActivity"
+            android:exported="false"
+            android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|screenLayout|smallestScreenSize" />
+
         <receiver android:name=".update.InstallReceiver" android:exported="false" />
 
         <service

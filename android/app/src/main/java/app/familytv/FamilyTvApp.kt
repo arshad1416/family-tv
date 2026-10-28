@@ -79,10 +79,6 @@ class FamilyTvApp : Application(), ImageLoaderFactory {
     val visible: Boolean get() = started > 0
     @Volatile private var started = 0
 
-    /** Counts each time one of our screens comes back into view, so a delayed step can tell the viewer returned. */
-    @Volatile var visits = 0
-        private set
-
     override fun onCreate() {
         super.onCreate()
         Perf.init(this)
@@ -92,7 +88,7 @@ class FamilyTvApp : Application(), ImageLoaderFactory {
         ServerSwitch.init(this)
         TvLock.init(this)
         registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
-            override fun onActivityStarted(a: Activity) { started++; visits++ }
+            override fun onActivityStarted(a: Activity) { started++ }
             override fun onActivityStopped(a: Activity) {
                 // Leaving the app (or Exit): send the usage stats now, the next check-in may be a while.
                 if (--started == 0) scope.launch { Usage.send(portal) }
