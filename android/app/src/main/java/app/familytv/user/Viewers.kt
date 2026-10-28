@@ -50,6 +50,20 @@ class Viewers(private val prefs: SharedPreferences) {
         return v
     }
 
+    /**
+     * Viewers brought over from the Rust app on this TV, with their favourites ([app.familytv.transfer.Transfer]), and
+     * the one watching there. Only onto a TV with no viewers of its own yet.
+     */
+    fun restore(viewers: List<Pair<Viewer, List<FavouriteEntity>>>, current: String?) {
+        if (viewers.isEmpty() || all().isNotEmpty()) return
+        val list = viewers.distinctBy { it.first.id }.take(MAX)
+        edit {
+            putString(LIST, gson.toJson(list.map { it.first }))
+            list.forEach { (v, favs) -> putString(FAVS + v.id, gson.toJson(favs.take(MAX_FAVOURITES))) }
+            if (current != null && list.any { it.first.id == current }) putString(CURRENT, current)
+        }
+    }
+
     /** Removes [viewer] with their favourites and titles; when they were watching, nobody is picked. */
     fun remove(viewer: Viewer) = edit {
         putString(LIST, gson.toJson(all().filter { it.id != viewer.id }))

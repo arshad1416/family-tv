@@ -1,7 +1,11 @@
 package app.familytv.portal
 
+import com.google.gson.JsonElement
+
 data class RegisterRequest(val manufacturer: String, val model: String, val sdk: Int, val appVersion: String)
 data class RegisterResponse(val deviceId: String, val deviceToken: String, val pairCode: String, val pairExpires: Long)
+/** A claimed move from the Rust app: this TV's device row, its new token, and the Rust app's settings ([app.familytv.transfer.Transfer.Local]). */
+data class TransferClaim(val deviceId: String, val deviceToken: String, val local: JsonElement? = null)
 
 data class Source(
     val id: String,

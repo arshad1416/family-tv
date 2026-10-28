@@ -64,6 +64,17 @@ object ServerSwitch {
         PlaybackStatus.serverSwitch = lastSwitch()
     }
 
+    /** The servers the Rust app on this TV had moved to, by their place in each source's list ([app.familytv.transfer.Transfer]). */
+    fun restore(profile: Profile, picks: Map<String, Int>) {
+        val p = prefs ?: return
+        p.edit().apply {
+            for (s in profile.sources) {
+                val i = picks[s.id]?.takeIf { it > 0 } ?: continue
+                s.serverUrls?.getOrNull(i)?.let { putString(s.id, it.trimEnd('/')) }
+            }
+        }.apply()
+    }
+
     /** The server this TV moved [s] to, while the profile still lists it. */
     fun chosen(s: Source): String? =
         prefs?.getString(s.id, null)?.takeIf { c -> s.serverUrls.orEmpty().any { it.trimEnd('/') == c } }

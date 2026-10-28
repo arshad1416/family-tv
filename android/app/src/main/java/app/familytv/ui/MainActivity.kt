@@ -1,6 +1,7 @@
 package app.familytv.ui
 
 import android.annotation.SuppressLint
+import android.content.Intent
 import android.content.res.Configuration
 import android.os.Bundle
 import android.view.KeyEvent
@@ -58,6 +59,7 @@ import app.familytv.perf.Perf
 import app.familytv.start.OpenOnStart
 import app.familytv.sync.CommandRunner
 import app.familytv.sync.TvLock
+import app.familytv.transfer.Transfer
 import kotlinx.coroutines.launch
 import java.util.Calendar
 
@@ -101,6 +103,7 @@ class MainActivity : ComponentActivity() {
         Perf.activityCreated()
         Perf.watchFrames(this)
         if (savedInstanceState == null) splash = Splash.choice(app.portal.cachedConfig?.profile?.splash, Calendar.getInstance().get(Calendar.MONTH) + 1)
+        if (savedInstanceState == null) takeTransfer(intent)
         lifecycleScope.launch {
             app.commands.events.collect { e ->
                 if (e is CommandRunner.UiEvent.Message) message = e.text
@@ -161,6 +164,18 @@ class MainActivity : ComponentActivity() {
               }
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        takeTransfer(intent)
+    }
+
+    /** A move code from the Rust app ([Transfer]), read once. */
+    private fun takeTransfer(intent: Intent?) {
+        val code = intent?.getStringExtra(Transfer.EXTRA) ?: return
+        intent.removeExtra(Transfer.EXTRA)
+        vm.transfer(code)
     }
 
     override fun onStart() {

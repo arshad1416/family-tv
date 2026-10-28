@@ -1,6 +1,7 @@
 package app.familytv.ui
 
 import android.app.Application
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import app.familytv.app
@@ -15,6 +16,7 @@ import app.familytv.portal.PortalException
 import app.familytv.portal.Profile
 import app.familytv.sync.PlaybackStatus
 import app.familytv.trailer.Tmdb
+import app.familytv.transfer.Transfer
 import app.familytv.update.Updater
 import app.familytv.usage.Usage
 import kotlinx.coroutines.CancellationException
@@ -59,7 +61,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun stop() { loop?.cancel() }
 
+    /** Opened by the Rust app with a move code ([Transfer]): claimed on the next boot, at once if pairing shows now. */
+    fun transfer(code: String?) {
+        if (!Transfer.offer(code)) return
+        if (loop?.isActive == true && _screen.value is Screen.Pairing) { stop(); start() }
+    }
+
+    /** Claims a waiting move code on a TV that isn't set up yet; the pairing screen shows as usual if it fails. */
+    private suspend fun claimTransfer() {
+        val code = Transfer.take() ?: return
+        if (app.portal.cachedConfig != null) return
+        runCatching { app.portal.claimTransfer(code) }
+            .onSuccess { Transfer.claimed = Transfer.parse(it) ?: Transfer.Local() }
+            .onFailure { Log.w("Transfer", "move from the Rust app failed: ${(it as? PortalException)?.code ?: it.javaClass.simpleName}") }
+    }
+
     private suspend fun boot() {
+        claimTransfer()
         val config = try {
             app.portal.config()
         } catch (e: Exception) {
@@ -76,6 +94,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         val profile = config.profile ?: return
+        Transfer.claimed?.let { local ->
+            Transfer.claimed = null
+            runCatching { Transfer.apply(app, local, profile) }
+        }
         val firstLoad = app.db.catalog().channelCount() == 0
         if (firstLoad) {
             _screen.value = Screen.Syncing("Loading channels")

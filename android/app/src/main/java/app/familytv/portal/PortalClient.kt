@@ -11,6 +11,7 @@ import app.familytv.usage.Usage
 import app.familytv.user.SharedProgressPage
 import app.familytv.user.SharedProgressRow
 import com.google.gson.Gson
+import com.google.gson.JsonElement
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -51,6 +52,17 @@ class PortalClient(context: Context, private val baseUrl: String = BuildConfig.P
             auth = false,
         )
         prefs.edit().putString("deviceId", r.deviceId).putString("token", r.deviceToken).apply()
+    }
+
+    /**
+     * Takes over the device row the Rust app on this TV handed over with [code] ([app.familytv.transfer.Transfer]),
+     * dropping any registration of this app's own; returns the settings the Rust app sent, if any.
+     */
+    suspend fun claimTransfer(code: String): JsonElement? = registerLock.withLock {
+        val req = Request.Builder().url("$baseUrl/api/device/transfer-claim").post(gson.toJson(mapOf("code" to code)).toRequestBody(jsonType))
+        val r = call(req, TransferClaim::class.java, auth = token != null)
+        prefs.edit().clear().putString("deviceId", r.deviceId).putString("token", r.deviceToken).apply()
+        r.local
     }
 
     /** Forget this device (portal removed it); the next call registers again and shows a new code. */
