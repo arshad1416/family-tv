@@ -22,6 +22,12 @@ class SharedProgress(private val app: FamilyTvApp, private val portal: PortalCli
     private val dao get() = app.userDb.user()
     private val lock = Mutex()
     private var pending: Job? = null
+    /**
+     * Rows pulled from the portal, by key with their time, which the push leaves out. Kept until this TV's push mark
+     * passes their time: a row from a TV whose clock runs ahead stays newer than the mark, and went back on every
+     * round (round 22).
+     */
+    private val pulled = HashMap<String, Long>()
 
     /** Syncs shortly, folding a burst of changes (a season marked, a pause then stop) into one round. */
     fun soon(delayMs: Long = 3_000) {
@@ -48,6 +54,8 @@ class SharedProgress(private val app: FamilyTvApp, private val portal: PortalCli
 
     suspend fun sync() = lock.withLock {
         val at = System.currentTimeMillis()
+        pulled.clear()
+        prefs.getStringSet(PULLED, null).orEmpty().forEach { e -> e.split('\t').takeIf { it.size == 2 }?.let { (k, t) -> t.toLongOrNull()?.let { pulled[k] = it } } }
         val pushed = try {
             if (pull()) push() else null
         } catch (e: Exception) {
@@ -69,7 +77,8 @@ class SharedProgress(private val app: FamilyTvApp, private val portal: PortalCli
             }
             if (page.profile != prefs.getString(PROFILE, null)) {
                 // A new profile (or the first sync): start over, and give it everything on this TV.
-                prefs.edit().putString(PROFILE, page.profile).putLong(SEQ, 0).putLong(PUSHED, 0).apply()
+                prefs.edit().putString(PROFILE, page.profile).putLong(SEQ, 0).putLong(PUSHED, 0).remove(PULLED).apply()
+                pulled.clear()
                 if (since != 0L) { since = 0; continue }
             }
             val rows = page.rows.orEmpty()
@@ -77,6 +86,7 @@ class SharedProgress(private val app: FamilyTvApp, private val portal: PortalCli
                 val local = dao.progressFor(rows.map { it.key }).associateBy { it.key }
                 val changed = rows.mapNotNull { merge(local[it.key], it.toEntity()) }
                 if (changed.isNotEmpty()) dao.upsertProgressRows(changed)
+                changed.forEach { pulled[it.key] = it.updatedAt }
             }
             since = page.seq
             prefs.edit().putLong(SEQ, since).apply()
@@ -86,14 +96,15 @@ class SharedProgress(private val app: FamilyTvApp, private val portal: PortalCli
 
     /**
      * Sends the rows changed since the last push, oldest first, a chunk at a time; each chunk that lands moves the
-     * mark on, so one that fails doesn't send everything before it again. Returns how many rows went.
+     * mark on, so one that fails doesn't send everything before it again. Rows pulled from the portal, unchanged since, aren't
+     * sent back. Returns how many rows went.
      */
     private suspend fun push(): Int {
         val start = System.currentTimeMillis()
         val since = prefs.getLong(PUSHED, 0)
         val resend = prefs.getStringSet(RESEND, null).orEmpty().toList()
         val rows = (dao.progressChangedSince(since) + resend.chunked(500).flatMap { dao.progressFor(it) })
-            .distinctBy { it.key }.sortedBy { it.updatedAt }
+            .distinctBy { it.key }.filter { pulled[it.key] != it.updatedAt }.sortedBy { it.updatedAt }
         var sent = 0
         rows.chunked(PUSH_MAX).forEach { chunk ->
             portal.progressPush(chunk.map(SharedProgressRow::of))
@@ -102,7 +113,8 @@ class SharedProgress(private val app: FamilyTvApp, private val portal: PortalCli
             prefs.edit().putLong(PUSHED, maxOf(since, minOf(start, chunk.last().updatedAt))).apply()
         }
         synchronized(prefs) {
-            prefs.edit().putLong(PUSHED, start).putStringSet(RESEND, prefs.getStringSet(RESEND, null).orEmpty() - resend.toSet()).apply()
+            prefs.edit().putLong(PUSHED, start).putStringSet(RESEND, prefs.getStringSet(RESEND, null).orEmpty() - resend.toSet())
+                .putStringSet(PULLED, pulled.filterValues { it >= start }.mapTo(HashSet()) { (k, t) -> "$k\t$t" }).apply()
         }
         return sent
     }
@@ -112,6 +124,7 @@ class SharedProgress(private val app: FamilyTvApp, private val portal: PortalCli
         private const val SEQ = "seq"
         private const val PUSHED = "pushed"
         private const val RESEND = "resend"
+        private const val PULLED = "pulled"
         /** Rows per push: well inside the portal's 500, so a backlog never makes one request too heavy for it. */
         private const val PUSH_MAX = 100
 

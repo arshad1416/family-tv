@@ -68,12 +68,15 @@ fun rememberFavourites(): List<FavouriteEntity> {
 fun rememberFavouriteKeys(favs: List<FavouriteEntity> = rememberFavourites()): Set<String> =
     remember(favs) { favs.mapTo(HashSet()) { Favourites.key(it.kind, it.sourceId, it.itemId) } }
 
-/** Resume points and watched marks, by [app.familytv.user.ProgressKey]. */
+/** Resume points and watched marks, by [app.familytv.user.ProgressKey]; a film's marks show on all its copies ([withSiblings]). */
 @Composable
 fun rememberProgress(): Map<String, ProgressEntity> {
     val ctx = LocalContext.current
     val rows by remember { ctx.app.userDb.user().progress() }.collectKept("progress", emptyList())
-    return remember(rows) { rows.associateBy { it.key } }
+    val movies = remember(rows) { rows.filter { it.kind == ProgressKey.MOVIE }.mapTo(HashSet()) { it.key } }
+    var siblings by remember { mutableStateOf(emptyMap<String, List<String>>()) }
+    LaunchedEffect(movies) { siblings = ctx.app.db.movieSiblings(movies) }
+    return remember(rows, siblings) { withSiblings(rows, siblings) }
 }
 
 /** The [ProgressKey]s the picked viewer played on this TV, newest first, or null when nobody is picked. */
