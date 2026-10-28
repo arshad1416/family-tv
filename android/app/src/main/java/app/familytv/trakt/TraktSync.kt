@@ -204,7 +204,11 @@ class TraktSync(private val app: FamilyTvApp, private val trakt: Trakt) {
                     else -> null
                 }
             }
-            if (rows.isNotEmpty()) user.upsertProgressRows(rows)
+            if (rows.isNotEmpty()) {
+                user.upsertProgressRows(rows)
+                app.sharedProgress.resend(rows.map { it.key })
+                app.sharedProgress.soon()
+            }
         }
     }
 
@@ -251,7 +255,11 @@ class TraktSync(private val app: FamilyTvApp, private val trakt: Trakt) {
                 val base = e ?: fresh
                 base.copy(percent = pct, positionMs = if (base.durationMs > 0) (base.durationMs * pct / 100f).toLong() else 0, updatedAt = at)
             }
-            if (rows.isNotEmpty()) user.upsertProgressRows(rows)
+            if (rows.isNotEmpty()) {
+                user.upsertProgressRows(rows)
+                app.sharedProgress.resend(rows.map { it.key })
+                app.sharedProgress.soon()
+            }
         }
     }
 
