@@ -41,6 +41,24 @@ class UsageTest {
         )
     }
 
+    @Test fun aSearchIsLoggedOnceNotAtEveryPauseInTyping() {
+        Usage.enabled = true
+        Usage.opened(Screen.MOVIES)
+        val log = SearchLog()
+        // "b", "br", "bre", "break": typing settles after each letter on a TV keyboard.
+        listOf(40, 12, 5, 3).forEach(log::settled)
+        log.picked(0)
+        log.picked(2) // Back, and another result of the same search
+        log.settled(0) // new words, nothing found, then the search is left
+        log.ended()
+        log.ended()
+        Usage.left(Screen.MOVIES, 20)
+        assertEquals(
+            listOf("movies open", "movies search_submit 3", "movies search_pick 0", "movies search_pick 2", "movies search_empty 0", "movies leave 20"),
+            Usage.take().map { listOfNotNull(it.screen, it.action, it.value).joinToString(" ") },
+        )
+    }
+
     @Test fun sendsInBatchesAndTurningOffEmptiesTheQueue() {
         Usage.enabled = true
         repeat(Usage.BATCH + 20) { Usage.log(Screen.PLAYER, Action.ZAP_DOWN) }

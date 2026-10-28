@@ -28,6 +28,12 @@ class PerfTest {
         assertNull("the last ten browsing minutes hold too few frames", w.pct())
     }
 
+    @Test fun aSlowFrameMissedARefresh() {
+        // A frame still on time can take over one refresh while the one before it is shown: only over two is it late.
+        assertEquals(33_333_333L, Perf.slowFrameNs(60f))
+        assertEquals(40_000_000L, Perf.slowFrameNs(50f))
+    }
+
     @Test fun tooFewFramesSaysNothing() {
         val w = FrameWindow()
         repeat(FrameWindow.MIN_FRAMES - 1) { w.add(t0, isSlow = true) }

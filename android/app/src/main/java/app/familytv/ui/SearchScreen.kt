@@ -48,7 +48,7 @@ import app.familytv.data.searchChannels
 import app.familytv.data.searchMovies
 import app.familytv.data.searchSeries
 import app.familytv.portal.Profile
-import app.familytv.usage.Usage
+import app.familytv.usage.rememberSearchLog
 import app.familytv.user.Favourites
 import kotlinx.coroutines.delay
 
@@ -78,6 +78,7 @@ fun SearchScreen(vm: MainViewModel, profile: Profile) {
     val movies = keys(categories(profile, Kind.MOVIE))
     val series = keys(categories(profile, Kind.SERIES))
     val q = query.trim()
+    val log = rememberSearchLog()
     val results by produceState(Results(), q, live, movies, series) {
         delay(300) // let typing settle
         value = if (q.length < 2) Results() else {
@@ -88,7 +89,7 @@ fun SearchScreen(vm: MainViewModel, profile: Profile) {
                 m, s,
             )
         }
-        if (q.length >= 2) value.count.let { Usage.log(if (it == 0) Usage.Action.SEARCH_EMPTY else Usage.Action.SEARCH_SUBMIT, it) }
+        if (q.length >= 2) log.settled(value.count) else log.ended()
     }
     val progs = rememberProgrammes(results.channels)
     val favs = rememberFavourites()
@@ -139,7 +140,7 @@ fun SearchScreen(vm: MainViewModel, profile: Profile) {
                                 c, c.epgId?.let { progs[it] }?.firstOrNull(),
                                 favourite = Favourites.key(Kind.LIVE, c.sourceId, c.streamId) in favKeys,
                                 onFavourite = { toggleFavourite(ctx, Kind.LIVE, c.sourceId, c.streamId, c.name) },
-                            ) { Usage.log(Usage.Action.SEARCH_PICK, i); playLive(ctx, c.sourceId, c.categoryId, 0, c.streamId) }
+                            ) { log.picked(i); playLive(ctx, c.sourceId, c.categoryId, 0, c.streamId) }
                         }
                     }
                 }
@@ -158,7 +159,7 @@ fun SearchScreen(vm: MainViewModel, profile: Profile) {
                                 g.title, g.poster, entryPoint(nav.back == g.key),
                                 favourite = on,
                                 onFavourite = { toggleShowFavourite(ctx, g, on) }, onMenu = { openShowMenu(g, on) },
-                            ) { Usage.log(Usage.Action.SEARCH_PICK, i); nav.open = g }
+                            ) { log.picked(i); nav.open = g }
                         }
                     }
                 }

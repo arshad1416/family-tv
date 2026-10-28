@@ -83,8 +83,19 @@ class Catalog(private val db: AppDb, private val marks: SharedPreferences? = nul
         private var done = 0f
         private var weight = 0f
         private var step = ""
+        private var listsFrom = 0L
+        /** Time on the lists themselves, sign-in to the last series, summed over the sources: not the guides. */
+        var listsMs = 0L
+            private set
 
         fun startSource(index: Int) { done = index.toFloat(); weight = 0f }
+        fun listsBegin() { listsFrom = SystemClock.elapsedRealtime() }
+        /** The source's lists are in (its guide may follow); only the first call per source counts. */
+        fun listsDone() {
+            if (listsFrom == 0L) return
+            listsMs += SystemClock.elapsedRealtime() - listsFrom
+            listsFrom = 0L
+        }
         fun step(name: String, share: Float) {
             done += weight
             step = name; weight = share
@@ -118,9 +129,9 @@ class Catalog(private val db: AppDb, private val marks: SharedPreferences? = nul
         val errors = mutableListOf<String>()
         val extras = profile.extraGuides.orEmpty().distinct().take(MAX_EXTRA_GUIDES)
         val t = Tracker(profile.sources.size + (if (extras.isEmpty()) 0 else 1), onProgress)
-        val began = SystemClock.elapsedRealtime()
         for ((i, s) in profile.sources.withIndex()) {
             t.startSource(i)
+            t.listsBegin()
             try {
                 when (s.type) {
                     "xtream" -> refreshXtream(s, t)
@@ -128,10 +139,12 @@ class Catalog(private val db: AppDb, private val marks: SharedPreferences? = nul
                 }
             } catch (e: IOException) {
                 errors += "${s.name}: ${e.message}"
+            } finally {
+                t.listsDone()
             }
         }
-        // The lists alone (the extra guides load after); the Rust app measures the same span.
-        if (profile.sources.isNotEmpty() && errors.size < profile.sources.size) Perf.listLoaded(SystemClock.elapsedRealtime() - began)
+        // The lists alone: not the provider's guide (often the slowest download of all) or the extra guides.
+        if (profile.sources.isNotEmpty() && errors.size < profile.sources.size) Perf.listLoaded(t.listsMs)
         t.startSource(profile.sources.size)
         loadExtraGuides(profile, extras, t)
         onProgress(Progress("Finishing", 1f))
@@ -208,6 +221,7 @@ class Catalog(private val db: AppDb, private val marks: SharedPreferences? = nul
             )
         }
         dao.pruneSeries(s.id, gen)
+        t.listsDone()
 
         t.step("Loading guide", 0.2f)
         loadGuide(s.id, s.epgUrl ?: XtreamUrls.xmltv(server, user, pass), t)
@@ -251,6 +265,7 @@ class Catalog(private val db: AppDb, private val marks: SharedPreferences? = nul
         for (k in listOf(Kind.LIVE, Kind.MOVIE, Kind.SERIES)) dao.pruneCategories(s.id, k, gen)
         dao.pruneChannels(s.id, gen)
         dao.pruneMovies(s.id, gen)
+        t.listsDone()
         s.epgUrl?.let { t.step("Loading guide", 0.2f); loadGuide(s.id, it, t) }
     }
 

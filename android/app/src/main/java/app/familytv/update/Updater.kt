@@ -37,7 +37,7 @@ object Updater {
 
     fun available(latest: LatestApp?) = latest != null && latest.versionCode > BuildConfig.VERSION_CODE
 
-    /** [visible] is true when one of our screens is showing. Returns what happened, for the portal. */
+    /** [visible] is true when one of our screens is showing. Returns what happened, for the portal: null when there is nothing newer. */
     suspend fun check(context: Context, latest: LatestApp?, visible: Boolean, force: Boolean = false): String? = lock.withLock {
         // Once per run: an offer this app left unconfirmed belongs to an older run, perhaps for a
         // build that's now installed or older, and Android could show it again later.
@@ -48,7 +48,7 @@ object Updater {
         val silent = canInstallSilently(context)
         when {
             !visible && !silent -> return "waiting: needs someone at the TV"
-            visible && !force && promptedFor == latest.versionCode -> return null
+            visible && !force && promptedFor == latest.versionCode -> return "offered ${latest.versionName ?: latest.versionCode}: waiting for Install"
         }
         if (!context.packageManager.canRequestPackageInstallsCompat()) {
             if (!visible) return "waiting: install permission"

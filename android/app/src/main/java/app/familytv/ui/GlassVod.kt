@@ -87,7 +87,7 @@ import app.familytv.perf.Perf
 import app.familytv.portal.Profile
 import app.familytv.sync.PlaybackStatus
 import app.familytv.trakt.ProgressRules
-import app.familytv.usage.Usage
+import app.familytv.usage.rememberSearchLog
 import app.familytv.user.ProgressEntity
 import app.familytv.user.ProgressKey
 import coil.compose.AsyncImage
@@ -665,7 +665,8 @@ private fun CollectionPage(
             }
         }
     }
-    LaunchedEffect(q) { if (q.length >= 2) { delay(300); Usage.log(if (items.isNullOrEmpty()) Usage.Action.SEARCH_EMPTY else Usage.Action.SEARCH_SUBMIT, items?.size ?: 0) } }
+    val log = rememberSearchLog()
+    LaunchedEffect(q) { if (q.length >= 2) { delay(300); log.settled(items?.size ?: 0) } else log.ended() }
     Column {
         PageHeader(onBack, title, art, counts)
         if (views.isNotEmpty()) Row(Modifier.padding(start = FOCUS_ROOM, bottom = 10.gx), verticalAlignment = Alignment.CenterVertically) {
@@ -682,7 +683,7 @@ private fun CollectionPage(
             else -> {
                 val grid = c.grids.getOrPut(if (q.length >= 2) View.AToZ else view ?: View.AToZ) { LazyGridState() }
                 val entry = nav?.back?.let { b -> shown.firstOrNull { it.group == b }?.key }
-                PosterGrid(shown, { it.key }, entry, grid) { x, mod, _ -> VodCard(x, marks, mod, null) }
+                PosterGrid(shown, { it.key }, entry, grid) { x, mod, _ -> VodCard(x, marks, mod, null) { if (q.length >= 2) log.picked(shown.indexOf(x)) } }
             }
         }
     }
@@ -773,6 +774,7 @@ private fun VodSearch(profile: Profile, kind: String, q: String, marks: VodMarks
     // search made during a load or before the lists were read doesn't stay as it was.
     val voted by app.mostVoted.lists.collectAsState()
     val loads by CatalogWork.listsLoaded.collectAsState()
+    val log = rememberSearchLog()
     LaunchedEffect(q, keys, voted, loads) {
         val again = resultsFor == q
         // Never under a viewer already moving through the results.
@@ -794,7 +796,7 @@ private fun VodSearch(profile: Profile, kind: String, q: String, marks: VodMarks
             // Test builds: the top of the order and each title's votes on the list, to check it on the TV (titles only).
             Log.i("VodSearch", "most-voted ${popular?.size ?: "not read"}; " + results.orEmpty().take(12).joinToString { "${it.title} (${it.year ?: "-"}): ${popular?.votes(it.tmdbIds, it.title, it.year) ?: "off"}" })
         }
-        if (!again) found.size.let { Usage.log(if (it == 0) Usage.Action.SEARCH_EMPTY else Usage.Action.SEARCH_SUBMIT, it) }
+        if (!again) log.settled(found.size)
     }
     val shown = results
     when {
@@ -803,7 +805,7 @@ private fun VodSearch(profile: Profile, kind: String, q: String, marks: VodMarks
         else -> Box(Modifier.onFocusChanged { picking = it.hasFocus }) {
             key(shownSet) {
                 PosterGrid(shown, { it.key }, nav?.back?.let { b -> shown.firstOrNull { it.group == b }?.key }) { x, mod, _ ->
-                    VodCard(x, marks, mod, null) { Usage.log(Usage.Action.SEARCH_PICK, shown.indexOf(x)) }
+                    VodCard(x, marks, mod, null) { log.picked(shown.indexOf(x)) }
                 }
             }
         }

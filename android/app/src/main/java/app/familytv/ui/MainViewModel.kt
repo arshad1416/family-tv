@@ -134,7 +134,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private suspend fun offerUpdate(latest: LatestApp?) {
         runCatching { Updater.check(app, latest, visible = true) }
-            .onSuccess { it?.let { s -> PlaybackStatus.update = s } }
+            .onSuccess { PlaybackStatus.update = it }
             .onFailure { PlaybackStatus.update = "failed: ${it.message}" }
     }
 

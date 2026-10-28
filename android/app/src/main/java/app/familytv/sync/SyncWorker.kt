@@ -18,7 +18,7 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
             app.commands.runAll(config.commands, config.profile)
             runCatching { app.sharedProgress.sync() }
             runCatching { Updater.check(app, hb.latestApp ?: config.latestApp, visible = app.visible) }
-                .onSuccess { it?.let { s -> PlaybackStatus.update = s } }
+                .onSuccess { PlaybackStatus.update = it }
             val stale = System.currentTimeMillis() - (app.db.catalog().sources().minOfOrNull { it.lastRefresh } ?: 0) > 12 * 3600_000
             if (stale) config.profile?.let { app.commands.refreshCatalog(it) }
             config.profile?.let { runCatching { app.newEpisodes.checkIfDue(it) } }
