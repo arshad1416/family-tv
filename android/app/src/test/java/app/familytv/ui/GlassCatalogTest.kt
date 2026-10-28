@@ -51,7 +51,14 @@ class GlassCatalogTest {
         assertEquals(LiveGenre.Kids, LiveGenre.of("CA| KIDS"))
         assertEquals(LiveGenre.Entertainment, LiveGenre.of("CA| CANADA HD"))
         assertEquals(LiveGenre.Entertainment, LiveGenre.of("UK| GENERAL ᴴᴰ"))
-        assertEquals(LiveGenre.Other, LiveGenre.of("4K| RELAX"))
+        assertEquals(LiveGenre.Relax, LiveGenre.of("4K| RELAX ᵁᴴᴰ ³⁸⁴⁰ᴾ ☼"))
+        assertEquals(LiveGenre.Relax, LiveGenre.of("RX| RELAX 4K ☼"))
+        // A 24/7 loop list with no genre word is entertainment; a bare quality list still says nothing.
+        assertEquals(LiveGenre.Entertainment, LiveGenre.of("4K| 24/7 ᵁᴴᴰ ³⁸⁴⁰ᴾ"))
+        assertEquals(LiveGenre.Entertainment, LiveGenre.of("EXYU| BALKAN SKY 24/7 ᴿᴬᵂ"))
+        assertEquals(LiveGenre.Other, LiveGenre.of("4K| ᵁᴴᴰ ³⁸⁴⁰ᴾ"))
+        assertEquals(LiveGenre.Sports, LiveGenre.of("TS| TENNIS LIVE"))
+        assertEquals(LiveGenre.Music, LiveGenre.of("MC| RADIO LIVE"))
         assertEquals(LiveGenre.Adult, LiveGenre.of("FOR ADULTS", adult = true))
     }
 
@@ -64,6 +71,9 @@ class GlassCatalogTest {
         assertEquals("Switzerland", liveCountry("CH| SWISS"))
         assertEquals("Pakistan", liveCountry("ASIA| PAKISTAN"))
         assertEquals("India", liveCountry("ASIA| HINDI"))
+        assertEquals("Bangladesh", liveCountry("ASIA| BENGALI"))
+        assertEquals("Bangladesh", liveCountry("ASIA| 24/7 BANGAL/BANGAL"))
+        assertEquals("Balkans", liveCountry("EXYU| 24/7 ᴿᴬᵂ"))
         assertNull(liveCountry("HR| HORSE RACING"))
         assertNull(liveCountry("4K| RELAX"))
         assertEquals("Bangladesh", liveCountry("BD| BANGLA"))
@@ -72,6 +82,10 @@ class GlassCatalogTest {
         assertNull(liveCountry("VIP| EVENTS"))
         assertNull(liveCountry("NBA| LEAGUE PASS"))
         assertNull(liveCountry("EN| NEWS"))
+        assertNull(liveCountry("RX| RELAX 4K"))
+        assertNull(liveCountry("TS| TENNIS LIVE"))
+        assertNull(liveCountry("WT| WORLD CRICKET"))
+        assertNull(liveCountry("MC| RADIO LIVE"))
     }
 
     @Test

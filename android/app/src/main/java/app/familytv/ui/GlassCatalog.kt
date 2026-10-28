@@ -69,6 +69,7 @@ enum class LiveGenre(val label: String, pattern: String?) {
     Documentary("Documentary", """DOCU|DOKU|DOKUMENT|BELGESEL|ΝΤΟΚΙΜΑΝΤΕΡ|وثائقي"""),
     Music("Music", """MUSIC|MUSIQUE|MUSICA|MÚSICA|MUZIEK|MÜZİK|MUZIK|MUZYCZNE|ΜΟΥΣΙΚΗ|ANGHAMI|\bRADIO\b|موسيقى|أغاني"""),
     Religious("Religious", """ISLAM|QURAN|QUR'AN|MUSLIM|CHRISTIAN|CHRISTEM|RELIGIO|GOSPEL|CATHOLIC|GURBANI|SIKH|\bNAATS?\b|FETARE|MAJD|مسيحية|اسلامية|القران"""),
+    Relax("Relax", """RELAX"""),
     Adult("Adult", null),
     Other("Other", null),
     ;
@@ -77,19 +78,22 @@ enum class LiveGenre(val label: String, pattern: String?) {
 
     companion object {
         /** Most specific first: religious and kids lists also say "TV", news lists also say "GENERAL" now and then. */
-        private val MATCH_ORDER = listOf(Religious, Kids, News, Documentary, Music, Movies)
+        private val MATCH_ORDER = listOf(Religious, Kids, News, Documentary, Music, Movies, Relax)
+
+        /** 24/7 lists loop films and shows; one with no genre word is entertainment ("4K| 24/7 UHD"). */
+        private val LOOPS = Regex("""\b24/7\b|24-7""")
 
         /**
          * The genre of a live category named [name]. Sports uses the Sports tab's rule
          * ([Sport.isSportsCategory]); a country's own list with no genre word ("CA| CANADA HD") is
-         * that country's general channels, so Entertainment.
+         * that country's general channels, so Entertainment, as is a 24/7 loop list.
          */
         fun of(name: String, adult: Boolean = false): LiveGenre {
             if (adult) return Adult
             val n = Names.clean(name)
             MATCH_ORDER.firstOrNull { it.regex!!.containsMatchIn(n) }?.let { return it }
             if (Sport.isSportsCategory(n)) return Sports
-            if (Entertainment.regex!!.containsMatchIn(n) || liveCountry(n) != null) return Entertainment
+            if (Entertainment.regex!!.containsMatchIn(n) || LOOPS.containsMatchIn(n) || liveCountry(n) != null) return Entertainment
             return Other
         }
     }
@@ -123,13 +127,19 @@ private val CODES = mapOf(
     "ZA" to "South Africa", "GH" to "Ghana", "ET" to "Ethiopia", "SO" to "Somalia", "CN" to "China",
     "SG" to "Singapore", "TW" to "Taiwan", "KH" to "Cambodia", "UA" to "Ukraine", "LV" to "Latvia",
     "EE" to "Estonia", "SK" to "Slovakia", "BY" to "Belarus", "MD" to "Moldova", "LU" to "Luxembourg",
+    "EXYU" to "Balkans",
 )
 
 /** Prefixes before "|" that aren't countries, so an unknown code never becomes a country of its own. */
 private val NOT_COUNTRIES = setOf(
     "VIP", "PPV", "NEW", "TOP", "HD", "FHD", "UHD", "SD", "HQ", "LQ", "EPL", "NBA", "NFL", "NHL", "MLB", "UFC",
     "WWE", "MMA", "BT", "SKY", "TNT", "VOD", "XXX", "TV", "DTH", "OTT", "EPG",
+    // The provider's own groups: Relax, Tennis, World Cricket, Radio live.
+    "RX", "TS", "WT", "MC",
 )
+
+/** Bangladeshi lists in the provider's Asian bundle ("ASIA| BENGALI", "ASIA| 24/7 BANGAL"). */
+private val BANGLA = Regex("""BENGALI|BANGAL""", RegexOption.IGNORE_CASE)
 
 /** Country words a name without a code prefix may carry, and what an ambiguous code means with them. */
 private val WORDS = listOf(
@@ -143,7 +153,7 @@ private val WORDS = listOf(
  * The country of a live category named [name], or null when it gives none. Most lines start names
  * with a code ("CA| NEWS EN"); a few codes are shared ("UK| UKRAINE", "CH| CHINA", "MA| MALAYSIA",
  * "HR| HORSE RACING"), so a country word in the name wins. Asian lists ("ASIA| PAKISTAN") are India
- * unless they name another country.
+ * unless they name another country or are Bengali.
  */
 fun liveCountry(name: String): String? {
     val n = Names.clean(name)
@@ -151,7 +161,7 @@ fun liveCountry(name: String): String? {
     val code = PREFIX.find(n)?.groupValues?.get(1)?.uppercase()
     return when {
         word != null -> word
-        code == "ASIA" -> "India"
+        code == "ASIA" -> if (BANGLA.containsMatchIn(n)) "Bangladesh" else "India"
         code == "HR" && n.contains("HORSE", ignoreCase = true) -> null
         code == null -> null
         else -> CODES[code]
