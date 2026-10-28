@@ -20,10 +20,10 @@ class OpenTrailerTest {
         val intents = trailerIntents("dQw4w9WgXcQ", listOf("com.google.android.youtube.tv"))
         assertEquals(
             listOf(
-                "vnd.youtube:dQw4w9WgXcQ" to "com.google.android.youtube.tv",
                 "https://www.youtube.com/watch?v=dQw4w9WgXcQ" to "com.google.android.youtube.tv",
-                "vnd.youtube:dQw4w9WgXcQ" to null,
+                "vnd.youtube:dQw4w9WgXcQ" to "com.google.android.youtube.tv",
                 "https://www.youtube.com/watch?v=dQw4w9WgXcQ" to null,
+                "vnd.youtube:dQw4w9WgXcQ" to null,
             ),
             intents.map { it.data.toString() to it.`package` },
         )

@@ -174,7 +174,7 @@ fun openTrailer(ctx: Context, youtubeId: String) {
 
 /**
  * Opens a YouTube trailer in the first installed YouTube app (the TV one first), else any app that
- * takes vnd.youtube: or the watch link; says so when nothing can (some Fire TV devices).
+ * takes the watch link or vnd.youtube:; says so when nothing can (some Fire TV devices).
  */
 fun openInYouTube(ctx: Context, youtubeId: String) {
     val pm = ctx.packageManager
@@ -192,9 +192,12 @@ fun openInYouTube(ctx: Context, youtubeId: String) {
     Toast.makeText(ctx.applicationContext, "Trailer needs the YouTube app", Toast.LENGTH_LONG).show()
 }
 
-/** What [openTrailer] tries, best first: each of [apps] by package (app link, then watch link), then any app. */
+/**
+ * What [openInYouTube] tries, best first: each of [apps] by package, then any app; the watch link before the app link,
+ * which Google TV's YouTube opens on its home screen and Fire TV's refuses (round 22).
+ */
 internal fun trailerIntents(youtubeId: String, apps: List<String>): List<Intent> {
-    val uris = listOf(Trailers.appUri(youtubeId), Trailers.webUrl(youtubeId))
+    val uris = listOf(Trailers.webUrl(youtubeId), Trailers.appUri(youtubeId))
     return (apps.flatMap { pkg -> uris.map { it to pkg } } + uris.map { it to null }).map { (uri, pkg) ->
         Intent(Intent.ACTION_VIEW, Uri.parse(uri))
             .setPackage(pkg)
