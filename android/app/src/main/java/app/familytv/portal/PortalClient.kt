@@ -65,6 +65,15 @@ class PortalClient(context: Context, private val baseUrl: String = BuildConfig.P
         r.local
     }
 
+    /**
+     * Takes in the Rust app's [code] on a TV where this app is already paired: the portal drops the Rust app's
+     * device row (same profile only) and returns the settings it sent, if any.
+     */
+    suspend fun absorbTransfer(code: String): JsonElement? {
+        val req = Request.Builder().url("$baseUrl/api/device/transfer-absorb").post(gson.toJson(mapOf("code" to code)).toRequestBody(jsonType))
+        return call(req, TransferAbsorb::class.java, auth = true).local
+    }
+
     /** Forget this device (portal removed it); the next call registers again and shows a new code. */
     fun reset() {
         prefs.edit().clear().apply()

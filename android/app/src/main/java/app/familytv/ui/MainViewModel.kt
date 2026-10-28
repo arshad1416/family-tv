@@ -61,23 +61,42 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun stop() { loop?.cancel() }
 
-    /** Opened by the Rust app with a move code ([Transfer]): claimed on the next boot, at once if pairing shows now. */
+    /**
+     * Opened by the Rust app with a move code ([Transfer]): taken in at once on a TV that is set up, else on the
+     * next boot (at once if pairing shows now).
+     */
     fun transfer(code: String?) {
         if (!Transfer.offer(code)) return
-        if (loop?.isActive == true && _screen.value is Screen.Pairing) { stop(); start() }
+        when {
+            loop?.isActive != true -> Unit // the boot takes it
+            _screen.value is Screen.Pairing -> { stop(); start() }
+            app.portal.cachedConfig != null -> viewModelScope.launch {
+                takeTransfer()
+                app.portal.cachedConfig?.profile?.let { applyTransfer(it) }
+            }
+        }
     }
 
-    /** Claims a waiting move code on a TV that isn't set up yet; the pairing screen shows as usual if it fails. */
-    private suspend fun claimTransfer() {
+    /**
+     * Takes a waiting move code: claimed on a TV that isn't set up yet (the pairing screen shows as usual if that
+     * fails), absorbed on one that is, which removes the Rust app's registration.
+     */
+    private suspend fun takeTransfer() {
         val code = Transfer.take() ?: return
-        if (app.portal.cachedConfig != null) return
-        runCatching { app.portal.claimTransfer(code) }
-            .onSuccess { Transfer.claimed = Transfer.parse(it) ?: Transfer.Local() }
+        val paired = app.portal.cachedConfig != null
+        runCatching { if (paired) app.portal.absorbTransfer(code) else app.portal.claimTransfer(code) }
+            .onSuccess { Transfer.claimed = Transfer.Claimed(Transfer.parse(it) ?: Transfer.Local(), paired) }
             .onFailure { Log.w("Transfer", "move from the Rust app failed: ${(it as? PortalException)?.code ?: it.javaClass.simpleName}") }
     }
 
+    private suspend fun applyTransfer(profile: Profile) {
+        val claimed = Transfer.claimed ?: return
+        Transfer.claimed = null
+        runCatching { Transfer.apply(app, claimed, profile) }
+    }
+
     private suspend fun boot() {
-        claimTransfer()
+        takeTransfer()
         val config = try {
             app.portal.config()
         } catch (e: Exception) {
@@ -94,10 +113,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         val profile = config.profile ?: return
-        Transfer.claimed?.let { local ->
-            Transfer.claimed = null
-            runCatching { Transfer.apply(app, local, profile) }
-        }
+        applyTransfer(profile)
         val firstLoad = app.db.catalog().channelCount() == 0
         if (firstLoad) {
             _screen.value = Screen.Syncing("Loading channels")

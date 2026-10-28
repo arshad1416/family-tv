@@ -52,15 +52,27 @@ class Viewers(private val prefs: SharedPreferences) {
 
     /**
      * Viewers brought over from the Rust app on this TV, with their favourites ([app.familytv.transfer.Transfer]), and
-     * the one watching there. Only onto a TV with no viewers of its own yet.
+     * the one watching there. Merged in: a viewer this TV already has (the same id, or the same name) only gains the
+     * favourites they lack, others are added while there's room, and the one watching here is kept if anyone is.
      */
     fun restore(viewers: List<Pair<Viewer, List<FavouriteEntity>>>, current: String?) {
-        if (viewers.isEmpty() || all().isNotEmpty()) return
-        val list = viewers.distinctBy { it.first.id }.take(MAX)
+        if (viewers.isEmpty()) return
+        val list = all().toMutableList()
+        val favs = LinkedHashMap<String, List<FavouriteEntity>>()
+        var pick: String? = null
+        for ((v, incoming) in viewers) {
+            val into = list.firstOrNull { it.id == v.id || it.name.equals(v.name, ignoreCase = true) }
+                ?: v.takeIf { list.size < MAX }?.also { list += it }
+                ?: continue
+            val have = favs[into.id] ?: favouritesOf(into)
+            val add = incoming.filter { f -> have.none { it.kind == f.kind && it.sourceId == f.sourceId && it.itemId == f.itemId } }
+            favs[into.id] = (have + add).take(MAX_FAVOURITES)
+            if (v.id == current) pick = into.id
+        }
         edit {
-            putString(LIST, gson.toJson(list.map { it.first }))
-            list.forEach { (v, favs) -> putString(FAVS + v.id, gson.toJson(favs.take(MAX_FAVOURITES))) }
-            if (current != null && list.any { it.first.id == current }) putString(CURRENT, current)
+            putString(LIST, gson.toJson(list))
+            favs.forEach { (id, f) -> putString(FAVS + id, gson.toJson(f)) }
+            if (pick != null && current() == null) putString(CURRENT, pick)
         }
     }
 

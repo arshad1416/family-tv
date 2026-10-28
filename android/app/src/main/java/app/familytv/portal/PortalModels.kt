@@ -7,6 +7,8 @@ data class RegisterResponse(val deviceId: String, val deviceToken: String, val p
 /** A claimed move from the Rust app: this TV's device row, its new token, and the Rust app's settings ([app.familytv.transfer.Transfer.Local]). */
 data class TransferClaim(val deviceId: String, val deviceToken: String, val local: JsonElement? = null)
 
+data class TransferAbsorb(val absorbed: String? = null, val local: JsonElement? = null)
+
 data class Source(
     val id: String,
     val type: String, // "xtream" | "m3u"

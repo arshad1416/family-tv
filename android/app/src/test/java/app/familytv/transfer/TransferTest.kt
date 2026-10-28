@@ -75,7 +75,7 @@ class TransferTest {
                   "later":"ignored"}""",
             ),
         )!!
-        Transfer.apply(app, local, profile)
+        Transfer.apply(app, Transfer.Claimed(local, paired = false), profile)
 
         // This TV's own favourite stays as it was; the movie comes over as one added here.
         assertEquals("Mine", dao.favourite(Kind.LIVE, "s", "1")!!.name)
@@ -87,6 +87,50 @@ class TransferTest {
         assertEquals(10, app.glassPrefs.saverMinutes.value)
         assertEquals(SaverSource.SPACE, app.glassPrefs.saverSource.value)
         assertEquals("http://b.test", ServerSwitch.chosen(profile.sources[0]))
+    }
+
+    @Test
+    fun aPairedTvSendsItsOwnTokenToAbsorbTheCode() = runBlocking {
+        val portal = PortalClient(app, server.url("/").toString().trimEnd('/'))
+        server.enqueue(MockResponse().setBody("""{"deviceId":"kt01","deviceToken":"kt-token"}"""))
+        portal.ensureRegistered()
+        server.takeRequest()
+        server.enqueue(MockResponse().setBody("""{"absorbed":"abc1","local":{"v":1,"currentViewer":"v1"}}"""))
+        val local = Transfer.parse(portal.absorbTransfer(code))
+        val req = server.takeRequest()
+        assertEquals("/api/device/transfer-absorb", req.path)
+        assertEquals("""{"code":"$code"}""", req.body.readUtf8())
+        assertEquals("Bearer kt-token", req.getHeader("Authorization"))
+        // This TV keeps its own registration.
+        assertEquals("kt01", portal.deviceId)
+        assertEquals("v1", local?.currentViewer)
+    }
+
+    @Test
+    fun aPairedTvMergesTheRustAppsViewersAndFavouritesAndKeepsItsOwnSettings() = runBlocking {
+        val profile = Profile(sources = listOf(Source("s", "xtream", "Line", listOf("http://a.test/", "http://b.test/"), "u", "p")))
+        val mine = app.viewers.add(profile, "Mum", kids = false)!!
+        app.viewers.toggleFavourite(mine, Kind.LIVE, "s", "1", "News")
+        app.viewers.choose(mine)
+        app.glassPrefs.setSaverMinutes(5)
+        val local = Transfer.parse(
+            com.google.gson.JsonParser.parseString(
+                """{"v":1,
+                  "viewers":[{"id":"r1","name":"mum","favourites":[{"kind":"live","sourceId":"s","itemId":"1","name":"News"},{"kind":"movie","sourceId":"s","itemId":"9","name":"Up"}]},
+                             {"id":"r2","name":"Izaan","kids":true,"favourites":[{"kind":"series","sourceId":"s","itemId":"7","name":"Bluey"}]}],
+                  "currentViewer":"r2",
+                  "screensaver":{"minutes":15,"source":"clock"},
+                  "servers":{"s":1}}""",
+            ),
+        )!!
+        Transfer.apply(app, Transfer.Claimed(local, paired = true), profile)
+
+        // "mum" is this TV's Mum: she only gains the movie. Izaan is added; Mum is still the one watching.
+        assertEquals(listOf("Mum", "Izaan"), app.viewers.all().map { it.name })
+        assertEquals(listOf("1", "9"), app.viewers.favourites()!!.map { it.itemId })
+        assertEquals("Mum", app.viewers.current()!!.name)
+        assertEquals(5, app.glassPrefs.saverMinutes.value)
+        assertNull(ServerSwitch.chosen(profile.sources[0]))
     }
 
     @Test

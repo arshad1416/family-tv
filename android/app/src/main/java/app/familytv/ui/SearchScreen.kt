@@ -89,7 +89,7 @@ fun SearchScreen(vm: MainViewModel, profile: Profile) {
                 m, s,
             )
         }
-        if (q.length >= 2) log.settled(value.count) else log.ended()
+        if (q.length >= 2) log.settled(q, value.count) else log.ended()
     }
     val progs = rememberProgrammes(results.channels)
     val favs = rememberFavourites()

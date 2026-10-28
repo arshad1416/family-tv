@@ -94,3 +94,59 @@ describe("moving a TV from the Rust app to the Kotlin app", () => {
     expect((await call(env, "rust-token", "/api/device/transfer-start", { local: { x: "a".repeat(130 * 1024) } })).status).toBe(413);
   });
 });
+
+describe("moving into a Kotlin app that is already paired", () => {
+  async function kotlin(env: Env, id: string, profile: string | null, nickname: string | null = null) {
+    await env.DB.prepare("INSERT INTO devices (id, token_hash, profile_id, nickname, app_version, created_at) VALUES (?, ?, ?, ?, '0.2.93', 0)")
+      .bind(id, await sha256Hex(`kt-${id}`), profile, nickname)
+      .run();
+  }
+  const absorb = (env: Env, code: string, token: string, ip?: string) => call(env, token, "/api/device/transfer-absorb", { code }, ip);
+  const status = async (env: Env, token: string) =>
+    (await worker.fetch(new Request("https://portal.test/api/device/config", { headers: { authorization: `Bearer ${token}` } }), env)).status;
+
+  it("drops the Rust app's row, so its token gets 401, and hands its settings to the Kotlin app", async () => {
+    const env = await setup();
+    await kotlin(env, "kt01", "aa");
+    const local = { v: 1, viewers: [{ id: "v1", name: "Izaan", kids: true, favourites: [] }] };
+    const { code } = await start(env, local);
+    const res = await absorb(env, code, "kt-kt01");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ absorbed: "abc1", local });
+    expect(await status(env, "rust-token")).toBe(401);
+    // Its own setup stays; it had no name or lock, so it takes the Rust row's.
+    const config = await (await worker.fetch(new Request("https://portal.test/api/device/config", { headers: { authorization: "Bearer kt-kt01" } }), env)).json<{ paired: boolean; nickname: string; lock: unknown }>();
+    expect(config).toMatchObject({ paired: true, nickname: "Lounge", lock: { message: "Homework first" } });
+    expect((await absorb(env, code, "kt-kt01")).status).toBe(404);
+  });
+
+  it("keeps the Kotlin app's own name", async () => {
+    const env = await setup();
+    await kotlin(env, "kt01", "aa", "Kitchen");
+    const { code } = await start(env);
+    expect((await absorb(env, code, "kt-kt01")).status).toBe(200);
+    expect(await env.DB.prepare("SELECT nickname FROM devices WHERE id = 'kt01'").first()).toEqual({ nickname: "Kitchen" });
+  });
+
+  it("refuses a TV on another profile and leaves the Rust app paired", async () => {
+    const env = await setup();
+    await env.DB.prepare("INSERT INTO profiles (id, name, data_enc, created_at, updated_at) VALUES ('bb', 'bb', ?, 0, 0)").bind(await sealJson(KEY, { sources: [] })).run();
+    await kotlin(env, "kt01", "bb");
+    const { code } = await start(env);
+    expect((await absorb(env, code, "kt-kt01")).status).toBe(409);
+    expect(await status(env, "rust-token")).toBe(200);
+  });
+
+  it("is only for a paired Kotlin app, and wrong codes count toward the lockout", async () => {
+    const env = await setup();
+    await kotlin(env, "kt01", null);
+    const { code } = await start(env);
+    expect((await absorb(env, code, "kt-kt01")).status).toBe(409);
+    expect((await absorb(env, code, "rust-token")).status).toBe(409);
+    expect((await call(env, null, "/api/device/transfer-absorb", { code })).status).toBe(401);
+    await kotlin(env, "kt02", "aa");
+    for (let i = 0; i < 10; i++) expect((await absorb(env, "f".repeat(32), "kt-kt02", "9.9.9.9")).status).toBe(404);
+    expect((await absorb(env, code, "kt-kt02", "9.9.9.9")).status).toBe(429);
+    expect((await absorb(env, code, "kt-kt02")).status).toBe(200);
+  });
+});

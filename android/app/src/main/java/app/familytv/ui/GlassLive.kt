@@ -491,7 +491,7 @@ private fun ChannelSearch(profile: Profile, q: String, sports: Boolean) {
         delay(300) // let typing settle
         val found = dao.searchChannels(q, SEARCH_LIMIT * 3).filter { (it.sourceId to it.categoryId) in keys }.take(SEARCH_LIMIT)
         results = found
-        log.settled(found.size)
+        log.settled(q, found.size)
     }
     val r = results ?: return
     if (r.isEmpty()) return EmptyState("No matches for \"$q\".")

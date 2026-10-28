@@ -44,17 +44,34 @@ class UsageTest {
     @Test fun aSearchIsLoggedOnceNotAtEveryPauseInTyping() {
         Usage.enabled = true
         Usage.opened(Screen.MOVIES)
-        val log = SearchLog()
+        val log = SearchLog { 0L }
         // "b", "br", "bre", "break": typing settles after each letter on a TV keyboard.
-        listOf(40, 12, 5, 3).forEach(log::settled)
+        listOf("b" to 40, "br" to 12, "bre" to 5, "break" to 3).forEach { (w, n) -> log.settled(w, n) }
         log.picked(0)
         log.picked(2) // Back, and another result of the same search
-        log.settled(0) // new words, nothing found, then the search is left
+        log.settled("breakz", 0) // new words, nothing found, then the search is left
         log.ended()
         log.ended()
         Usage.left(Screen.MOVIES, 20)
         assertEquals(
             listOf("movies open", "movies search_submit 3", "movies search_pick 0", "movies search_pick 2", "movies search_empty 0", "movies leave 20"),
+            Usage.take().map { listOfNotNull(it.screen, it.action, it.value).joinToString(" ") },
+        )
+    }
+
+    // Round 18: "nemo" logged on the pick, then again on leaving, because Back rebuilt the search and it settled anew.
+    @Test fun comingBackFromThePickedTitleIsTheSameSearch() {
+        Usage.enabled = true
+        Usage.opened(Screen.SERIES)
+        var clock = 0L
+        SearchLog { clock }.apply { settled("Friends", 9); picked(0); ended() }
+        clock = 60_000
+        SearchLog { clock }.apply { settled("friends ", 9); picked(1); ended() } // rebuilt after Back
+        clock += SearchLog.SAME_SEARCH_MS
+        SearchLog { clock }.apply { settled("friends", 9); ended() } // much later: a new search
+        Usage.left(Screen.SERIES, 5)
+        assertEquals(
+            listOf("series open", "series search_submit 9", "series search_pick 0", "series search_pick 1", "series search_submit 9", "series leave 5"),
             Usage.take().map { listOfNotNull(it.screen, it.action, it.value).joinToString(" ") },
         )
     }

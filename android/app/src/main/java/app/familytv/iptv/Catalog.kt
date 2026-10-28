@@ -2,7 +2,9 @@ package app.familytv.iptv
 
 import android.content.SharedPreferences
 import android.os.SystemClock
+import android.util.Log
 import android.util.Xml
+import app.familytv.BuildConfig
 import app.familytv.core.Http
 import app.familytv.data.AppDb
 import app.familytv.data.CategoryEntity
@@ -88,21 +90,44 @@ class Catalog(private val db: AppDb, private val marks: SharedPreferences? = nul
         var listsMs = 0L
             private set
 
+        // Each list step's time, rows and time spent saving, for test builds' log: step names and numbers only.
+        private val steps = StringBuilder()
+        private var stepFrom = 0L
+        private var stepRows = 0
+        private var stepSavingMs = 0L
+
         fun startSource(index: Int) { done = index.toFloat(); weight = 0f }
-        fun listsBegin() { listsFrom = SystemClock.elapsedRealtime() }
+        fun listsBegin() {
+            listsFrom = SystemClock.elapsedRealtime()
+            stepFrom = listsFrom
+            steps.setLength(0)
+        }
         /** The source's lists are in (its guide may follow); only the first call per source counts. */
         fun listsDone() {
             if (listsFrom == 0L) return
-            listsMs += SystemClock.elapsedRealtime() - listsFrom
+            endStep()
+            val ms = SystemClock.elapsedRealtime() - listsFrom
+            listsMs += ms
             listsFrom = 0L
+            if (BuildConfig.DEBUG || BuildConfig.VERSION_NAME.contains("-test")) Log.i("Catalog", "lists %.1f s:%s".format(ms / 1000.0, steps))
         }
         fun step(name: String, share: Float) {
+            endStep()
             done += weight
             step = name; weight = share
             emit(0f, null)
         }
-        fun rows(n: Int, typical: Int, noun: String) =
+        fun rows(n: Int, typical: Int, noun: String) {
+            stepRows = n
             emit(0.9f * (1f - kotlin.math.exp(-n.toFloat() / typical)), "%,d %s".format(n, noun))
+        }
+        fun saved(ms: Long) { stepSavingMs += ms }
+        private fun endStep() {
+            if (listsFrom == 0L) return
+            val now = SystemClock.elapsedRealtime()
+            if (step.isNotEmpty()) steps.append(" %s %.1f s (%,d rows, saving %.1f s);".format(step, (now - stepFrom) / 1000.0, stepRows, stepSavingMs / 1000.0))
+            stepFrom = now; stepRows = 0; stepSavingMs = 0
+        }
         private fun emit(within: Float, detail: String?) =
             report(Progress(step, ((done + weight * within) / sources.coerceAtLeast(1)).coerceIn(0f, 1f), detail))
     }
@@ -195,7 +220,7 @@ class Catalog(private val db: AppDb, private val marks: SharedPreferences? = nul
         }
 
         t.step("Loading channels", 0.2f)
-        streamBatches(XtreamUrls.api(server, user, pass, "get_live_streams"), { dao.upsertChannels(it) }, { t.rows(it, 5_000, "channels") }) { st ->
+        streamBatches(XtreamUrls.api(server, user, pass, "get_live_streams"), { dao.upsertChannels(it) }, t, 5_000, "channels") { st ->
             // Heading rows ("##### 4K #####") aren't channels; leave them out of every list.
             if (Names.isSeparator(st.name)) null
             else ChannelEntity(s.id, st.id, st.name, st.num, st.icon, st.categoryId, st.epgId, null, st.catchupDays, gen)
@@ -203,7 +228,7 @@ class Catalog(private val db: AppDb, private val marks: SharedPreferences? = nul
         dao.pruneChannels(s.id, gen)
 
         t.step("Loading movies", 0.35f)
-        streamBatches(XtreamUrls.api(server, user, pass, "get_vod_streams"), { dao.upsertMovies(it) }, { t.rows(it, 20_000, "movies") }) { st ->
+        streamBatches(XtreamUrls.api(server, user, pass, "get_vod_streams"), { dao.upsertMovies(it) }, t, 20_000, "movies") { st ->
             val parsed = SeriesTitles.parse(st.name)
             MovieEntity(
                 s.id, st.id, st.name, st.icon, st.categoryId, st.rating, st.ext, null, st.added, gen, st.tmdb, st.year,
@@ -213,7 +238,7 @@ class Catalog(private val db: AppDb, private val marks: SharedPreferences? = nul
         dao.pruneMovies(s.id, gen)
 
         t.step("Loading series", 0.2f)
-        streamBatches(XtreamUrls.api(server, user, pass, "get_series"), { dao.upsertSeries(it) }, { t.rows(it, 5_000, "series") }) { st ->
+        streamBatches(XtreamUrls.api(server, user, pass, "get_series"), { dao.upsertSeries(it) }, t, 5_000, "series") { st ->
             val t = SeriesTitles.parse(st.name)
             SeriesEntity(
                 s.id, st.id, st.name, st.icon, st.categoryId, st.plot, st.rating, gen, st.tmdb, st.year,
@@ -298,7 +323,7 @@ class Catalog(private val db: AppDb, private val marks: SharedPreferences? = nul
                 if (pending.isNotEmpty()) dao.insertProgrammes(pending)
             }
         } catch (e: Exception) {
-            android.util.Log.w("Catalog", "guide load failed: ${e.javaClass.simpleName}")
+            Log.w("Catalog", "guide load failed: ${e.javaClass.simpleName}")
         }
     }
 
@@ -306,7 +331,7 @@ class Catalog(private val db: AppDb, private val marks: SharedPreferences? = nul
     private val TRACED = Regex("""(?i)\b(global|ctv)\b""")
 
     private fun trace(c: ChannelEntity, linked: String, why: String) =
-        android.util.Log.i("GuideMatch", "${c.name.take(60)} -> provider epgId ${c.epgId ?: "none"} -> linked $linked ($why)")
+        Log.i("GuideMatch", "${c.name.take(60)} -> provider epgId ${c.epgId ?: "none"} -> linked $linked ($why)")
 
     private fun pct(f: Float) = "${(f * 100).roundToInt()}%"
 
@@ -467,16 +492,23 @@ class Catalog(private val db: AppDb, private val marks: SharedPreferences? = nul
     // --- streaming helpers ---
 
     /** Streams an Xtream list and writes it [BATCH] rows at a time (runs on an IO thread); [map] returns null for a row to leave out. */
-    private suspend fun <T : Any> streamBatches(url: String, write: suspend (List<T>) -> Unit, progress: (Int) -> Unit, map: (XtStream) -> T?) {
+    private suspend fun <T : Any> streamBatches(url: String, write: suspend (List<T>) -> Unit, t: Tracker, typical: Int, noun: String, map: (XtStream) -> T?) {
         val buf = ArrayList<T>(BATCH)
         var n = 0
+        suspend fun save(chunk: List<T>) {
+            val from = SystemClock.elapsedRealtime()
+            write(chunk)
+            t.saved(SystemClock.elapsedRealtime() - from)
+            n += chunk.size
+            t.rows(n, typical, noun)
+        }
         open(url).use { res ->
             XtreamParser.streams(reader(res)) { st ->
                 map(st)?.let { buf += it }
-                if (buf.size >= BATCH) { val chunk = buf.toList(); buf.clear(); runBlocking { write(chunk) }; n += chunk.size; progress(n) }
+                if (buf.size >= BATCH) { val chunk = buf.toList(); buf.clear(); runBlocking { save(chunk) } }
             }
         }
-        if (buf.isNotEmpty()) { write(buf); n += buf.size; progress(n) }
+        if (buf.isNotEmpty()) save(buf)
     }
 
     /**

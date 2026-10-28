@@ -666,7 +666,7 @@ private fun CollectionPage(
         }
     }
     val log = rememberSearchLog()
-    LaunchedEffect(q) { if (q.length >= 2) { delay(300); log.settled(items?.size ?: 0) } else log.ended() }
+    LaunchedEffect(q) { if (q.length >= 2) { delay(300); log.settled(q, items?.size ?: 0) } else log.ended() }
     Column {
         PageHeader(onBack, title, art, counts)
         if (views.isNotEmpty()) Row(Modifier.padding(start = FOCUS_ROOM, bottom = 10.gx), verticalAlignment = Alignment.CenterVertically) {
@@ -796,7 +796,7 @@ private fun VodSearch(profile: Profile, kind: String, q: String, marks: VodMarks
             // Test builds: the top of the order and each title's votes on the list, to check it on the TV (titles only).
             Log.i("VodSearch", "most-voted ${popular?.size ?: "not read"}; " + results.orEmpty().take(12).joinToString { "${it.title} (${it.year ?: "-"}): ${popular?.votes(it.tmdbIds, it.title, it.year) ?: "off"}" })
         }
-        if (!again) log.settled(found.size)
+        if (!again) log.settled(q, found.size)
     }
     val shown = results
     when {
