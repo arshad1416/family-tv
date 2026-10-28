@@ -10,6 +10,7 @@ import app.familytv.core.Http
 import app.familytv.iptv.CatalogWork
 import app.familytv.iptv.ServerSwitch
 import app.familytv.perf.Perf
+import app.familytv.portal.Command
 import app.familytv.portal.DeviceConfig
 import app.familytv.portal.LatestApp
 import app.familytv.portal.PortalException
@@ -44,6 +45,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val diagnosing = MutableStateFlow(false)
 
     private var loop: Job? = null
+    /** Portal commands that came in while lists were loading. */
+    private var heldCommands: List<Command> = emptyList()
 
     val profile: Profile? get() = (screen.value as? Screen.Ready)?.config?.profile
 
@@ -153,11 +156,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private suspend fun checkIn() {
         when (val s = _screen.value) {
             is Screen.Pairing, is Screen.Failed -> boot()
+            // Reload channels takes minutes on a Fire Stick: still check in, so the portal doesn't show the TV as
+            // offline. What the portal sent waits for the home.
+            is Screen.Syncing, Screen.Loading -> if (app.portal.cachedConfig != null) runCatching {
+                heldCommands += app.portal.heartbeat(PlaybackStatus.snapshot()).commands.orEmpty()
+            }
             is Screen.Ready -> runCatching {
                 val hb = app.portal.heartbeat(PlaybackStatus.snapshot())
                 // Unpaired in the portal: show the pairing code again (same device, no re-register).
                 if (!hb.paired) { boot(); return }
-                app.commands.runAll(hb.commands, s.config.profile)
+                app.commands.runAll(heldCommands + hb.commands.orEmpty(), s.config.profile)
+                heldCommands = emptyList()
                 app.sharedProgress.onSeq(hb.progressSeq)
                 offerUpdate(hb.latestApp)
                 Usage.send(app.portal)
@@ -166,7 +175,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 // Token rejected: the portal forgot this TV, so show why with a new code.
                 if ((it as? PortalException)?.code == 401) boot()
             }
-            else -> Unit
         }
     }
 

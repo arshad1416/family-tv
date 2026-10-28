@@ -20,10 +20,14 @@ import app.familytv.portal.Profile
 import app.familytv.portal.Source
 import app.familytv.sync.PlaybackStatus
 import kotlin.math.roundToInt
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import okhttp3.Request
@@ -492,23 +496,38 @@ class Catalog(private val db: AppDb, private val marks: SharedPreferences? = nul
     // --- streaming helpers ---
 
     /** Streams an Xtream list and writes it [BATCH] rows at a time (runs on an IO thread); [map] returns null for a row to leave out. */
-    private suspend fun <T : Any> streamBatches(url: String, write: suspend (List<T>) -> Unit, t: Tracker, typical: Int, noun: String, map: (XtStream) -> T?) {
-        val buf = ArrayList<T>(BATCH)
-        var n = 0
-        suspend fun save(chunk: List<T>) {
-            val from = SystemClock.elapsedRealtime()
-            write(chunk)
-            t.saved(SystemClock.elapsedRealtime() - from)
-            n += chunk.size
-            t.rows(n, typical, noun)
+    /**
+     * Reads a list from [url] and saves it in batches while the rest is still downloading: the save runs alongside
+     * the download, at most two batches behind (saving took a fifth of the Kitchen's Fire Stick's list load, Oct 28).
+     */
+    private suspend fun <T : Any> streamBatches(url: String, write: suspend (List<T>) -> Unit, t: Tracker, typical: Int, noun: String, map: (XtStream) -> T?) = coroutineScope {
+        val batches = Channel<List<T>>(2)
+        val saver = launch {
+            var n = 0
+            try {
+                for (chunk in batches) {
+                    val from = SystemClock.elapsedRealtime()
+                    write(chunk)
+                    t.saved(SystemClock.elapsedRealtime() - from)
+                    n += chunk.size
+                    t.rows(n, typical, noun)
+                }
+            } catch (e: Throwable) {
+                // Stops the download too, which would otherwise wait for room forever.
+                batches.cancel(CancellationException("saving failed", e))
+                throw e
+            }
         }
+        val buf = ArrayList<T>(BATCH)
         open(url).use { res ->
             XtreamParser.streams(reader(res)) { st ->
                 map(st)?.let { buf += it }
-                if (buf.size >= BATCH) { val chunk = buf.toList(); buf.clear(); runBlocking { save(chunk) } }
+                if (buf.size >= BATCH) { val chunk = buf.toList(); buf.clear(); runBlocking { batches.send(chunk) } }
             }
         }
-        if (buf.isNotEmpty()) save(buf)
+        if (buf.isNotEmpty()) batches.send(buf.toList())
+        batches.close()
+        saver.join()
     }
 
     /**

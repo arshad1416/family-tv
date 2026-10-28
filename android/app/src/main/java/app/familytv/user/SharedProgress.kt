@@ -3,6 +3,7 @@ package app.familytv.user
 import android.content.Context
 import app.familytv.FamilyTvApp
 import app.familytv.portal.PortalException
+import app.familytv.sync.PlaybackStatus
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -36,7 +37,15 @@ class SharedProgress(private val app: FamilyTvApp) {
     }
 
     suspend fun sync() = lock.withLock {
-        if (pull()) push()
+        val at = System.currentTimeMillis()
+        val pushed = try {
+            if (pull()) push() else null
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            PlaybackStatus.progressSync = mapOf("at" to at, "failed" to ((e as? PortalException)?.code?.let { "HTTP $it" } ?: e.javaClass.simpleName))
+            throw e
+        }
+        PlaybackStatus.progressSync = mapOf("at" to at, "seq" to prefs.getLong(SEQ, 0), "pushed" to pushed)
     }
 
     /** False when the portal doesn't share progress yet; then nothing is pushed either. */
@@ -65,19 +74,29 @@ class SharedProgress(private val app: FamilyTvApp) {
         }
     }
 
-    private suspend fun push() {
+    /**
+     * Sends the rows changed since the last push, oldest first, a chunk at a time; each chunk that lands moves the
+     * mark on, so one that fails doesn't send everything before it again. Returns how many rows went.
+     */
+    private suspend fun push(): Int {
         val start = System.currentTimeMillis()
-        dao.progressChangedSince(prefs.getLong(PUSHED, 0)).chunked(PUSH_MAX).forEach { chunk ->
+        var sent = 0
+        dao.progressChangedSince(prefs.getLong(PUSHED, 0)).sortedBy { it.updatedAt }.chunked(PUSH_MAX).forEach { chunk ->
             app.portal.progressPush(chunk.map(SharedProgressRow::of))
+            sent += chunk.size
+            // Rows changed at the chunk's last moment may be in the next chunk too: those are sent again, harmlessly.
+            prefs.edit().putLong(PUSHED, minOf(start, chunk.last().updatedAt)).apply()
         }
         prefs.edit().putLong(PUSHED, start).apply()
+        return sent
     }
 
     companion object {
         private const val PROFILE = "profile"
         private const val SEQ = "seq"
         private const val PUSHED = "pushed"
-        private const val PUSH_MAX = 500
+        /** Rows per push: well inside the portal's 500, so a backlog never makes one request too heavy for it. */
+        private const val PUSH_MAX = 100
 
         /** The row to save for a pulled [remote], or null when this TV's own is as new. Trakt's pending flag stays this TV's. */
         fun merge(local: ProgressEntity?, remote: ProgressEntity): ProgressEntity? =
