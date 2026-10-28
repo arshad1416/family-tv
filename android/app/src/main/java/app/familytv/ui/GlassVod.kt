@@ -35,7 +35,6 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.collectAsState
@@ -68,7 +67,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.Icon
-import androidx.tv.material3.LocalContentColor
 import androidx.tv.material3.Text
 import app.familytv.BuildConfig
 import app.familytv.app
@@ -391,62 +389,56 @@ private fun VodHome(
     }
     LaunchedEffect(fits, slides.isNotEmpty()) { if (slides.isNotEmpty()) fits?.let { slot.floatValue = it } }
     val heroHeight = slot.floatValue.takeIf { it > 0f }?.let { with(density) { it.toDp() } } ?: CAROUSEL_HEIGHT.gx
-    // While the art is up the rows sit on its dark shade, so they keep light text in either look.
-    val onArt by remember(shell) { derivedStateOf { shell?.backdrop?.value != null } }
-    val page = LocalGlassPalette.current
-    val rowPalette = if (carousel && onArt) GlassPalette.Dark else page
 
-    CompositionLocalProvider(LocalGlassPalette provides rowPalette, LocalContentColor provides rowPalette.text) {
-        LazyColumn(
-            Modifier.onFocusChanged { listFocused = it.hasFocus },
-            state = list, verticalArrangement = Arrangement.spacedBy(ROW_GAP.gx), contentPadding = PaddingValues(bottom = 40.dp),
-        ) {
-            // Always the first item, so the highlights loading in after the rest don't land above the scroll position.
-            item("hero") {
-                if (slides.isNotEmpty()) HomeCarousel(slides, marks, Modifier.height(heroHeight).onFocusChanged { heroFocused = it.hasFocus; if (it.hasFocus) lastCard.value = "hero" }, entry = entryPoint(target == "hero"), compact = heroHeight < CAROUSEL_COMPACT.gx)
-                else if (featured != null) HighlightsRow {
-                    val (item, from) = featured
-                    HeroCard(
-                        item.title, listOf(if (movies) "Movie" else "TV show", from).joinToString("  ·  "), item.poster, HERO_MAIN, 2.2f,
-                        entryPoint(target == "hero").onFocusChanged { if (it.hasFocus) lastCard.value = "hero" },
-                    ) {
-                        when (item) {
-                            is VodItem.Movie -> nav?.movie = item.g to marks.movieKeys
-                            is VodItem.Show -> nav?.open = item.g
-                        }
+    LazyColumn(
+        Modifier.onFocusChanged { listFocused = it.hasFocus },
+        state = list, verticalArrangement = Arrangement.spacedBy(ROW_GAP.gx), contentPadding = PaddingValues(bottom = 40.dp),
+    ) {
+        // Always the first item, so the highlights loading in after the rest don't land above the scroll position.
+        item("hero") {
+            if (slides.isNotEmpty()) HomeCarousel(slides, marks, Modifier.height(heroHeight).onFocusChanged { heroFocused = it.hasFocus; if (it.hasFocus) lastCard.value = "hero" }, entry = entryPoint(target == "hero"), compact = heroHeight < CAROUSEL_COMPACT.gx)
+            else if (featured != null) HighlightsRow {
+                val (item, from) = featured
+                HeroCard(
+                    item.title, listOf(if (movies) "Movie" else "TV show", from).joinToString("  ·  "), item.poster, HERO_MAIN, 2.2f,
+                    entryPoint(target == "hero").onFocusChanged { if (it.hasFocus) lastCard.value = "hero" },
+                ) {
+                    when (item) {
+                        is VodItem.Movie -> nav?.movie = item.g to marks.movieKeys
+                        is VodItem.Show -> nav?.open = item.g
                     }
-                    shelves[newest]?.let { l -> HeroCard(newest, null, l.first().poster, HERO_NEW, 1f, entryPoint(target == "newest")) { open(if (movies) "recent" else "new") } }
-                    shelves["Top rated"]?.let { l -> HeroCard("Top rated", null, l.first().poster, HERO_TOP, 1f, entryPoint(target == "top")) { open("top") } }
                 }
+                shelves[newest]?.let { l -> HeroCard(newest, null, l.first().poster, HERO_NEW, 1f, entryPoint(target == "newest")) { open(if (movies) "recent" else "new") } }
+                shelves["Top rated"]?.let { l -> HeroCard("Top rated", null, l.first().poster, HERO_TOP, 1f, entryPoint(target == "top")) { open("top") } }
             }
-            rows.filter { it.first == CONTINUE_WATCHING || it.first == FOR_YOU }.forEach { (title, items) -> shelf(title, items) }
-            if (providers.isNotEmpty()) item("providers") {
-                Column(verticalArrangement = Arrangement.spacedBy(10.gx)) {
-                    GlassHeading("Providers", Modifier.padding(start = FOCUS_ROOM))
-                    ProvidersShelf(providers, target) { open("provider/${it.name}") }
-                }
+        }
+        rows.filter { it.first == CONTINUE_WATCHING || it.first == FOR_YOU }.forEach { (title, items) -> shelf(title, items) }
+        if (providers.isNotEmpty()) item("providers") {
+            Column(verticalArrangement = Arrangement.spacedBy(10.gx)) {
+                GlassHeading("Providers", Modifier.padding(start = FOCUS_ROOM))
+                ProvidersShelf(providers, target) { open("provider/${it.name}") }
             }
-            if (languages.isNotEmpty()) item("Languages") {
-                Column(verticalArrangement = Arrangement.spacedBy(10.gx)) {
-                    GlassHeading("Languages", Modifier.padding(start = FOCUS_ROOM))
-                    PillRow {
-                        items(languages, key = { it.name }) { g ->
-                            BigPill(g.label, entryPoint(target == "language/${g.name}")) { open("language/${g.name}") }
-                        }
+        }
+        if (languages.isNotEmpty()) item("Languages") {
+            Column(verticalArrangement = Arrangement.spacedBy(10.gx)) {
+                GlassHeading("Languages", Modifier.padding(start = FOCUS_ROOM))
+                PillRow {
+                    items(languages, key = { it.name }) { g ->
+                        BigPill(g.label, entryPoint(target == "language/${g.name}")) { open("language/${g.name}") }
                     }
                 }
             }
-            rows.filter { it.first != CONTINUE_WATCHING && it.first != FOR_YOU }.forEach { (title, items) -> shelf(title, items) }
-            if (cats.isNotEmpty()) item("categories") {
-                Column(Modifier.padding(horizontal = FOCUS_ROOM), verticalArrangement = Arrangement.spacedBy(10.gx)) {
-                    GlassHeading("All categories")
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(10.gx), verticalArrangement = Arrangement.spacedBy(10.gx)) {
-                        // The toggle stays put, so focus never drops when the chips open or close.
-                        BigPill(if (catsOpen) "Hide categories" else "Show all categories (${cats.size + if (hasAdult) 1 else 0})") { allCats = !catsOpen }
-                        if (catsOpen) {
-                            cats.forEach { c -> BigPill(c.displayName, entryPoint(target == "cat/${c.chipKey}")) { open("cat/${c.chipKey}") } }
-                            if (hasAdult) BigPill(ADULT_CONTENT, entryPoint(target == "adult"), lock = true) { open("adult") }
-                        }
+        }
+        rows.filter { it.first != CONTINUE_WATCHING && it.first != FOR_YOU }.forEach { (title, items) -> shelf(title, items) }
+        if (cats.isNotEmpty()) item("categories") {
+            Column(Modifier.padding(horizontal = FOCUS_ROOM), verticalArrangement = Arrangement.spacedBy(10.gx)) {
+                GlassHeading("All categories")
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(10.gx), verticalArrangement = Arrangement.spacedBy(10.gx)) {
+                    // The toggle stays put, so focus never drops when the chips open or close.
+                    BigPill(if (catsOpen) "Hide categories" else "Show all categories (${cats.size + if (hasAdult) 1 else 0})") { allCats = !catsOpen }
+                    if (catsOpen) {
+                        cats.forEach { c -> BigPill(c.displayName, entryPoint(target == "cat/${c.chipKey}")) { open("cat/${c.chipKey}") } }
+                        if (hasAdult) BigPill(ADULT_CONTENT, entryPoint(target == "adult"), lock = true) { open("adult") }
                     }
                 }
             }
