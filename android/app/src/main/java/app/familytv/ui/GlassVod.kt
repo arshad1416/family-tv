@@ -404,7 +404,7 @@ private fun VodHome(
             // Always the first item, so the highlights loading in after the rest don't land above the scroll position.
             item("hero") {
                 if (slides.isNotEmpty()) HomeCarousel(slides, marks, Modifier.height(heroHeight).onFocusChanged { heroFocused = it.hasFocus; if (it.hasFocus) lastCard.value = "hero" }, entry = entryPoint(target == "hero"), compact = heroHeight < CAROUSEL_COMPACT.gx)
-                else if (featured != null) Row(Modifier.fillMaxWidth().height(190.gx).padding(horizontal = FOCUS_ROOM), horizontalArrangement = Arrangement.spacedBy(20.gx)) {
+                else if (featured != null) HighlightsRow {
                     val (item, from) = featured
                     HeroCard(
                         item.title, listOf(if (movies) "Movie" else "TV show", from).joinToString("  ·  "), item.poster, HERO_MAIN, 2.2f,
@@ -460,7 +460,9 @@ private const val ROW_ROOM = 8
 
 /** How long Home waits for its categories before saying there are none. */
 private const val EMPTY_AFTER_MS = 1500L
-private val HERO_MAIN = listOf(Color(0xFF3B4A6B), Color(0xFF1D2638), Color(0xFF0F1420))
+/** A focused highlights card's zoom. */
+internal const val HERO_SCALE = 1.04f
+internal val HERO_MAIN = listOf(Color(0xFF3B4A6B), Color(0xFF1D2638), Color(0xFF0F1420))
 private val HERO_NEW = listOf(Color(0xFF5A3D2B), Color(0xFF1F1612))
 private val HERO_TOP = listOf(Color(0xFF2B4A5A), Color(0xFF121C22))
 
@@ -469,11 +471,23 @@ private val POSTER_W: Dp @Composable get() = if (LocalBigTiles.current) 190.gx e
 
 private val VodItem.poster: String? get() = when (this) { is VodItem.Movie -> g.poster; is VodItem.Show -> g.poster }
 
+/**
+ * The highlights row where there's no carousel, with room all round for a focused card's zoom: as the page's first
+ * row, its cards' tops were cut off at the list's top edge when focused (round 22).
+ */
+@Composable
+internal fun HighlightsRow(content: @Composable RowScope.() -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = FOCUS_ROOM).height(190.gx).padding(horizontal = FOCUS_ROOM),
+        horizontalArrangement = Arrangement.spacedBy(20.gx), content = content,
+    )
+}
+
 /** A glass card in the highlights row: artwork, a dark fade, and its title. */
 @Composable
-private fun RowScope.HeroCard(title: String, subtitle: String?, art: String?, tint: List<Color>, weight: Float, modifier: Modifier, onClick: () -> Unit) {
+internal fun RowScope.HeroCard(title: String, subtitle: String?, art: String?, tint: List<Color>, weight: Float, modifier: Modifier, onClick: () -> Unit) {
     val shape = RoundedCornerShape(22.gx)
-    FocusBox(onClick = onClick, outline = true, scale = 1.04f, color = Color.Transparent, shape = shape, modifier = modifier.weight(weight).fillMaxHeight()) {
+    FocusBox(onClick = onClick, outline = true, scale = HERO_SCALE, color = Color.Transparent, shape = shape, modifier = modifier.weight(weight).fillMaxHeight()) {
         Box(Modifier.fillMaxSize().background(Brush.linearGradient(tint)).border(1.dp, Color(0x24FFFFFF), shape))
         if (art != null) AsyncImage(art, contentDescription = null, contentScale = ContentScale.Crop, alignment = Alignment.TopCenter, modifier = Modifier.fillMaxSize())
         Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.35f to Color.Transparent, 1f to Color(0xC8000000))))
