@@ -50,6 +50,7 @@ import app.familytv.trakt.ProgressRules
 import app.familytv.usage.TrackScreen
 import app.familytv.usage.Usage
 import app.familytv.user.MovieLanguages
+import app.familytv.user.ProgressEntity
 import app.familytv.user.ProgressKey
 import coil.compose.AsyncImage
 import kotlinx.coroutines.delay
@@ -58,7 +59,7 @@ import kotlinx.coroutines.launch
 /**
  * One film before it plays, like the series page: poster, title, year, rating, running time and
  * synopsis from the provider's movie info, a 4K/HDR note, Play (or "Resume · 42 min left" and
- * Start over), Favourite and Trailer. A failed info call still shows the poster and title with Play.
+ * Start over, or "Play again" once watched), Favourite and Trailer. A failed info call still shows the poster and title with Play.
  */
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
@@ -88,7 +89,8 @@ fun MoviePage(profile: Profile, group: MovieGroup, visible: Set<Pair<String, Str
     val favKeys = rememberFavouriteKeys(rememberFavourites())
     val favourite = all.favourite(favKeys)
     val p = progress[ProgressKey.movie(m.sourceId, m.streamId)]
-    val resumeAt = if (ProgressRules.started(p)) ProgressRules.resumeAt(p, p?.durationMs ?: 0) else null
+    val watched = p?.watched == true
+    val resumeAt = movieResumeAt(p)
     val cover = m.poster ?: group.poster ?: info?.cover
     val meta = listOfNotNull(
         (m.releaseYear ?: info?.year)?.toString(),
@@ -119,11 +121,8 @@ fun MoviePage(profile: Profile, group: MovieGroup, visible: Set<Pair<String, Str
                 LazyRow(Modifier.focusRestorer(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     item("play") {
                         TvButton(
-                            when {
-                                resumeAt == null -> "▶  Play"
-                                else -> ProgressRules.timeLeft(p)?.let { "▶  Resume · $it" } ?: "▶  Resume from ${PlaybackTracker.clock(resumeAt)}"
-                            },
-                            { scope.launch { playMovieNow(ctx, profile, m) } },
+                            moviePlayLabel(p),
+                            { scope.launch { playMovieNow(ctx, profile, m, fromStart = watched) } },
                             Modifier.focusRequester(playFirst),
                         )
                     }
@@ -161,4 +160,15 @@ private fun Poster(url: String?, modifier: Modifier) {
     Box(modifier.aspectRatio(2f / 3f).clip(Tv.Shape).background(Tv.Raised)) {
         if (url != null) AsyncImage(url, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
     }
+}
+
+/** Where Play picks a film up, or null for the start: watched (on any copy) starts over, as the tile's check says, even with a later spot saved. */
+internal fun movieResumeAt(p: ProgressEntity?): Long? =
+    if (p?.watched != true && ProgressRules.started(p)) ProgressRules.resumeAt(p, p?.durationMs ?: 0) else null
+
+/** Play's label on a film's page: "Play again" once watched, "Resume · 42 min left" from a saved spot, else Play. */
+internal fun moviePlayLabel(p: ProgressEntity?): String {
+    if (p?.watched == true) return "▶  Play again"
+    val at = movieResumeAt(p) ?: return "▶  Play"
+    return ProgressRules.timeLeft(p)?.let { "▶  Resume · $it" } ?: "▶  Resume from ${PlaybackTracker.clock(at)}"
 }

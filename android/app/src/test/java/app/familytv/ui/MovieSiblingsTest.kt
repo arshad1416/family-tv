@@ -4,6 +4,7 @@ import app.familytv.trakt.ProgressRules
 import app.familytv.user.ProgressEntity
 import app.familytv.user.ProgressKey
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -48,5 +49,15 @@ class MovieSiblingsTest {
     @Test
     fun aRewatchStaysOutOfContinueWatching() {
         assertEquals(emptyList<ProgressEntity>(), ProgressRules.continueWatching(listOf(movie("a", 40f, true, 10)), ProgressKey.MOVIE))
+    }
+
+    /** Round 23: Novocaine's tile said Watched while its page offered "Resume · 1 h 48 min left". */
+    @Test
+    fun aWatchedFilmsPagePlaysAgainFromTheStart() {
+        val rewatch = movie("a", 2f, true, 10)
+        assertEquals("▶  Play again", moviePlayLabel(rewatch))
+        assertNull(movieResumeAt(rewatch))
+        assertEquals("▶  Resume · 1 h left", moviePlayLabel(movie("a", 40f, false, 10)))
+        assertEquals("▶  Play", moviePlayLabel(null))
     }
 }

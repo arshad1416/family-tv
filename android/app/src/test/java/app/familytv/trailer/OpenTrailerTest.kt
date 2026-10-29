@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Intent
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -51,6 +52,19 @@ class OpenTrailerTest {
     fun aBadIdClosesTheTrailerScreen() {
         val intent = Intent(ApplicationProvider.getApplicationContext(), TrailerActivity::class.java).putExtra(TrailerActivity.EXTRA_ID, "x'); alert(1")
         val activity = Robolectric.buildActivity(TrailerActivity::class.java, intent).setup().get()
+        assertTrue(activity.isFinishing)
+    }
+
+    /** Round 23: on the Kitchen, a Settings page opened over a trailer and its sound carried on. */
+    @Test
+    fun aCoveredTrailerPausesThenCloses() {
+        val intent = Intent(ApplicationProvider.getApplicationContext(), TrailerActivity::class.java).putExtra(TrailerActivity.EXTRA_ID, "dQw4w9WgXcQ")
+        val controller = Robolectric.buildActivity(TrailerActivity::class.java, intent).setup()
+        val activity = controller.get()
+        assertFalse(activity.isFinishing)
+        controller.pause()
+        assertEquals("hold()", shadowOf(activity.findViewById<android.view.ViewGroup>(android.R.id.content).getChildAt(0) as android.webkit.WebView).lastEvaluatedJavascript)
+        controller.stop()
         assertTrue(activity.isFinishing)
     }
 }

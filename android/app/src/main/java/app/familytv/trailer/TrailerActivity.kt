@@ -14,8 +14,9 @@ import androidx.activity.ComponentActivity
 /**
  * A YouTube trailer played here, in YouTube's own embedded player, so the YouTube app's "Who's watching?" picker never
  * comes between the viewer and the trailer (Google TV's YouTube dropped the link behind it, round 22). OK pauses and
- * plays, Left and Right skip 10 seconds, Back closes it; it closes itself when the trailer ends. A trailer whose owner
- * doesn't allow embedding, or that doesn't start, opens in the YouTube app instead.
+ * plays, Left and Right skip 10 seconds, Back closes it; it closes itself when the trailer ends, and pauses (then closes)
+ * when another screen covers it. A trailer whose owner doesn't allow embedding, or that doesn't start, opens in the
+ * YouTube app instead.
  */
 class TrailerActivity : ComponentActivity() {
     private var web: WebView? = null
@@ -23,6 +24,7 @@ class TrailerActivity : ComponentActivity() {
     private var playing = false
     private var handedOff = false
     private lateinit var id: String
+    private val startCheck = Runnable { if (!playing) handOff() }
 
     @SuppressLint("SetJavaScriptEnabled") // YouTube's player is a script; the page is ours and loads nothing else.
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -40,7 +42,28 @@ class TrailerActivity : ComponentActivity() {
         view.addJavascriptInterface(Bridge(), "FamilyTv")
         setContentView(view)
         view.loadDataWithBaseURL(ORIGIN, page(id), "text/html", "utf-8", null)
-        main.postDelayed({ if (!playing) handOff() }, START_MS)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Back in front before it ever played: carry on starting it, with a fresh wait.
+        if (playing || web == null) return
+        web?.evaluateJavascript("go()", null)
+        main.removeCallbacks(startCheck)
+        main.postDelayed(startCheck, START_MS)
+    }
+
+    // Round 23: a Settings page opened over the trailer and its sound carried on behind it.
+    override fun onPause() {
+        main.removeCallbacks(startCheck)
+        web?.evaluateJavascript("hold()", null)
+        super.onPause()
+    }
+
+    // Out of sight, it closes, so coming back lands on the title page rather than a paused player.
+    override fun onStop() {
+        super.onStop()
+        if (!isChangingConfigurations) finish()
     }
 
     // androidx marks this restricted, but overriding the platform method is fine.
@@ -97,11 +120,13 @@ class TrailerActivity : ComponentActivity() {
         internal fun page(id: String) = """<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>html,body{margin:0;height:100%;background:#000;overflow:hidden}#p{position:absolute;top:0;left:0;width:100%;height:100%}</style></head>
 <body><div id="p"></div><script>
-var p;
+var p,held=false;
 function onYouTubeIframeAPIReady(){p=new YT.Player('p',{width:'100%',height:'100%',videoId:'$id',
 playerVars:{autoplay:1,controls:0,rel:0,fs:0,playsinline:1,iv_load_policy:3,disablekb:1,origin:'$ORIGIN'},
-events:{onReady:function(e){e.target.playVideo()},onStateChange:function(e){FamilyTv.state(e.data)},onError:function(e){FamilyTv.error(e.data)}}})}
-function toggle(){if(!p||!p.getPlayerState)return;if(p.getPlayerState()==1)p.pauseVideo();else p.playVideo()}
+events:{onReady:function(e){if(held)e.target.pauseVideo();else e.target.playVideo()},onStateChange:function(e){FamilyTv.state(e.data)},onError:function(e){FamilyTv.error(e.data)}}})}
+function toggle(){if(!p||!p.getPlayerState)return;if(p.getPlayerState()==1)p.pauseVideo();else go()}
+function go(){held=false;if(p&&p.playVideo)p.playVideo()}
+function hold(){held=true;if(p&&p.pauseVideo)p.pauseVideo()}
 function seek(s){if(!p||!p.getCurrentTime)return;p.seekTo(Math.max(0,p.getCurrentTime()+s),true)}
 </script><script src="https://www.youtube.com/iframe_api"></script></body></html>"""
     }

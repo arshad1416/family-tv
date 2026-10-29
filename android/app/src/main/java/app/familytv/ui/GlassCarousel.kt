@@ -148,10 +148,17 @@ internal fun HomeCarousel(slides: List<Slide>, marks: VodMarks, modifier: Modifi
     val logo = if (compact) 56.gx else 80.gx
     val padV = if (compact) 8.gx else 10.gx
     Column(modifier.fillMaxWidth().padding(start = FOCUS_ROOM, bottom = 4.gx), verticalArrangement = Arrangement.spacedBy(if (compact) 8.gx else 10.gx, Alignment.Bottom)) {
+        // Round 23: on the Kitchen the logo was often still loading (or never came), leaving no title; the name shows until it's in.
+        var logoIn by remember(slide.logo) { mutableStateOf(false) }
         Box(Modifier.heightIn(min = logo), contentAlignment = Alignment.BottomStart) {
             if (slide.logo != null && darkLook) {
-                AsyncImage(slide.logo, contentDescription = slide.title, contentScale = ContentScale.Fit, alignment = Alignment.BottomStart, modifier = Modifier.height(logo).widthIn(max = 400.gx))
-            } else {
+                AsyncImage(
+                    slide.logo, contentDescription = slide.title, contentScale = ContentScale.Fit, alignment = Alignment.BottomStart,
+                    modifier = Modifier.height(logo).widthIn(max = 400.gx),
+                    onSuccess = { logoIn = true }, onError = { logoIn = false },
+                )
+            }
+            if (slide.logo == null || !darkLook || !logoIn) {
                 Text(slide.title, fontSize = (if (compact) 30 else 40).gsp, fontWeight = FontWeight.Bold, maxLines = if (compact) 1 else 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 620.gx))
             }
         }
