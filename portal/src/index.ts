@@ -196,6 +196,118 @@ async function deviceRegister(req: Request, env: Env) {
   return json({ deviceId: id, deviceToken: token, pairCode: code, pairExpires: now + PAIR_TTL_MS });
 }
 
+// ---------- moving a TV from the Rust app to the Kotlin app ----------
+
+const TRANSFER_TTL_MS = 10 * 60 * 1000;
+const TRANSFER_LOCAL_MAX = 128 * 1024;
+const TRANSFER_FAILURE_WINDOW_MS = 10 * 60 * 1000;
+const TRANSFER_FAILURE_MAX = 10;
+
+/**
+ * The Rust app on a paired TV asks to hand the TV over: a one-time code for the Kotlin app on the
+ * same TV, and the Rust app's own settings ({local}) for it to pick up. Never logs the code.
+ */
+async function transferStart(req: Request, env: Env) {
+  const d = await requireDevice(req, env);
+  if (!d.profile_id) throw new HttpError(409, "this TV isn't paired");
+  if (!(d.app_version ?? "").startsWith("0.1.")) throw new HttpError(409, "only the Rust app moves a TV");
+  const b = await body<{ local?: unknown }>(req);
+  let localEnc: string | null = null;
+  if (b.local !== undefined && b.local !== null) {
+    if (typeof b.local !== "object" || Array.isArray(b.local)) throw new HttpError(400, "local must be an object");
+    if (JSON.stringify(b.local).length > TRANSFER_LOCAL_MAX) throw new HttpError(413, "local too large");
+    localEnc = await sealJson(env.CONFIG_KEY, b.local);
+  }
+  const code = randomId(16);
+  const now = Date.now();
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM device_transfers WHERE device_id = ? OR expires <= ?").bind(d.id, now),
+    env.DB.prepare("INSERT INTO device_transfers (code_hash, device_id, local_enc, expires, created_at) VALUES (?,?,?,?,?)")
+      .bind(await sha256Hex(code), d.id, localEnc, now + TRANSFER_TTL_MS, now),
+  ]);
+  return json({ code, expires: now + TRANSFER_TTL_MS });
+}
+
+/** Wrong or spent codes count against the caller: too many in the window and it waits. */
+async function transferLockedOut(env: Env, ip: string, now: number) {
+  const failures = await env.DB.prepare("SELECT count(*) AS n FROM transfer_failures WHERE ip = ? AND at > ?")
+    .bind(ip, now - TRANSFER_FAILURE_WINDOW_MS)
+    .first<{ n: number }>();
+  if ((failures?.n ?? 0) >= TRANSFER_FAILURE_MAX) throw new HttpError(429, "too many tries; wait a few minutes");
+}
+
+/** Spends the code in the request's body: the device row it hands over and its sealed settings, or a 404 that counts. */
+async function spendTransfer(req: Request, env: Env, ip: string, now: number) {
+  const b = await body<{ code?: unknown }>(req);
+  const code = typeof b.code === "string" ? b.code.trim().toLowerCase() : "";
+  const spent = /^[a-f0-9]{32}$/.test(code)
+    ? await env.DB.prepare("DELETE FROM device_transfers WHERE code_hash = ? AND expires > ? RETURNING device_id, local_enc")
+        .bind(await sha256Hex(code), now)
+        .first<{ device_id: string; local_enc: string | null }>()
+    : null;
+  if (!spent) {
+    await env.DB.batch([
+      env.DB.prepare("DELETE FROM transfer_failures WHERE at <= ?").bind(now - 3600_000),
+      env.DB.prepare("INSERT INTO transfer_failures (ip, at) VALUES (?, ?)").bind(ip, now),
+    ]);
+    throw new HttpError(404, "that code is wrong, used or expired");
+  }
+  const local = spent.local_enc ? await openJson<unknown>(env.CONFIG_KEY, spent.local_enc).catch(() => null) : null;
+  return { deviceId: spent.device_id, local };
+}
+
+/**
+ * The Kotlin app claims a code (no token of its own needed): the TV's device row, with its name,
+ * profile and lock, gets a new token, which only this answer carries, so the Rust app's stops
+ * working. A Kotlin install that had registered while unpaired names its own token, and that
+ * spare row goes. Wrong or spent codes count against the caller; never logs the code or token.
+ */
+async function transferClaim(req: Request, env: Env) {
+  const ip = req.headers.get("cf-connecting-ip") ?? "unknown";
+  const now = Date.now();
+  await transferLockedOut(env, ip, now);
+  const claimed = await spendTransfer(req, env, ip, now);
+  const token = randomId(32);
+  const spare = bearer(req);
+  await env.DB.batch([
+    env.DB.prepare("UPDATE devices SET token_hash = ?, pair_code = NULL, pair_expires = NULL, last_seen = ? WHERE id = ?").bind(await sha256Hex(token), now, claimed.deviceId),
+    ...(spare
+      ? [env.DB.prepare("DELETE FROM devices WHERE token_hash = ? AND profile_id IS NULL AND id <> ?").bind(await sha256Hex(spare), claimed.deviceId)]
+      : []),
+  ]);
+  return json({ deviceId: claimed.deviceId, deviceToken: token, local: claimed.local });
+}
+
+/**
+ * A Kotlin app that is already paired takes in the Rust app's code on the same TV: the Rust app's
+ * device row goes (so its token gets 401, which is how the Rust app knows the move worked) and its
+ * settings come back for the Kotlin app to merge. The Kotlin row keeps its own name and lock, and
+ * only takes the Rust row's when it has none. Both rows must be on the same profile; a code from a
+ * TV on another profile is refused (and spent). Never logs the code or tokens.
+ */
+async function transferAbsorb(req: Request, env: Env) {
+  const d = await requireDevice(req, env);
+  if (!d.profile_id) throw new HttpError(409, "this TV isn't paired");
+  if ((d.app_version ?? "").startsWith("0.1.")) throw new HttpError(409, "only the Kotlin app takes a TV over");
+  const ip = req.headers.get("cf-connecting-ip") ?? "unknown";
+  const now = Date.now();
+  await transferLockedOut(env, ip, now);
+  const spent = await spendTransfer(req, env, ip, now);
+  const from = await env.DB.prepare("SELECT * FROM devices WHERE id = ?").bind(spent.deviceId).first<DeviceRow>();
+  if (!from) throw new HttpError(404, "that TV is already gone");
+  if (from.id === d.id) throw new HttpError(409, "that code is this TV's own");
+  if (from.profile_id !== d.profile_id) {
+    console.warn(`transfer-absorb refused: device ${d.id} and ${from.id} are on different profiles`);
+    throw new HttpError(409, "that TV is on another profile");
+  }
+  await env.DB.batch([
+    env.DB.prepare("UPDATE devices SET nickname = COALESCE(nickname, ?), lock_message = COALESCE(lock_message, ?), last_seen = ? WHERE id = ?")
+      .bind(from.nickname, from.lock_message ?? null, now, d.id),
+    env.DB.prepare("DELETE FROM devices WHERE id = ?").bind(from.id),
+  ]);
+  return json({ absorbed: from.id, local: spent.local });
+}
+
 async function deviceConfig(req: Request, env: Env) {
   const d = await requireDevice(req, env);
   const now = Date.now();
@@ -1410,6 +1522,9 @@ export async function handle(req: Request, env: Env): Promise<Response> {
   if (m === "POST" && p === "/api/device/register") return deviceRegister(req, env);
   if (m === "GET" && p === "/api/device/config") return deviceConfig(req, env);
   if (m === "POST" && p === "/api/device/heartbeat") return deviceHeartbeat(req, env);
+  if (m === "POST" && p === "/api/device/transfer-start") return transferStart(req, env);
+  if (m === "POST" && p === "/api/device/transfer-claim") return transferClaim(req, env);
+  if (m === "POST" && p === "/api/device/transfer-absorb") return transferAbsorb(req, env);
   if (m === "POST" && p === "/api/device/diagnostics") return deviceDiagnostics(req, env);
   if (m === "POST" && p === "/api/device/reachability") return deviceReachability(req, env);
   if (m === "POST" && p === "/api/device/categories") return deviceCategories(req, env);

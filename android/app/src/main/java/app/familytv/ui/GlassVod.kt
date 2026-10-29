@@ -35,7 +35,6 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.collectAsState
@@ -68,7 +67,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.Icon
-import androidx.tv.material3.LocalContentColor
 import androidx.tv.material3.Text
 import app.familytv.BuildConfig
 import app.familytv.app
@@ -87,7 +85,7 @@ import app.familytv.perf.Perf
 import app.familytv.portal.Profile
 import app.familytv.sync.PlaybackStatus
 import app.familytv.trakt.ProgressRules
-import app.familytv.usage.Usage
+import app.familytv.usage.rememberSearchLog
 import app.familytv.user.ProgressEntity
 import app.familytv.user.ProgressKey
 import coil.compose.AsyncImage
@@ -391,62 +389,56 @@ private fun VodHome(
     }
     LaunchedEffect(fits, slides.isNotEmpty()) { if (slides.isNotEmpty()) fits?.let { slot.floatValue = it } }
     val heroHeight = slot.floatValue.takeIf { it > 0f }?.let { with(density) { it.toDp() } } ?: CAROUSEL_HEIGHT.gx
-    // While the art is up the rows sit on its dark shade, so they keep light text in either look.
-    val onArt by remember(shell) { derivedStateOf { shell?.backdrop?.value != null } }
-    val page = LocalGlassPalette.current
-    val rowPalette = if (carousel && onArt) GlassPalette.Dark else page
 
-    CompositionLocalProvider(LocalGlassPalette provides rowPalette, LocalContentColor provides rowPalette.text) {
-        LazyColumn(
-            Modifier.onFocusChanged { listFocused = it.hasFocus },
-            state = list, verticalArrangement = Arrangement.spacedBy(ROW_GAP.gx), contentPadding = PaddingValues(bottom = 40.dp),
-        ) {
-            // Always the first item, so the highlights loading in after the rest don't land above the scroll position.
-            item("hero") {
-                if (slides.isNotEmpty()) HomeCarousel(slides, marks, Modifier.height(heroHeight).onFocusChanged { heroFocused = it.hasFocus; if (it.hasFocus) lastCard.value = "hero" }, entry = entryPoint(target == "hero"), compact = heroHeight < CAROUSEL_COMPACT.gx)
-                else if (featured != null) Row(Modifier.fillMaxWidth().height(190.gx).padding(horizontal = FOCUS_ROOM), horizontalArrangement = Arrangement.spacedBy(20.gx)) {
-                    val (item, from) = featured
-                    HeroCard(
-                        item.title, listOf(if (movies) "Movie" else "TV show", from).joinToString("  ·  "), item.poster, HERO_MAIN, 2.2f,
-                        entryPoint(target == "hero").onFocusChanged { if (it.hasFocus) lastCard.value = "hero" },
-                    ) {
-                        when (item) {
-                            is VodItem.Movie -> nav?.movie = item.g to marks.movieKeys
-                            is VodItem.Show -> nav?.open = item.g
-                        }
+    LazyColumn(
+        Modifier.onFocusChanged { listFocused = it.hasFocus },
+        state = list, verticalArrangement = Arrangement.spacedBy(ROW_GAP.gx), contentPadding = PaddingValues(bottom = 40.dp),
+    ) {
+        // Always the first item, so the highlights loading in after the rest don't land above the scroll position.
+        item("hero") {
+            if (slides.isNotEmpty()) HomeCarousel(slides, marks, Modifier.height(heroHeight).onFocusChanged { heroFocused = it.hasFocus; if (it.hasFocus) lastCard.value = "hero" }, entry = entryPoint(target == "hero"), compact = heroHeight < CAROUSEL_COMPACT.gx)
+            else if (featured != null) HighlightsRow {
+                val (item, from) = featured
+                HeroCard(
+                    item.title, listOf(if (movies) "Movie" else "TV show", from).joinToString("  ·  "), item.poster, HERO_MAIN, 2.2f,
+                    entryPoint(target == "hero").onFocusChanged { if (it.hasFocus) lastCard.value = "hero" },
+                ) {
+                    when (item) {
+                        is VodItem.Movie -> nav?.movie = item.g to marks.movieKeys
+                        is VodItem.Show -> nav?.open = item.g
                     }
-                    shelves[newest]?.let { l -> HeroCard(newest, null, l.first().poster, HERO_NEW, 1f, entryPoint(target == "newest")) { open(if (movies) "recent" else "new") } }
-                    shelves["Top rated"]?.let { l -> HeroCard("Top rated", null, l.first().poster, HERO_TOP, 1f, entryPoint(target == "top")) { open("top") } }
                 }
+                shelves[newest]?.let { l -> HeroCard(newest, null, l.first().poster, HERO_NEW, 1f, entryPoint(target == "newest")) { open(if (movies) "recent" else "new") } }
+                shelves["Top rated"]?.let { l -> HeroCard("Top rated", null, l.first().poster, HERO_TOP, 1f, entryPoint(target == "top")) { open("top") } }
             }
-            rows.filter { it.first == CONTINUE_WATCHING || it.first == FOR_YOU }.forEach { (title, items) -> shelf(title, items) }
-            if (providers.isNotEmpty()) item("providers") {
-                Column(verticalArrangement = Arrangement.spacedBy(10.gx)) {
-                    GlassHeading("Providers", Modifier.padding(start = FOCUS_ROOM))
-                    ProvidersShelf(providers, target) { open("provider/${it.name}") }
-                }
+        }
+        rows.filter { it.first == CONTINUE_WATCHING || it.first == FOR_YOU }.forEach { (title, items) -> shelf(title, items) }
+        if (providers.isNotEmpty()) item("providers") {
+            Column(verticalArrangement = Arrangement.spacedBy(10.gx)) {
+                GlassHeading("Providers", Modifier.padding(start = FOCUS_ROOM))
+                ProvidersShelf(providers, target) { open("provider/${it.name}") }
             }
-            if (languages.isNotEmpty()) item("Languages") {
-                Column(verticalArrangement = Arrangement.spacedBy(10.gx)) {
-                    GlassHeading("Languages", Modifier.padding(start = FOCUS_ROOM))
-                    PillRow {
-                        items(languages, key = { it.name }) { g ->
-                            BigPill(g.label, entryPoint(target == "language/${g.name}")) { open("language/${g.name}") }
-                        }
+        }
+        if (languages.isNotEmpty()) item("Languages") {
+            Column(verticalArrangement = Arrangement.spacedBy(10.gx)) {
+                GlassHeading("Languages", Modifier.padding(start = FOCUS_ROOM))
+                PillRow {
+                    items(languages, key = { it.name }) { g ->
+                        BigPill(g.label, entryPoint(target == "language/${g.name}")) { open("language/${g.name}") }
                     }
                 }
             }
-            rows.filter { it.first != CONTINUE_WATCHING && it.first != FOR_YOU }.forEach { (title, items) -> shelf(title, items) }
-            if (cats.isNotEmpty()) item("categories") {
-                Column(Modifier.padding(horizontal = FOCUS_ROOM), verticalArrangement = Arrangement.spacedBy(10.gx)) {
-                    GlassHeading("All categories")
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(10.gx), verticalArrangement = Arrangement.spacedBy(10.gx)) {
-                        // The toggle stays put, so focus never drops when the chips open or close.
-                        BigPill(if (catsOpen) "Hide categories" else "Show all categories (${cats.size + if (hasAdult) 1 else 0})") { allCats = !catsOpen }
-                        if (catsOpen) {
-                            cats.forEach { c -> BigPill(c.displayName, entryPoint(target == "cat/${c.chipKey}")) { open("cat/${c.chipKey}") } }
-                            if (hasAdult) BigPill(ADULT_CONTENT, entryPoint(target == "adult"), lock = true) { open("adult") }
-                        }
+        }
+        rows.filter { it.first != CONTINUE_WATCHING && it.first != FOR_YOU }.forEach { (title, items) -> shelf(title, items) }
+        if (cats.isNotEmpty()) item("categories") {
+            Column(Modifier.padding(horizontal = FOCUS_ROOM), verticalArrangement = Arrangement.spacedBy(10.gx)) {
+                GlassHeading("All categories")
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(10.gx), verticalArrangement = Arrangement.spacedBy(10.gx)) {
+                    // The toggle stays put, so focus never drops when the chips open or close.
+                    BigPill(if (catsOpen) "Hide categories" else "Show all categories (${cats.size + if (hasAdult) 1 else 0})") { allCats = !catsOpen }
+                    if (catsOpen) {
+                        cats.forEach { c -> BigPill(c.displayName, entryPoint(target == "cat/${c.chipKey}")) { open("cat/${c.chipKey}") } }
+                        if (hasAdult) BigPill(ADULT_CONTENT, entryPoint(target == "adult"), lock = true) { open("adult") }
                     }
                 }
             }
@@ -460,7 +452,9 @@ private const val ROW_ROOM = 8
 
 /** How long Home waits for its categories before saying there are none. */
 private const val EMPTY_AFTER_MS = 1500L
-private val HERO_MAIN = listOf(Color(0xFF3B4A6B), Color(0xFF1D2638), Color(0xFF0F1420))
+/** A focused highlights card's zoom. */
+internal const val HERO_SCALE = 1.04f
+internal val HERO_MAIN = listOf(Color(0xFF3B4A6B), Color(0xFF1D2638), Color(0xFF0F1420))
 private val HERO_NEW = listOf(Color(0xFF5A3D2B), Color(0xFF1F1612))
 private val HERO_TOP = listOf(Color(0xFF2B4A5A), Color(0xFF121C22))
 
@@ -469,11 +463,23 @@ private val POSTER_W: Dp @Composable get() = if (LocalBigTiles.current) 190.gx e
 
 private val VodItem.poster: String? get() = when (this) { is VodItem.Movie -> g.poster; is VodItem.Show -> g.poster }
 
+/**
+ * The highlights row where there's no carousel, with room all round for a focused card's zoom: as the page's first
+ * row, its cards' tops were cut off at the list's top edge when focused (round 22).
+ */
+@Composable
+internal fun HighlightsRow(content: @Composable RowScope.() -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = FOCUS_ROOM).height(190.gx).padding(horizontal = FOCUS_ROOM),
+        horizontalArrangement = Arrangement.spacedBy(20.gx), content = content,
+    )
+}
+
 /** A glass card in the highlights row: artwork, a dark fade, and its title. */
 @Composable
-private fun RowScope.HeroCard(title: String, subtitle: String?, art: String?, tint: List<Color>, weight: Float, modifier: Modifier, onClick: () -> Unit) {
+internal fun RowScope.HeroCard(title: String, subtitle: String?, art: String?, tint: List<Color>, weight: Float, modifier: Modifier, onClick: () -> Unit) {
     val shape = RoundedCornerShape(22.gx)
-    FocusBox(onClick = onClick, outline = true, scale = 1.04f, color = Color.Transparent, shape = shape, modifier = modifier.weight(weight).fillMaxHeight()) {
+    FocusBox(onClick = onClick, outline = true, scale = HERO_SCALE, color = Color.Transparent, shape = shape, modifier = modifier.weight(weight).fillMaxHeight()) {
         Box(Modifier.fillMaxSize().background(Brush.linearGradient(tint)).border(1.dp, Color(0x24FFFFFF), shape))
         if (art != null) AsyncImage(art, contentDescription = null, contentScale = ContentScale.Crop, alignment = Alignment.TopCenter, modifier = Modifier.fillMaxSize())
         Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.35f to Color.Transparent, 1f to Color(0xC8000000))))
@@ -665,7 +671,8 @@ private fun CollectionPage(
             }
         }
     }
-    LaunchedEffect(q) { if (q.length >= 2) { delay(300); Usage.log(if (items.isNullOrEmpty()) Usage.Action.SEARCH_EMPTY else Usage.Action.SEARCH_SUBMIT, items?.size ?: 0) } }
+    val log = rememberSearchLog()
+    LaunchedEffect(q) { if (q.length >= 2) { delay(300); log.settled(q, items?.size ?: 0) } else log.ended() }
     Column {
         PageHeader(onBack, title, art, counts)
         if (views.isNotEmpty()) Row(Modifier.padding(start = FOCUS_ROOM, bottom = 10.gx), verticalAlignment = Alignment.CenterVertically) {
@@ -682,7 +689,7 @@ private fun CollectionPage(
             else -> {
                 val grid = c.grids.getOrPut(if (q.length >= 2) View.AToZ else view ?: View.AToZ) { LazyGridState() }
                 val entry = nav?.back?.let { b -> shown.firstOrNull { it.group == b }?.key }
-                PosterGrid(shown, { it.key }, entry, grid) { x, mod, _ -> VodCard(x, marks, mod, null) }
+                PosterGrid(shown, { it.key }, entry, grid) { x, mod, _ -> VodCard(x, marks, mod, null) { if (q.length >= 2) log.picked(shown.indexOf(x)) } }
             }
         }
     }
@@ -773,6 +780,7 @@ private fun VodSearch(profile: Profile, kind: String, q: String, marks: VodMarks
     // search made during a load or before the lists were read doesn't stay as it was.
     val voted by app.mostVoted.lists.collectAsState()
     val loads by CatalogWork.listsLoaded.collectAsState()
+    val log = rememberSearchLog()
     LaunchedEffect(q, keys, voted, loads) {
         val again = resultsFor == q
         // Never under a viewer already moving through the results.
@@ -794,7 +802,7 @@ private fun VodSearch(profile: Profile, kind: String, q: String, marks: VodMarks
             // Test builds: the top of the order and each title's votes on the list, to check it on the TV (titles only).
             Log.i("VodSearch", "most-voted ${popular?.size ?: "not read"}; " + results.orEmpty().take(12).joinToString { "${it.title} (${it.year ?: "-"}): ${popular?.votes(it.tmdbIds, it.title, it.year) ?: "off"}" })
         }
-        if (!again) found.size.let { Usage.log(if (it == 0) Usage.Action.SEARCH_EMPTY else Usage.Action.SEARCH_SUBMIT, it) }
+        if (!again) log.settled(q, found.size)
     }
     val shown = results
     when {
@@ -803,7 +811,7 @@ private fun VodSearch(profile: Profile, kind: String, q: String, marks: VodMarks
         else -> Box(Modifier.onFocusChanged { picking = it.hasFocus }) {
             key(shownSet) {
                 PosterGrid(shown, { it.key }, nav?.back?.let { b -> shown.firstOrNull { it.group == b }?.key }) { x, mod, _ ->
-                    VodCard(x, marks, mod, null) { Usage.log(Usage.Action.SEARCH_PICK, shown.indexOf(x)) }
+                    VodCard(x, marks, mod, null) { log.picked(shown.indexOf(x)) }
                 }
             }
         }

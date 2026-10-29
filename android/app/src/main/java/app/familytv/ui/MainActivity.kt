@@ -1,6 +1,7 @@
 package app.familytv.ui
 
 import android.annotation.SuppressLint
+import android.content.Intent
 import android.content.res.Configuration
 import android.os.Bundle
 import android.view.KeyEvent
@@ -26,6 +27,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
@@ -38,6 +40,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -58,6 +61,7 @@ import app.familytv.perf.Perf
 import app.familytv.start.OpenOnStart
 import app.familytv.sync.CommandRunner
 import app.familytv.sync.TvLock
+import app.familytv.transfer.Transfer
 import kotlinx.coroutines.launch
 import java.util.Calendar
 
@@ -101,6 +105,7 @@ class MainActivity : ComponentActivity() {
         Perf.activityCreated()
         Perf.watchFrames(this)
         if (savedInstanceState == null) splash = Splash.choice(app.portal.cachedConfig?.profile?.splash, Calendar.getInstance().get(Calendar.MONTH) + 1)
+        if (savedInstanceState == null) takeTransfer(intent)
         lifecycleScope.launch {
             app.commands.events.collect { e ->
                 if (e is CommandRunner.UiEvent.Message) message = e.text
@@ -163,6 +168,18 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        takeTransfer(intent)
+    }
+
+    /** A move code from the Rust app ([Transfer]), read once. */
+    private fun takeTransfer(intent: Intent?) {
+        val code = intent?.getStringExtra(Transfer.EXTRA) ?: return
+        intent.removeExtra(Transfer.EXTRA)
+        vm.transfer(code)
+    }
+
     override fun onStart() {
         super.onStart()
         vm.start()
@@ -203,6 +220,13 @@ fun Centered(content: @Composable () -> Unit) {
 
 @Composable
 private fun SyncingScreen(s: Screen.Syncing) = Centered {
+    // A load runs for minutes on a Fire Stick: the screen stays on so the TV's own screensaver doesn't stop the app
+    // (and its check-ins) part way; Home takes the screen over from here.
+    val view = LocalView.current
+    DisposableEffect(view) {
+        view.keepScreenOn = true
+        onDispose { view.keepScreenOn = false }
+    }
     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.widthIn(max = 520.dp).padding(horizontal = 16.dp)) {
         Text("${s.step}…", fontSize = 22.sp)
         Spacer(Modifier.height(20.dp))

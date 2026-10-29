@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -39,6 +40,7 @@ import app.familytv.FamilyTvApp
 import app.familytv.app
 import app.familytv.data.CategoryEntity
 import app.familytv.data.Kind
+import app.familytv.perf.Perf
 import app.familytv.portal.Profile
 import app.familytv.user.SaverSource
 import app.familytv.weather.WeatherParse
@@ -81,6 +83,10 @@ internal class SaverPicture(val url: String, val crop: Boolean, val caption: Str
 @Composable
 internal fun Screensaver(profile: Profile, weather: GlassWeather) {
     val ctx = LocalContext.current
+    DisposableEffect(Unit) {
+        Perf.screensaver = true
+        onDispose { Perf.screensaver = false }
+    }
     val source by ctx.app.glassPrefs.saverSource.collectAsState()
     val movies = categories(profile, Kind.MOVIE)
     val shows = categories(profile, Kind.SERIES)

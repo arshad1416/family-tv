@@ -1,12 +1,12 @@
 package app.familytv.trailer
 
+import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
 import app.familytv.FamilyTvApp
-import app.familytv.app
 import app.familytv.core.Http
 import app.familytv.data.MovieEntity
 import app.familytv.data.ProgrammeEntity
@@ -16,8 +16,6 @@ import app.familytv.iptv.SeriesTitles
 import app.familytv.portal.Profile
 import app.familytv.ui.YOUTUBE
 import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
@@ -165,41 +163,41 @@ class MediaExtras(private val app: FamilyTvApp) {
 }
 
 /**
- * Opens a YouTube trailer in the first installed YouTube app (the TV one first), else any app that
- * takes vnd.youtube: or the watch link; says so when nothing can (some Fire TV devices).
- *
- * Google TV's YouTube drops the link when it opens on its "Who's watching?" picker, and lands on
- * its home screen once an account is picked. So the same link is sent once more after
- * [TRAILER_RESEND_MS] while YouTube is still in front, unless the viewer came back to Family TV.
+ * Plays a YouTube trailer on its own screen ([TrailerActivity]), so YouTube's account picker never comes into it; the
+ * YouTube app is the fallback there ([openInYouTube]).
  */
 fun openTrailer(ctx: Context, youtubeId: String) {
-    val app = ctx.app
+    val intent = Intent(ctx, TrailerActivity::class.java).putExtra(TrailerActivity.EXTRA_ID, youtubeId)
+    if (ctx !is Activity) intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    ctx.startActivity(intent)
+}
+
+/**
+ * Opens a YouTube trailer in the first installed YouTube app (the TV one first), else any app that
+ * takes the watch link or vnd.youtube:; says so when nothing can (some Fire TV devices).
+ */
+fun openInYouTube(ctx: Context, youtubeId: String) {
     val pm = ctx.packageManager
     val installed = YOUTUBE.filter { runCatching { pm.getPackageInfo(it, 0) }.isSuccess }
     for (intent in trailerIntents(youtubeId, installed)) {
         try {
             ctx.startActivity(intent)
+            return
         } catch (_: ActivityNotFoundException) {
             continue
         } catch (_: SecurityException) {
             continue
         }
-        val visits = app.visits
-        app.scope.launch {
-            delay(TRAILER_RESEND_MS)
-            if (!app.visible && app.visits == visits) runCatching { app.startActivity(intent) }
-        }
-        return
     }
     Toast.makeText(ctx.applicationContext, "Trailer needs the YouTube app", Toast.LENGTH_LONG).show()
 }
 
-/** How long YouTube gets to show its account picker before the trailer link is sent again. */
-const val TRAILER_RESEND_MS = 4_000L
-
-/** What [openTrailer] tries, best first: each of [apps] by package (app link, then watch link), then any app. */
+/**
+ * What [openInYouTube] tries, best first: each of [apps] by package, then any app; the watch link before the app link,
+ * which Google TV's YouTube opens on its home screen and Fire TV's refuses (round 22).
+ */
 internal fun trailerIntents(youtubeId: String, apps: List<String>): List<Intent> {
-    val uris = listOf(Trailers.appUri(youtubeId), Trailers.webUrl(youtubeId))
+    val uris = listOf(Trailers.webUrl(youtubeId), Trailers.appUri(youtubeId))
     return (apps.flatMap { pkg -> uris.map { it to pkg } } + uris.map { it to null }).map { (uri, pkg) ->
         Intent(Intent.ACTION_VIEW, Uri.parse(uri))
             .setPackage(pkg)

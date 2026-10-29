@@ -1,11 +1,16 @@
 package app.familytv.trailer
 
+import android.app.Application
 import android.content.Intent
+import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
@@ -16,10 +21,10 @@ class OpenTrailerTest {
         val intents = trailerIntents("dQw4w9WgXcQ", listOf("com.google.android.youtube.tv"))
         assertEquals(
             listOf(
-                "vnd.youtube:dQw4w9WgXcQ" to "com.google.android.youtube.tv",
                 "https://www.youtube.com/watch?v=dQw4w9WgXcQ" to "com.google.android.youtube.tv",
-                "vnd.youtube:dQw4w9WgXcQ" to null,
+                "vnd.youtube:dQw4w9WgXcQ" to "com.google.android.youtube.tv",
                 "https://www.youtube.com/watch?v=dQw4w9WgXcQ" to null,
+                "vnd.youtube:dQw4w9WgXcQ" to null,
             ),
             intents.map { it.data.toString() to it.`package` },
         )
@@ -30,5 +35,36 @@ class OpenTrailerTest {
     @Test
     fun withoutYouTubeAnyAppMayOpenIt() {
         assertEquals(listOf(null, null), trailerIntents("dQw4w9WgXcQ", emptyList()).map { it.`package` })
+    }
+
+    /** Round 22: Google TV's YouTube opened on "Who's watching?" and never played the trailer, so it plays here. */
+    @Test
+    fun aTrailerPlaysOnItsOwnScreen() {
+        val app = ApplicationProvider.getApplicationContext<Application>()
+        openTrailer(app, "dQw4w9WgXcQ")
+        val started = shadowOf(app).nextStartedActivity
+        assertEquals(TrailerActivity::class.java.name, started.component?.className)
+        assertEquals("dQw4w9WgXcQ", started.getStringExtra(TrailerActivity.EXTRA_ID))
+        assertTrue("dQw4w9WgXcQ" in TrailerActivity.page("dQw4w9WgXcQ"))
+    }
+
+    @Test
+    fun aBadIdClosesTheTrailerScreen() {
+        val intent = Intent(ApplicationProvider.getApplicationContext(), TrailerActivity::class.java).putExtra(TrailerActivity.EXTRA_ID, "x'); alert(1")
+        val activity = Robolectric.buildActivity(TrailerActivity::class.java, intent).setup().get()
+        assertTrue(activity.isFinishing)
+    }
+
+    /** Round 23: on the Kitchen, a Settings page opened over a trailer and its sound carried on. */
+    @Test
+    fun aCoveredTrailerPausesThenCloses() {
+        val intent = Intent(ApplicationProvider.getApplicationContext(), TrailerActivity::class.java).putExtra(TrailerActivity.EXTRA_ID, "dQw4w9WgXcQ")
+        val controller = Robolectric.buildActivity(TrailerActivity::class.java, intent).setup()
+        val activity = controller.get()
+        assertFalse(activity.isFinishing)
+        controller.pause()
+        assertEquals("hold()", shadowOf(activity.findViewById<android.view.ViewGroup>(android.R.id.content).getChildAt(0) as android.webkit.WebView).lastEvaluatedJavascript)
+        controller.stop()
+        assertTrue(activity.isFinishing)
     }
 }

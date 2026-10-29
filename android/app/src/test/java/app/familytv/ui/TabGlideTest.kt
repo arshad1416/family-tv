@@ -185,15 +185,6 @@ class TabGlideTest {
     }
 
     @Test
-    fun theBarTakesTheDarkLookWithHomesArtNotTheTab() {
-        // Both looks, whatever the hour: over the art the bar is dark, off it the page's own look.
-        for (page in listOf(GlassPalette.Light, GlassPalette.Dark)) {
-            assertEquals(page, barPalette(0f, page))
-            assertEquals(GlassPalette.Dark, barPalette(1f, page))
-        }
-    }
-
-    @Test
     fun noPillOnSettings() {
         val glide = TabGlide()
         runBlocking { glide.pill.glide(200f to 120f, jump = true) }

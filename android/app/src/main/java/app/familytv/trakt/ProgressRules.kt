@@ -51,7 +51,9 @@ object ProgressRules {
     /**
      * Continue watching, newest first: the started, unwatched movies or episodes of [kind]
      * ([app.familytv.user.ProgressKey.MOVIE] or [app.familytv.user.ProgressKey.EPISODE]), one per film or show (its latest).
+     * A rewatch of something marked watched resumes, but stays out of it, so no poster there shows both the check and
+     * the time left (round 22).
      */
     fun continueWatching(rows: Collection<ProgressEntity>, kind: String): List<ProgressEntity> =
-        rows.filter { it.kind == kind && started(it) }.sortedByDescending { it.updatedAt }.distinctBy { it.sourceId to it.itemId }
+        rows.filter { it.kind == kind && !it.watched && started(it) }.sortedByDescending { it.updatedAt }.distinctBy { it.sourceId to it.itemId }
 }

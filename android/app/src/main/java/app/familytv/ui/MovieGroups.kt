@@ -71,6 +71,51 @@ suspend fun AppDb.allCopies(group: MovieGroup, visible: Set<Pair<String, String>
     return copies.sortedWith(compareBy({ SeriesTitles.languageName(it.language) }, { it.key }))
 }
 
+/**
+ * For each film in [keys] (movie [ProgressKey]s), the keys of its other copies in the catalog: another TV, or the Rust
+ * app, may have played a copy in another language or from another line, which this page's poster doesn't list.
+ */
+suspend fun AppDb.movieSiblings(keys: Collection<String>): Map<String, List<String>> {
+    val dao = catalog()
+    val played = keys.mapNotNull { k -> k.split('/', limit = 3).takeIf { it.size == 3 && it[0] == "m" }?.let { dao.movie(it[1], it[2]) } }
+    if (played.isEmpty()) return emptyMap()
+    val titles = played.map { it.groupKey }.filter { it.isNotEmpty() }.distinct()
+    val tmdb = played.mapNotNull { it.tmdb }.distinct()
+    // Inside SQLite's limit on query arguments.
+    val more = titles.chunked(400).flatMap { dao.movieCopies(it, emptyList()) } + tmdb.chunked(400).flatMap { dao.movieCopies(emptyList(), it) }
+    val playedKeys = played.mapTo(HashSet()) { ProgressKey.movie(it.sourceId, it.streamId) }
+    return groupMovies((played + more).distinctBy { it.key }).flatMap { g ->
+        val all = g.copies.map { ProgressKey.movie(it.sourceId, it.streamId) }
+        if (all.size < 2) emptyList() else all.filter { it in playedKeys }.map { k -> k to all.filter { it != k } }
+    }.toMap()
+}
+
+/**
+ * Progress by key, with each film's marks on its other copies ([siblings]): a copy with no row of its own takes the
+ * film's latest, and a watched copy makes the whole film watched, so its poster shows the check and it leaves
+ * Continue watching (round 22). Rows in the database are unchanged.
+ */
+internal fun withSiblings(rows: List<ProgressEntity>, siblings: Map<String, List<String>>): Map<String, ProgressEntity> {
+    val own = rows.associateBy { it.key }
+    if (siblings.isEmpty()) return own
+    val out = HashMap(own)
+    for ((key, others) in siblings) {
+        val r = own[key] ?: continue
+        for (s in others) {
+            val cur = out[s]
+            out[s] = when {
+                cur == null -> r
+                cur.watched -> cur
+                r.watched -> r
+                own[s] != null -> cur
+                r.updatedAt > cur.updatedAt -> r
+                else -> cur
+            }
+        }
+    }
+    return out
+}
+
 /** The copy OK plays: one already part-watched, else the one in the family's language, nearest Settings' Stream quality. */
 fun pickCopy(ctx: Context, copies: List<MovieEntity>, progress: Map<String, ProgressEntity>): MovieEntity {
     val started = copies.mapNotNull { c -> progress[ProgressKey.movie(c.sourceId, c.streamId)]?.takeIf { !it.watched && ProgressRules.started(it) }?.let { c to it } }

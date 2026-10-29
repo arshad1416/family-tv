@@ -11,6 +11,7 @@ import app.familytv.usage.Usage
 import app.familytv.user.SharedProgressPage
 import app.familytv.user.SharedProgressRow
 import com.google.gson.Gson
+import com.google.gson.JsonElement
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -51,6 +52,26 @@ class PortalClient(context: Context, private val baseUrl: String = BuildConfig.P
             auth = false,
         )
         prefs.edit().putString("deviceId", r.deviceId).putString("token", r.deviceToken).apply()
+    }
+
+    /**
+     * Takes over the device row the Rust app on this TV handed over with [code] ([app.familytv.transfer.Transfer]),
+     * dropping any registration of this app's own; returns the settings the Rust app sent, if any.
+     */
+    suspend fun claimTransfer(code: String): JsonElement? = registerLock.withLock {
+        val req = Request.Builder().url("$baseUrl/api/device/transfer-claim").post(gson.toJson(mapOf("code" to code)).toRequestBody(jsonType))
+        val r = call(req, TransferClaim::class.java, auth = token != null)
+        prefs.edit().clear().putString("deviceId", r.deviceId).putString("token", r.deviceToken).apply()
+        r.local
+    }
+
+    /**
+     * Takes in the Rust app's [code] on a TV where this app is already paired: the portal drops the Rust app's
+     * device row (same profile only) and returns the settings it sent, if any.
+     */
+    suspend fun absorbTransfer(code: String): JsonElement? {
+        val req = Request.Builder().url("$baseUrl/api/device/transfer-absorb").post(gson.toJson(mapOf("code" to code)).toRequestBody(jsonType))
+        return call(req, TransferAbsorb::class.java, auth = true).local
     }
 
     /** Forget this device (portal removed it); the next call registers again and shows a new code. */

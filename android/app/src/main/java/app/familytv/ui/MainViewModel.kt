@@ -1,6 +1,7 @@
 package app.familytv.ui
 
 import android.app.Application
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import app.familytv.app
@@ -9,12 +10,14 @@ import app.familytv.core.Http
 import app.familytv.iptv.CatalogWork
 import app.familytv.iptv.ServerSwitch
 import app.familytv.perf.Perf
+import app.familytv.portal.Command
 import app.familytv.portal.DeviceConfig
 import app.familytv.portal.LatestApp
 import app.familytv.portal.PortalException
 import app.familytv.portal.Profile
 import app.familytv.sync.PlaybackStatus
 import app.familytv.trailer.Tmdb
+import app.familytv.transfer.Transfer
 import app.familytv.update.Updater
 import app.familytv.usage.Usage
 import kotlinx.coroutines.CancellationException
@@ -42,6 +45,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val diagnosing = MutableStateFlow(false)
 
     private var loop: Job? = null
+    /** Portal commands that came in while lists were loading. */
+    private var heldCommands: List<Command> = emptyList()
 
     val profile: Profile? get() = (screen.value as? Screen.Ready)?.config?.profile
 
@@ -59,7 +64,42 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun stop() { loop?.cancel() }
 
+    /**
+     * Opened by the Rust app with a move code ([Transfer]): taken in at once on a TV that is set up, else on the
+     * next boot (at once if pairing shows now).
+     */
+    fun transfer(code: String?) {
+        if (!Transfer.offer(code)) return
+        when {
+            loop?.isActive != true -> Unit // the boot takes it
+            _screen.value is Screen.Pairing -> { stop(); start() }
+            app.portal.cachedConfig != null -> viewModelScope.launch {
+                takeTransfer()
+                app.portal.cachedConfig?.profile?.let { applyTransfer(it) }
+            }
+        }
+    }
+
+    /**
+     * Takes a waiting move code: claimed on a TV that isn't set up yet (the pairing screen shows as usual if that
+     * fails), absorbed on one that is, which removes the Rust app's registration.
+     */
+    private suspend fun takeTransfer() {
+        val code = Transfer.take() ?: return
+        val paired = app.portal.cachedConfig != null
+        runCatching { if (paired) app.portal.absorbTransfer(code) else app.portal.claimTransfer(code) }
+            .onSuccess { Transfer.claimed = Transfer.Claimed(Transfer.parse(it) ?: Transfer.Local(), paired) }
+            .onFailure { Log.w("Transfer", "move from the Rust app failed: ${(it as? PortalException)?.code ?: it.javaClass.simpleName}") }
+    }
+
+    private suspend fun applyTransfer(profile: Profile) {
+        val claimed = Transfer.claimed ?: return
+        Transfer.claimed = null
+        runCatching { Transfer.apply(app, claimed, profile) }
+    }
+
     private suspend fun boot() {
+        takeTransfer()
         val config = try {
             app.portal.config()
         } catch (e: Exception) {
@@ -76,6 +116,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         val profile = config.profile ?: return
+        applyTransfer(profile)
         val firstLoad = app.db.catalog().channelCount() == 0
         if (firstLoad) {
             _screen.value = Screen.Syncing("Loading channels")
@@ -115,11 +156,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private suspend fun checkIn() {
         when (val s = _screen.value) {
             is Screen.Pairing, is Screen.Failed -> boot()
+            // Reload channels takes minutes on a Fire Stick: still check in, so the portal doesn't show the TV as
+            // offline. What the portal sent waits for the home.
+            is Screen.Syncing, Screen.Loading -> if (app.portal.cachedConfig != null) runCatching {
+                heldCommands += app.portal.heartbeat(PlaybackStatus.snapshot()).commands.orEmpty()
+            }
             is Screen.Ready -> runCatching {
                 val hb = app.portal.heartbeat(PlaybackStatus.snapshot())
                 // Unpaired in the portal: show the pairing code again (same device, no re-register).
                 if (!hb.paired) { boot(); return }
-                app.commands.runAll(hb.commands, s.config.profile)
+                app.commands.runAll(heldCommands + hb.commands.orEmpty(), s.config.profile)
+                heldCommands = emptyList()
                 app.sharedProgress.onSeq(hb.progressSeq)
                 offerUpdate(hb.latestApp)
                 Usage.send(app.portal)
@@ -128,13 +175,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 // Token rejected: the portal forgot this TV, so show why with a new code.
                 if ((it as? PortalException)?.code == 401) boot()
             }
-            else -> Unit
         }
     }
 
     private suspend fun offerUpdate(latest: LatestApp?) {
         runCatching { Updater.check(app, latest, visible = true) }
-            .onSuccess { it?.let { s -> PlaybackStatus.update = s } }
+            .onSuccess { PlaybackStatus.update = it }
             .onFailure { PlaybackStatus.update = "failed: ${it.message}" }
     }
 

@@ -3,6 +3,7 @@ package app.familytv.usage
 import android.os.SystemClock
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.remember
 import app.familytv.BuildConfig
 import app.familytv.portal.PortalClient
 
@@ -100,4 +101,61 @@ fun TrackScreen(screen: Usage.Screen) {
         Usage.opened(screen)
         onDispose { Usage.left(screen, (SystemClock.elapsedRealtime() - since) / 1000) }
     }
+}
+
+/**
+ * One search, logged once: the result count for the last words the viewer settled on, when they pick a result or
+ * leave the search, not at every pause in typing (a TV keyboard pauses after nearly every letter). Coming back to
+ * the same words on the same screen within [SAME_SEARCH_MS] (Back from the picked title rebuilds the search) is
+ * still that search. The words stay in memory only, as a hash; they are never logged.
+ */
+class SearchLog(private val now: () -> Long = SystemClock::elapsedRealtime) {
+    private var pending: Triple<Usage.Screen, Int, Int>? = null
+
+    /** Typing settled on [words] that found [results]. */
+    @Synchronized fun settled(words: String, results: Int) {
+        val screen = Usage.current
+        val key = (screen to words.trim().lowercase()).hashCode()
+        synchronized(SearchLog) {
+            val prev = last
+            if (prev != null && prev.first == key && now() - prev.second < SAME_SEARCH_MS) {
+                last = key to now()
+                pending = null
+                return
+            }
+        }
+        pending = Triple(screen, results, key)
+    }
+
+    /** The viewer picked result [index]: the search is logged first, once. */
+    @Synchronized fun picked(index: Int) {
+        flush()
+        Usage.log(Usage.Action.SEARCH_PICK, index)
+    }
+
+    /** The words were cleared or the search left. */
+    @Synchronized fun ended() = flush()
+
+    private fun flush() {
+        pending?.let { (screen, n, key) ->
+            Usage.log(screen, if (n == 0) Usage.Action.SEARCH_EMPTY else Usage.Action.SEARCH_SUBMIT, n)
+            synchronized(SearchLog) { last = key to now() }
+        }
+        pending = null
+    }
+
+    companion object {
+        const val SAME_SEARCH_MS = 10 * 60_000L
+
+        /** The last search logged, on any screen: its screen and words' hash, and when it was last seen. */
+        private var last: Pair<Int, Long>? = null
+    }
+}
+
+/** A [SearchLog] that logs its search as it leaves the screen. */
+@Composable
+fun rememberSearchLog(): SearchLog {
+    val log = remember { SearchLog() }
+    DisposableEffect(log) { onDispose { log.ended() } }
+    return log
 }

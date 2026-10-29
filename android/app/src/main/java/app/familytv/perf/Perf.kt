@@ -16,17 +16,21 @@ import kotlin.math.max
 import kotlin.math.roundToLong
 
 /**
- * Speed and memory numbers sent as the heartbeat's `status.perf`, to compare this app with the Rust
- * one on the same TVs (parity checklist, "Spec: Speed and memory report"; the definitions match the
- * Rust app's). Whole numbers, MB truncated; unknown fields are left out. Measured in place: no extra
- * network calls, and nothing about what's watched.
+ * Speed and memory numbers sent as the heartbeat's `status.perf` (parity checklist, "Spec: Speed and
+ * memory report"). Whole numbers, MB truncated; unknown fields are left out. Measured in place: no
+ * extra network calls, and nothing about what's watched.
  */
 object Perf {
     private const val MB = 1024L * 1024
     /** A launch counts as cold only when its screen opened this soon after the process started (not a background check-in's process). */
     private const val COLD_GAP_MS = 10_000L
-    /** A browsing frame slower than this is a slow frame (fixed, whatever the display's refresh rate). */
-    private const val SLOW_FRAME_NS = 16_000_000L
+    /**
+     * Before Android 12, a browsing frame that took more than this many refreshes is a slow frame. Android draws a
+     * frame while the one before is still on its way to the screen, so a frame on time often takes over one refresh
+     * (every frame did on the Chromecasts and the Kitchen's Fire Stick, Oct 28); over two, one was missed. From
+     * Android 12 the system gives each frame its own deadline, which allows for that queue ([missedDeadline]).
+     */
+    private const val SLOW_FRAME_REFRESHES = 2
 
     private var prefs: SharedPreferences? = null
     private var appCreatedAt = 0L
@@ -42,6 +46,8 @@ object Perf {
     @Volatile private var pssPeakKb = 0L
     /** The app's own pages are showing (not the startup splash, loading, pairing or full-screen video). */
     @Volatile var browsing = false
+    /** Our screensaver shows: its slow fades over hours aren't browsing, and would fill the slow-frame window. */
+    @Volatile var screensaver = false
     internal val frames = FrameWindow()
     private val frameHandler by lazy { Handler(HandlerThread("perf").apply { start() }.looper) }
 
@@ -80,16 +86,42 @@ object Perf {
         samplePssKb()
     }
 
-    /** Counts the window's slow frames while [browsing] (Android 7+; older TVs leave jankPct out). */
+    /**
+     * Counts the window's slow frames while [browsing], not under the [screensaver] (Android 7+; older TVs leave
+     * jankPct out). From Android 12 a slow frame is one that missed the deadline the system gave it, as gfxinfo's
+     * "deadline missed" counts them; before that, one that took over [SLOW_FRAME_REFRESHES] refreshes.
+     */
     fun watchFrames(activity: Activity) {
         if (Build.VERSION.SDK_INT < 24) return
+        @Suppress("DEPRECATION")
+        val hz = activity.windowManager.defaultDisplay?.refreshRate?.takeIf { it >= 20f } ?: 60f
+        val slowNs = slowFrameNs(hz)
         runCatching {
             activity.window.addOnFrameMetricsAvailableListener(Window.OnFrameMetricsAvailableListener { _, m, _ ->
-                if (!browsing) return@OnFrameMetricsAvailableListener
+                if (!browsing || screensaver) return@OnFrameMetricsAvailableListener
                 if (Build.VERSION.SDK_INT >= 26 && m.getMetric(FrameMetrics.FIRST_DRAW_FRAME) == 1L) return@OnFrameMetricsAvailableListener
-                frames.add(System.currentTimeMillis(), m.getMetric(FrameMetrics.TOTAL_DURATION) > SLOW_FRAME_NS)
+                val total = m.getMetric(FrameMetrics.TOTAL_DURATION)
+                val slow = if (Build.VERSION.SDK_INT >= 31) {
+                    missedDeadline(total, m.getMetric(FrameMetrics.DEADLINE), m.getMetric(FrameMetrics.INTENDED_VSYNC_TIMESTAMP), slowNs)
+                } else {
+                    total > slowNs
+                }
+                frames.add(System.currentTimeMillis(), slow)
             }, frameHandler)
         }
+    }
+
+    /** How long a frame may take at [hz] before it counts as slow, before Android 12. */
+    internal fun slowFrameNs(hz: Float): Long = (SLOW_FRAME_REFRESHES * 1e9 / hz).toLong()
+
+    /**
+     * Whether a frame that took [total] ns from its vsync missed its [deadline]: a time from the frame's vsync, or the
+     * moment itself when it reads as one (after [intendedVsync]). A deadline that doesn't read sensibly falls back to
+     * [fallbackNs].
+     */
+    internal fun missedDeadline(total: Long, deadline: Long, intendedVsync: Long, fallbackNs: Long): Boolean {
+        val budget = if (intendedVsync in 1..<deadline) deadline - intendedVsync else deadline
+        return total > if (budget in 1..1_000_000_000L) budget else fallbackNs
     }
 
     private fun samplePssKb(): Long = Debug.getPss().also { pssPeakKb = max(pssPeakKb, it) }

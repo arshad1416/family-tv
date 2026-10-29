@@ -25,6 +25,8 @@ object PlaybackStatus {
     @Volatile var openOnStart: String? = null
     /** The last automatic server switch, host names only (see [app.familytv.iptv.ServerSwitch]). */
     @Volatile var serverSwitch: Map<String, Any?>? = null
+    /** How the last progress sync with the profile's other TVs went, in numbers or an error code (see [app.familytv.user.SharedProgress]). */
+    @Volatile var progressSync: Map<String, Any?>? = null
 
     fun started(t: String) {
         title = t; startedAt = System.currentTimeMillis(); bufferingEvents = 0; bitrateKbps = null; droppedFrames = 0
@@ -48,6 +50,7 @@ object PlaybackStatus {
         "followed" to followed,
         "openOnStart" to openOnStart,
         "serverSwitch" to serverSwitch,
+        "progressSync" to progressSync,
         "perf" to runCatching { Perf.snapshot() }.getOrNull(),
     )
 }

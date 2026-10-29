@@ -25,7 +25,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.FloatState
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.MutableFloatState
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.State
@@ -46,6 +45,8 @@ import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -90,7 +91,8 @@ internal const val ROW_GAP = 22
  * [entry] lands focus on Play; [compact] draws the title and buttons smaller, for a short slot.
  * It moves on every [SLIDE_SHOW_MS] while it is on screen and the app is in front (not under the
  * player, a dialog or the screensaver); Left on Play and Right on the last button step through it
- * and restart the wait. Always on the dark look: the scrim under it stays dark in the light look.
+ * and restart the wait. In the page's look, as the backdrop's shades are; the title logo (light lettering, as TMDB's
+ * mostly are) only in Dark, its name in its place in Light.
  */
 @Composable
 internal fun HomeCarousel(slides: List<Slide>, marks: VodMarks, modifier: Modifier = Modifier, entry: Modifier = Modifier, compact: Boolean = false) {
@@ -140,42 +142,49 @@ internal fun HomeCarousel(slides: List<Slide>, marks: VodMarks, modifier: Modifi
     }
     LaunchedEffect(notYet) { if (notYet) { delay(3_000); notYet = false } }
 
-    OnDarkArt {
-        // The title and buttons sit just above the first row, which lies over the bottom of the art.
-        val logo = if (compact) 56.gx else 80.gx
-        val padV = if (compact) 8.gx else 10.gx
-        Column(modifier.fillMaxWidth().padding(start = FOCUS_ROOM, bottom = 4.gx), verticalArrangement = Arrangement.spacedBy(if (compact) 8.gx else 10.gx, Alignment.Bottom)) {
-            Box(Modifier.heightIn(min = logo), contentAlignment = Alignment.BottomStart) {
-                if (slide.logo != null) {
-                    AsyncImage(slide.logo, contentDescription = slide.title, contentScale = ContentScale.Fit, alignment = Alignment.BottomStart, modifier = Modifier.height(logo).widthIn(max = 400.gx))
-                } else {
-                    Text(slide.title, fontSize = (if (compact) 30 else 40).gsp, fontWeight = FontWeight.Bold, maxLines = if (compact) 1 else 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 620.gx))
-                }
+    // The title and buttons sit just above the first row, which lies over the bottom of the art.
+    val ink = LocalGlassPalette.current.text
+    val darkLook = ink.luminance() > 0.5f
+    val logo = if (compact) 56.gx else 80.gx
+    val padV = if (compact) 8.gx else 10.gx
+    Column(modifier.fillMaxWidth().padding(start = FOCUS_ROOM, bottom = 4.gx), verticalArrangement = Arrangement.spacedBy(if (compact) 8.gx else 10.gx, Alignment.Bottom)) {
+        // Round 23: on the Kitchen the logo was often still loading (or never came), leaving no title; the name shows until it's in.
+        var logoIn by remember(slide.logo) { mutableStateOf(false) }
+        Box(Modifier.heightIn(min = logo), contentAlignment = Alignment.BottomStart) {
+            if (slide.logo != null && darkLook) {
+                AsyncImage(
+                    slide.logo, contentDescription = slide.title, contentScale = ContentScale.Fit, alignment = Alignment.BottomStart,
+                    modifier = Modifier.height(logo).widthIn(max = 400.gx),
+                    onSuccess = { logoIn = true }, onError = { logoIn = false },
+                )
             }
-            val event = slide.target as? Slide.Target.Event
-            Text(
-                if (notYet && event != null) "Starts ${Featured.startsAt(event.start)}" else slide.detail,
-                fontSize = 17.gsp, color = Glass.Soft, maxLines = 1,
-            )
-            Row(
-                Modifier.onPreviewKeyEvent { e ->
-                    if (e.type != KeyEventType.KeyDown || slides.size < 2) return@onPreviewKeyEvent false
-                    when (e.key) {
-                        Key.DirectionLeft -> if (focusedButton == 0) { step(-1); true } else false
-                        Key.DirectionRight -> if (focusedButton == (if (more != null) 1 else 0)) { step(1); true } else false
-                        else -> false
-                    }
-                },
-                horizontalArrangement = Arrangement.spacedBy(12.gx),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                GlassPill("Play", play, entry.onFocusChanged { if (it.isFocused) focusedButton = 0 }, fill = Glass.Raised, border = true, fontSize = 17.gsp, padH = 26.gx, padV = padV)
-                more?.let { GlassPill("More info", it, Modifier.onFocusChanged { f -> if (f.isFocused) focusedButton = 1 }, fill = Glass.Raised, border = true, fontSize = 17.gsp, padH = 26.gx, padV = padV) }
-                // The dots beside the buttons, so the row under them can come up.
-                if (slides.size > 1) Row(horizontalArrangement = Arrangement.spacedBy(8.gx), verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 12.gx)) {
-                    slides.indices.forEach { i ->
-                        Box(Modifier.size(if (i == index) 9.gx else 7.gx).background(if (i == index) Color.White else Color(0x66FFFFFF), CircleShape))
-                    }
+            if (slide.logo == null || !darkLook || !logoIn) {
+                Text(slide.title, fontSize = (if (compact) 30 else 40).gsp, fontWeight = FontWeight.Bold, maxLines = if (compact) 1 else 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 620.gx))
+            }
+        }
+        val event = slide.target as? Slide.Target.Event
+        Text(
+            if (notYet && event != null) "Starts ${Featured.startsAt(event.start)}" else slide.detail,
+            fontSize = 17.gsp, color = Glass.Soft, maxLines = 1,
+        )
+        Row(
+            Modifier.onPreviewKeyEvent { e ->
+                if (e.type != KeyEventType.KeyDown || slides.size < 2) return@onPreviewKeyEvent false
+                when (e.key) {
+                    Key.DirectionLeft -> if (focusedButton == 0) { step(-1); true } else false
+                    Key.DirectionRight -> if (focusedButton == (if (more != null) 1 else 0)) { step(1); true } else false
+                    else -> false
+                }
+            },
+            horizontalArrangement = Arrangement.spacedBy(12.gx),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            GlassPill("Play", play, entry.onFocusChanged { if (it.isFocused) focusedButton = 0 }, fill = Glass.Raised, border = true, fontSize = 17.gsp, padH = 26.gx, padV = padV)
+            more?.let { GlassPill("More info", it, Modifier.onFocusChanged { f -> if (f.isFocused) focusedButton = 1 }, fill = Glass.Raised, border = true, fontSize = 17.gsp, padH = 26.gx, padV = padV) }
+            // The dots beside the buttons, so the row under them can come up.
+            if (slides.size > 1) Row(horizontalArrangement = Arrangement.spacedBy(8.gx), verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 12.gx)) {
+                slides.indices.forEach { i ->
+                    Box(Modifier.size(if (i == index) 9.gx else 7.gx).background(if (i == index) ink else ink.copy(alpha = 0.4f), CircleShape))
                 }
             }
         }
@@ -223,10 +232,9 @@ internal object Backdrops {
  * the scrims sit in one cached layer; a plain cut when the system asks for less motion, or on a box
  * that can't keep up with the fade ([SlideFade]). Where the fades keep up, a flourish of light
  * plays over the art as it fades ([CarouselFlourish]: a sweep for films, a glow for shows, streaks
- * for events), under the text's shade. No zoom or pan. [under]: how much of the art is up behind the top bar now, set
- * in the same composition, so the bar takes the dark look's ink in the frame the art is drawn. With [cut] (the page's
- * own look is light, so the bar's ink flips with the art) the art comes and goes in one frame, not a fade, so no
- * frame has the bar's labels in one look's ink over the other look.
+ * for events), under the text's shade. No zoom or pan. The shades take the page's look ([light], 0 dark to 1 light):
+ * light ones in Light, so the bar, the carousel's text and the first row keep the page's ink over the art, and moving
+ * between the carousel and the rows never looks like the theme changing (round 22).
  */
 @Composable
 internal fun BoxScope.HomeBackdrop(
@@ -235,8 +243,7 @@ internal fun BoxScope.HomeBackdrop(
     covers: MutableState<Boolean>? = null,
     pageTop: FloatState? = null,
     slot: FloatState? = null,
-    cut: Boolean = false,
-    under: MutableFloatState? = null,
+    light: Float = 0f,
 ) {
     val ctx = LocalContext.current
     val still = LocalReducedMotion.current
@@ -251,7 +258,7 @@ internal fun BoxScope.HomeBackdrop(
     // Back on Home with the slide it left on, the art is up at once (no fade in from the page).
     val back = target != null && target.key == front?.slide?.key
     val fadeIn by animateFloatAsState(if (target != null) 1f else 0f, tween(if (still || back) 0 else 400), label = "backdrop")
-    val shown = if (back || cut) (if (target != null) 1f else 0f) else fadeIn
+    val shown = if (back) (if (target != null) 1f else 0f) else fadeIn
     var behind by remember { mutableStateOf<Shown?>(null) }
     val fade = remember { Animatable(1f) }
     // The flourish only on a box whose plain fades passed (never on the onn, which cuts); nothing of it is
@@ -296,7 +303,6 @@ internal fun BoxScope.HomeBackdrop(
     // While the art is fully up it covers the whole screen, so the page background under it isn't drawn.
     val covered = shown == 1f && front != null
     if (covers != null) SideEffect { covers.value = covered }
-    under?.floatValue = if (front != null) shown else 0f
     if (shown == 0f || front == null) return
     val density = LocalDensity.current
     val fullSlot = with(density) { CAROUSEL_HEIGHT.gx.toPx() }
@@ -311,15 +317,16 @@ internal fun BoxScope.HomeBackdrop(
         }
         // Never on a box that cuts.
         flourish?.takeIf { !SlideFade.cuts(ctx) }?.let { CarouselFlourish(it) { flourishAt.value } }
-        // Dark behind the text on the left whatever the look; below the carousel, the page's own colour.
+        // In the page's look behind the text on the left and under the top bar; below the carousel, the page's own colour.
         Spacer(
             Modifier.fillMaxSize().graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }.drawWithCache {
-                val dark = Color(0xE6060A14)
-                val across = Brush.horizontalGradient(0f to dark, 0.45f to Color(0x99060A14), 0.75f to Color.Transparent)
-                // The top bar's light text sits on this shade, whatever the art.
+                val shade = lerp(SHADE, GlassPalette.Light.top, light)
+                val ink = lerp(GlassPalette.Dark.middle, GlassPalette.Light.middle, light)
+                val across = Brush.horizontalGradient(0f to shade.copy(alpha = 0.9f), 0.45f to shade.copy(alpha = 0.6f), 0.75f to Color.Transparent)
+                // The top bar's text sits on this shade, whatever the art.
                 // The first row lies over the art's lower part (Arshad, Oct 26): its heading and titles on a
-                // dark shade that is solid by the bottom of the screen, in either look; the art shows through
-                // it down to about three quarters of the way.
+                // shade that is solid by the bottom of the screen; the art shows through it down to about
+                // three quarters of the way.
                 val h = size.height
                 val row = (pageTop?.floatValue ?: 0f).takeIf { it > 0f }
                     ?.let { it + ((slot?.floatValue ?: 0f).takeIf { s -> s > 0f } ?: fullSlot) + gap } ?: (h * 0.6f)
@@ -328,8 +335,8 @@ internal fun BoxScope.HomeBackdrop(
                 val under = (top + heading / h).coerceAtMost(0.95f)
                 val deep = maxOf(0.75f, under + 0.02f).coerceAtMost(0.97f)
                 val down = Brush.verticalGradient(
-                    0f to Color(0xCC060A14), 0.12f to Color(0x8C060A14), 0.24f to Color.Transparent, clear to Color.Transparent,
-                    top to INK.copy(alpha = 0.7f), under to INK.copy(alpha = 0.82f), deep to INK.copy(alpha = 0.93f), 1f to INK,
+                    0f to shade.copy(alpha = 0.8f), 0.12f to shade.copy(alpha = 0.55f), 0.24f to Color.Transparent, clear to Color.Transparent,
+                    top to ink.copy(alpha = 0.7f), under to ink.copy(alpha = 0.82f), deep to ink.copy(alpha = 0.93f), 1f to ink,
                 )
                 onDrawBehind { drawRect(across); drawRect(down) }
             },
@@ -340,8 +347,8 @@ internal fun BoxScope.HomeBackdrop(
 /** How long the art Home left on waits for the carousel to come back with it. */
 private const val ARRIVING_MS = 1_000L
 
-/** The shade under Home's rows while the carousel shows: the dark look's page colour. */
-private val INK = GlassPalette.Dark.middle
+/** The dark look's shade behind the carousel's text and the top bar. */
+private val SHADE = Color(0xFF060A14)
 
 /** A slide on the backdrop, with its art already decoded (null for an event without TMDB art). */
 private class Shown(val slide: Slide, val art: ImageBitmap?)

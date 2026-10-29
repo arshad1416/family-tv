@@ -69,6 +69,7 @@ import app.familytv.data.searchChannels
 import app.familytv.portal.Profile
 import app.familytv.usage.TrackScreen
 import app.familytv.usage.Usage
+import app.familytv.usage.rememberSearchLog
 import app.familytv.user.Favourites
 import coil.compose.AsyncImage
 import kotlinx.coroutines.Dispatchers
@@ -485,15 +486,16 @@ private fun ChannelSearch(profile: Profile, q: String, sports: Boolean) {
     val keys = remember(cats, sports) { categoryKeys(if (sports) cats.filter { Sport.isSportsCategory(it.name) } else cats) }
     val favKeys = rememberFavouriteKeys(rememberFavourites())
     var results by remember { mutableStateOf<List<ChannelEntity>?>(null) }
+    val log = rememberSearchLog()
     LaunchedEffect(q, keys) {
         delay(300) // let typing settle
         val found = dao.searchChannels(q, SEARCH_LIMIT * 3).filter { (it.sourceId to it.categoryId) in keys }.take(SEARCH_LIMIT)
         results = found
-        found.size.let { Usage.log(if (it == 0) Usage.Action.SEARCH_EMPTY else Usage.Action.SEARCH_SUBMIT, it) }
+        log.settled(q, found.size)
     }
     val r = results ?: return
     if (r.isEmpty()) return EmptyState("No matches for \"$q\".")
-    ChannelBrowser(r, favKeys, Modifier.fillMaxSize(), side = true, header = "Results", entry = true) { Usage.log(Usage.Action.SEARCH_PICK, it) }
+    ChannelBrowser(r, favKeys, Modifier.fillMaxSize(), side = true, header = "Results", entry = true) { log.picked(it) }
 }
 
 /** Sports' tiles, in their order, and the sports each one holds (sports without a tile go under More). */
