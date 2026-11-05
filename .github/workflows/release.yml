@@ -47,7 +47,11 @@ jobs:
           BWS_ACCESS_TOKEN: ${{ secrets.BWS_ACCESS_TOKEN }}
           VERSION_CODE: ${{ github.run_number }}
         run: |
-          export CODE=$((100 + VERSION_CODE)) NAME="0.2.$VERSION_CODE"
+          # versionCode is 1000 + run number (it was 100 + run until 0.2.94, code 194). Test builds
+          # sideloaded on the family room onn and the Kitchen stick carried codes up to 218, so
+          # 194 counted as a downgrade there: Android refused it as "package seems to be invalid"
+          # and never offered the update. The jump puts every release above any test build.
+          export CODE=$((1000 + VERSION_CODE)) NAME="0.2.$VERSION_CODE"
           bws run --server-url https://vault.bitwarden.eu -- bash -euo pipefail -c '
             echo "::add-mask::$FAMILYTV_KEYSTORE_PASSWORD"
             echo "$FAMILYTV_KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"

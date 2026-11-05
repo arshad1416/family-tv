@@ -3,13 +3,15 @@ name: Test build (TV app)
 # A signed build of any branch for sideloading to our own TVs with `adb install -r` (same key as the
 # release, so a TV keeps its pairing). It is kept for a day as a run artifact and never published:
 # TVs only update from release.yml's /tv feed. Give it the versionCode the TVs have now, so the next
-# real release (a higher code) still updates over it. The repo is public, so signed-in GitHub users
+# real release (a higher code) still updates over it. Never give it more than that next release's
+# code (1000 + the next release run number): a TV holding a higher code refuses the release as a
+# downgrade ("package seems to be invalid") and never updates. The repo is public, so signed-in GitHub users
 # can download the artifact; it holds nothing the public /tv download doesn't.
 on:
   workflow_dispatch:
     inputs:
       version_code:
-        description: versionCode of the build on the TVs now (0.2.N is 100 + N)
+        description: versionCode of the build on the TVs now (0.2.N is 1000 + N; it was 100 + N up to 0.2.94)
         required: true
 
 concurrency: test-build
@@ -43,7 +45,7 @@ jobs:
           SHA: ${{ github.sha }}
         run: |
           [[ "$CODE" =~ ^[0-9]+$ ]] || { echo "version_code must be a number"; exit 1; }
-          export NAME="0.2.$((CODE - 100))-test.${SHA:0:7}"
+          export NAME="0.2.$((CODE >= 1000 ? CODE - 1000 : CODE - 100))-test.${SHA:0:7}"
           bws run --server-url https://vault.bitwarden.eu -- bash -euo pipefail -c '
             echo "::add-mask::$FAMILYTV_KEYSTORE_PASSWORD"
             echo "$FAMILYTV_KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
