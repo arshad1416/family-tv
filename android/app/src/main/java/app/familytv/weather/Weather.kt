@@ -142,6 +142,9 @@ object WeatherParse {
         else -> "—"
     }
 
+    /** The icon and temperature beside the TV clock, e.g. "⛅ 4°". */
+    fun short(f: Forecast): String = "${icon(f.code, f.isDay)} ${f.temp}°"
+
     /** A WMO weather code as an emoji; clear skies show the moon at night. */
     fun icon(code: Int, day: Boolean = true): String = when (code) {
         0 -> if (day) "☀️" else "🌙"

@@ -115,6 +115,8 @@ internal class GlassShell(
     val saver: MutableState<Boolean>,
     /** The Home carousel's height in pixels as last laid out (0 before), so the backdrop's shade lines up with the first row. */
     val slot: MutableFloatState = mutableFloatStateOf(0f),
+    /** The home's weather, shown beside the clock. */
+    val weather: GlassWeather? = null,
 )
 
 internal val LocalGlassShell = staticCompositionLocalOf<GlassShell?> { null }
@@ -197,7 +199,7 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
     // The screensaver (backlog item 16): after Settings' minutes without a key (5 unless changed), unless a preview is playing.
     val saverState = remember { mutableStateOf(false) }
     var saver by saverState
-    val shell = remember { GlassShell(queries, glow, barHidden, darkPages, mutableStateOf(null), saverState) }
+    val shell = remember { GlassShell(queries, glow, barHidden, darkPages, mutableStateOf(null), saverState, weather = weather) }
     val shown by animateColorAsState(glow.value, tween(500), label = "glow")
     val lightness = rememberLightness(appearance, weather.forecast)
     LaunchedEffect(backHome) {

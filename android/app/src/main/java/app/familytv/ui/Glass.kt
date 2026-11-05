@@ -93,6 +93,7 @@ import androidx.tv.material3.Text
 import app.familytv.app
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import app.familytv.weather.WeatherParse
 
 /**
  * The TV's "liquid glass" look (parity checklist, "Spec: Liquid glass TV design"): glass panels
@@ -318,11 +319,15 @@ internal fun GlassIconButton(icon: ImageVector, label: String, onClick: () -> Un
 internal fun GlassBackButton(onClick: () -> Unit, modifier: Modifier = Modifier) =
     GlassIconButton(Icons.AutoMirrored.Filled.ArrowBack, "Back", onClick, modifier)
 
-/** The clock at the top right. */
+/** The weather and clock at the top right. */
 @Composable
 internal fun GlassClock() {
     val now by produceState(System.currentTimeMillis()) { while (true) { delay(15_000); value = System.currentTimeMillis() } }
-    Text(time(now), fontSize = 20.gsp, color = Glass.Soft, maxLines = 1)
+    val forecast = LocalGlassShell.current?.weather?.forecast
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.gx)) {
+        forecast?.let { Text(WeatherParse.short(it), fontSize = 20.gsp, color = Glass.Soft, maxLines = 1) }
+        Text(time(now), fontSize = 20.gsp, color = Glass.Soft, maxLines = 1)
+    }
 }
 
 /** A small section heading ("Providers"). */
