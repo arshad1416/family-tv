@@ -21,6 +21,15 @@ class WeatherTest {
         assertTrue("off by ${(actual - expected) / 60_000} min", abs(actual - expected) <= minutes * 60_000L)
 
     @Test
+    fun shortShowsIconAndTemperatureForTheClock() {
+        fun f(code: Int, temp: Int, day: Boolean) = Forecast(temp, code, day, null, null, emptyList(), emptyList(), emptyList())
+        assertEquals("☀️ 4°", WeatherParse.short(f(0, 4, true)))
+        assertEquals("🌙 -3°", WeatherParse.short(f(0, -3, false)))
+        assertEquals("🌨️ -1°", WeatherParse.short(f(71, -1, true)))
+        assertEquals("🌧️ 8°", WeatherParse.short(f(61, 8, false)))
+    }
+
+    @Test
     fun torontoSunTimesAreWithinMinutes() {
         val (rise, set) = Sun.times(LocalDate.of(2026, 10, 20), 43.65, -79.38)!!
         assertNear(at(2026, 10, 20, 7, 36), rise, 6)
