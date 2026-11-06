@@ -45,9 +45,10 @@ object SearchText {
     fun rank(indexed: String, q: String): Int? {
         val want = words(q).take(MAX_WORDS).ifEmpty { return 4 }
         val phrase = want.joinToString("") { " $it" }
-        val bare = indexed.replace(TRAILING_YEAR, "")
+        val main = indexed.substringBefore(JOINED)
+        val bare = main.replace(TRAILING_YEAR, "")
         return when {
-            ARTICLES.any { bare == it + phrase || indexed == it + phrase } -> 0
+            ARTICLES.any { bare == it + phrase || main == it + phrase } -> 0
             ARTICLES.any { indexed.startsWith("$it$phrase ") } -> 1
             want.all { "$indexed ".contains(" $it ") } -> 2
             ARTICLES.any { indexed.startsWith(it + phrase) } -> 3
@@ -71,13 +72,34 @@ object SearchText {
 
     private val TRAILING_YEAR = Regex(" (19|20)\\d\\d$")
 
-    /** The stored form, a space before every word (" pokemon the movie"), so `LIKE '% poke%'` is a word-prefix match. */
-    fun index(name: String): String = words(name).joinToString("") { " $it" }
+    /**
+     * The stored form, a space before every word (" pokemon the movie"), so `LIKE '% poke%'` is a
+     * word-prefix match, then [joined]'s words after [JOINED] (" spider man | spiderman").
+     */
+    fun index(name: String): String = words(name).joinToString("") { " $it" } + joined(name)
+
+    /**
+     * Marks where a stored form's joined spellings start. Words never hold "|", so `LIKE '% spiderman%'`
+     * still finds them, and the exact-title tier compares only what comes before it.
+     */
+    const val JOINED = " |"
+
+    /**
+     * Words a hyphen, apostrophe or dot splits, joined back up as people type them ("Spider-Man",
+     * "X-Men", "Ocean's", "S.W.A.T." as spiderman, xmen, oceans, swat), after [JOINED]; "" when none.
+     */
+    fun joined(name: String): String {
+        val extra = Names.clean(name).split(Regex("\\s+")).mapNotNull { token ->
+            words(token).takeIf { it.size > 1 }?.joinToString("")
+        }.distinct()
+        return if (extra.isEmpty()) "" else JOINED + extra.joinToString("") { " $it" }
+    }
 
     /** A film's or show's stored form: its clean title, then its year (from the list, else from the raw name). */
     fun titleIndex(name: String, year: Int?): String {
         val y = year?.takeIf { it in 1900..2099 }?.toString() ?: YEAR.findAll(name).lastOrNull()?.value
-        return index(SeriesTitles.parse(name).title) + (y?.let { " $it" } ?: "")
+        val title = SeriesTitles.parse(name).title
+        return words(title).joinToString("") { " $it" } + (y?.let { " $it" } ?: "") + joined(title)
     }
 
     /** A channel's stored form: its name as listed, without the country code. */
@@ -94,14 +116,17 @@ object SearchText {
         val prefixArgs = words.map { "% $it%" }
         val contains = words.all { it.length >= CONTAINS_MIN }
         val tier = buildString {
-            append("(CASE WHEN ${ARTICLES.joinToString(" OR ") { "searchText = ? OR searchText GLOB ?" }} THEN 0")
+            append("(CASE WHEN ${ARTICLES.joinToString(" OR ") { "searchText = ? OR searchText GLOB ? OR searchText GLOB ? OR searchText GLOB ?" }} THEN 0")
             append(" WHEN ${ARTICLES.joinToString(" OR ") { "searchText LIKE ?" }} THEN 1")
             append(" WHEN ${words.joinToString(" AND ") { "searchText || ' ' LIKE ?" }} THEN 2")
             append(" WHEN ${ARTICLES.joinToString(" OR ") { "searchText LIKE ?" }} THEN 3")
             append(" WHEN $prefix THEN 4 ELSE 5 END)")
         }
         val tierArgs = buildList<Any> {
-            ARTICLES.forEach { add(it + phrase); add("$it$phrase [12][0-9][0-9][0-9]") }
+            ARTICLES.forEach {
+                add(it + phrase); add("$it$phrase [12][0-9][0-9][0-9]")
+                add("$it$phrase$JOINED *"); add("$it$phrase [12][0-9][0-9][0-9]$JOINED *")
+            }
             ARTICLES.forEach { add("$it$phrase %") }
             words.forEach { add("% $it %") }
             ARTICLES.forEach { add("$it$phrase%") }
