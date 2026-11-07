@@ -46,12 +46,14 @@ class Element {
 }
 const settle = async () => {for(let i=0;i<30;i++)await Promise.resolve();};
 const profile = (id="ab12",name="Home") => ({id,name,data:{sources:[],extraGuides:[]}});
-function editor(write?: (path:string, opts:RequestInit)=>Promise<unknown>, reported: Record<string,{names:string[]}> = {}, stored = new Map<string,string>()) {
+function editor(write?: (path:string, opts:RequestInit)=>Promise<unknown>, reported: Record<string,{names:string[]}> = {}, stored = new Map<string,string>(), delay?: (path:string)=>Promise<void>) {
   const document=new Element("document",{},true);document.innerHTML='<main id="app"></main>';
   const calls:{path:string;opts:RequestInit}[]=[];
   const states=new Map<string,{revision:number;configured:boolean;maskedPreview:string|null}>();
   const fetch=async(path:string,opts:RequestInit={})=>{
-    calls.push({path,opts});let result:unknown;
+    calls.push({path,opts});
+    if(delay) await delay(path);
+    let result:unknown;
     if(path.endsWith("/api-key")) {
       const id=path.split("/")[4];let state=states.get(id)||{revision:1,configured:true,maskedPreview:id==="ab12"?"HOME********-123":"OTHR********-456"};
       if(opts.method) {if(write)result=await write(path,opts);else {const b=JSON.parse(opts.body as string);state={revision:b.revision+1,configured:opts.method==="PUT",maskedPreview:opts.method==="PUT"?b.apiKey.slice(0,4)+"********"+b.apiKey.slice(-4):null};states.set(id,state);result={profileId:id,...state};}}
@@ -64,9 +66,9 @@ function editor(write?: (path:string, opts:RequestInit)=>Promise<unknown>, repor
     return new Response(JSON.stringify(result),{headers:{"content-type":"application/json"}});
   };
   const script=ADMIN_PAGE.split('<script>')[1].split('</script>')[0];
-  const api=runInNewContext(script.slice(0,script.lastIndexOf('\ndocument.querySelectorAll("nav button")'))+'\n({editProfile})', {document,fetch,Response,localStorage:{getItem:(k:string)=>k==="ftv_admin"?"admin":stored.get(k)??null,setItem:(k:string,v:string)=>stored.set(k,v)},confirm:()=>true});
+  const api=runInNewContext(script.slice(0,script.lastIndexOf('\ndocument.querySelectorAll("nav button")'))+'\ntab = "profiles";\n({editProfile,navigate:()=>{tab="addons";renderVersion++;document.querySelector("#app").innerHTML="<p>Add-ons</p>";}})', {document,fetch,Response,localStorage:{getItem:(k:string)=>k==="ftv_admin"?"admin":stored.get(k)??null,setItem:(k:string,v:string)=>stored.set(k,v)},confirm:()=>true});
   const get=(selector:string)=>{const el=document.querySelector(selector);if(!el)throw new Error('Missing element '+selector);return el;};
-  return {document,calls,get,open:(p: unknown=profile())=>api.editProfile(p)};
+  return {document,calls,get,navigate:api.navigate,open:(p: unknown=profile())=>api.editProfile(p)};
 }
 
 describe("real profile editor credential integration",()=>{
@@ -144,5 +146,39 @@ describe("category list folding",()=>{
     expect(e.document.querySelector('#catlist')).toBeNull();await e.get('#save').onclick!();await settle();
     const sent=JSON.parse(e.calls.find(c=>c.path==='/api/admin/profiles/ab12'&&c.opts.method==='PUT')!.opts.body as string);
     expect(sent.data).toMatchObject({hiddenCategories:['Kids'],categoryOrder:{live:['Sports','News','Kids']}});
+  });
+});
+
+
+describe("profile editor lifetime",()=>{
+  it.each(["categories","lines"])("ignores delayed %s after Back or tab navigation",async(kind)=>{
+    for(const leave of ["back","tab"]){
+      let finish!:()=>void;
+      const e=editor(undefined,{},new Map(),path=>path.endsWith('/'+kind)?new Promise<void>(r=>finish=r):Promise.resolve());
+      e.open();await settle();
+      if(leave==='back') {await e.get('#back').onclick!();await settle();} else e.navigate();
+      const html=e.get('#app').innerHTML;finish();await settle();
+      expect(e.get('#app').innerHTML).toBe(html);expect(e.document.querySelector('#pname')).toBeNull();
+    }
+  });
+  it.each(["resolve","reject"])("ignores an obsolete lines %s after another profile opens",async(outcome)=>{
+    let finish!:()=>void,fail!:(e:Error)=>void,first=true;
+    const e=editor(undefined,{},new Map(),path=>{
+      if(path==='/api/admin/lines'&&first){first=false;return new Promise<void>((r,j)=>{finish=r;fail=j;});}
+      return Promise.resolve();
+    });
+    e.open();await settle();e.open(profile('cd34','Other'));await settle();
+    const name=e.get('#pname');name.value='Unsaved Other';const html=e.get('#app').innerHTML;
+    if(outcome==='resolve')finish();else fail(new Error('old lines unavailable'));await settle();
+    expect(e.get('#pname')).toBe(name);expect(name.value).toBe('Unsaved Other');expect(e.get('#app').innerHTML).toBe(html);
+  });
+  it('ignores old categories after reopening the same profile',async()=>{
+    let finish!:()=>void,first=true;
+    const e=editor(undefined,{},new Map(),path=>{
+      if(path.endsWith('/categories')&&first){first=false;return new Promise<void>(r=>finish=r);}return Promise.resolve();
+    });
+    e.open();await settle();await e.get('#back').onclick!();await settle();e.open();await settle();
+    const name=e.get('#pname');name.value='New edit';finish();await settle();
+    expect(e.get('#pname')).toBe(name);expect(name.value).toBe('New edit');
   });
 });

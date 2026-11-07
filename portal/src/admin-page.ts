@@ -60,6 +60,8 @@ const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":
 let token = null;
 try { token = localStorage.getItem("ftv_admin"); } catch {}
 let tab = "devices", verdicts = {}, profiles = [];
+// Only the newest navigation or refresh may update the shared app container.
+let renderVersion = 0;
 const DEFAULT_GUIDES = ${JSON.stringify(DEFAULT_EXTRA_GUIDES)};
 const MASK = ${JSON.stringify(MASK)};
 const DEFAULT_LOCK = ${JSON.stringify(DEFAULT_LOCK_MESSAGE)};
@@ -89,8 +91,11 @@ function askToken(message) {
 
 const ago = (t) => { if (!t) return "never"; const s = (Date.now() - t) / 1000; if (s < 90) return "just now"; if (s < 3600) return Math.round(s / 60) + " min ago"; if (s < 86400) return Math.round(s / 3600) + " h ago"; return Math.round(s / 86400) + " d ago"; };
 
-async function renderDevices() {
+async function renderDevices(version) {
+  if (tab !== "devices") return;
+  version ??= ++renderVersion;
   const [{ devices }, p] = await Promise.all([api("/api/admin/devices"), api("/api/admin/profiles")]);
+  if (version !== renderVersion || tab !== "devices" || !token) return;
   profiles = p.profiles;
   const opts = profiles.map((x) => '<option value="' + esc(x.id) + '">' + esc(x.name) + "</option>").join("");
   let html = '<div class="card"><h3 style="margin-top:0">Add a TV</h3><p class="muted small">Open Family TV on the TV and type the code it shows.</p><div class="grid">' +
@@ -300,8 +305,11 @@ function linesCard(draft, lines, panel, lineOf, open, addTab) {
   return html + '<div id="plmsg" class="small"></div></div></div>';
 }
 
-async function renderProfiles(editId) {
+async function renderProfiles(editId, version) {
+  if (tab !== "profiles") return;
+  version ??= ++renderVersion;
   const { profiles: list } = await api("/api/admin/profiles");
+  if (version !== renderVersion || tab !== "profiles" || !token) return;
   profiles = list;
   if (editId !== undefined) return editProfile(list.find((p) => p.id === editId) || { name: "", data: { sources: [] } });
   let html = '<div class="card row"><span class="muted">A profile is a set of IPTV lines one household uses.</span><button class="b p" id="newp" style="margin-left:auto">New profile</button></div>';
@@ -415,15 +423,19 @@ function categoriesCard(draft, reported) {
 }
 
 function editProfile(p) {
+  const version = ++renderVersion;
+  const isCurrent = () => version === renderVersion && tab === "profiles" && !!token;
   const draft = JSON.parse(JSON.stringify(p));
   let reported = {}, lines = null, panel = null, addTab = "existing";
   // Lines whose details are open (by source id); the rest show as one row each.
   const open = new Set();
-  if (draft.id) api("/api/admin/profiles/" + draft.id + "/categories").then((r) => { reported = r.reported; collect(); paint(); }).catch(() => {});
+  if (draft.id) api("/api/admin/profiles/" + draft.id + "/categories").then((r) => { if (!isCurrent()) return; reported = r.reported; collect(); paint(); }).catch(() => {});
   api("/api/admin/lines").then(async (l) => {
+    if (!isCurrent()) return;
     if (l.configured) panel = await api("/api/admin/panel").catch((e) => ({ error: e.message }));
+    if (!isCurrent()) return;
     lines = l; collect(); paint();
-  }).catch(() => { lines = { lines: [] }; collect(); paint(); });
+  }).catch(() => { if (!isCurrent()) return; lines = { lines: [] }; collect(); paint(); });
   const lineOf = (s) => lines && (lines.lines || []).find((l) => s.username && (l.username || "").toLowerCase() === s.username.toLowerCase());
   const moveCat = (i, to) => {
     collect();
@@ -459,6 +471,7 @@ function editProfile(p) {
     handle.onpointercancel = () => end(false);
   };
   const paint = () => {
+    if (!isCurrent()) return;
     $("#app").innerHTML = '<div class="card"><label>Profile name</label><input id="pname" value="' + esc(draft.name) + '">' +
       '<label>Parental PIN (optional, asked before Adult Content opens on the Categories page)</label><input id="ppin" type="password" value="' + esc(draft.data.parentalPin) + '">' +
       '<label>Startup video</label><select id="psplash"><option value="">Family TV</option>' +
@@ -508,13 +521,15 @@ function editProfile(p) {
       $("#pncreate").disabled = true; $("#plmsg").textContent = "Creating the line…";
       try {
         const r = await api("/api/admin/lines/new", { method: "POST", body: JSON.stringify({ profileId: draft.id, packageId, months: m, name: $("#pnname").value }) });
+        if (!isCurrent()) return;
         if (!r.ok) { $("#pncreate").disabled = false; $("#plmsg").innerHTML = '<span class="err">' + esc(r.error) + "</span> Link: " + esc(r.url); return; }
         draft.data.sources.push(r.source);
         lines = await api("/api/admin/lines");
         panel = await api("/api/admin/panel").catch((e) => ({ error: e.message }));
+        if (!isCurrent()) return;
         paint();
         $("#plmsg").innerHTML = '<span class="ok">Line ' + esc(r.username) + " created and saved to this profile.</span>";
-      } catch (e) { $("#pncreate").disabled = false; $("#plmsg").innerHTML = '<span class="err">' + esc(e.message) + "</span>"; }
+      } catch (e) { if (!isCurrent()) return; $("#pncreate").disabled = false; $("#plmsg").innerHTML = '<span class="err">' + esc(e.message) + "</span>"; }
     };
     document.querySelectorAll("[data-kind]").forEach((b) => (b.onclick = () => { collect(); catKind = b.dataset.kind; paint(); }));
     document.querySelectorAll("[data-catfold]").forEach((b) => (b.onclick = () => { collect(); toggleCats(); paint(); }));
@@ -522,16 +537,17 @@ function editProfile(p) {
     document.querySelectorAll("[data-top]").forEach((b) => (b.onclick = () => moveCat(+b.dataset.top, 0)));
     document.querySelectorAll("[data-up]").forEach((b) => (b.onclick = () => moveCat(+b.dataset.up, +b.dataset.up - 1)));
     document.querySelectorAll("[data-down]").forEach((b) => (b.onclick = () => moveCat(+b.dataset.down, +b.dataset.down + 1)));
-    if ($("#delp")) $("#delp").onclick = async () => { if (confirm("Delete this profile? TVs on it stop playing until moved.")) { await api("/api/admin/profiles/" + draft.id, { method: "DELETE" }); renderProfiles(); } };
+    if ($("#delp")) $("#delp").onclick = async () => { if (confirm("Delete this profile? TVs on it stop playing until moved.")) { await api("/api/admin/profiles/" + draft.id, { method: "DELETE" }); if (isCurrent()) renderProfiles(); } };
     $("#save").onclick = async () => {
       collect();
       try {
         await api(draft.id ? "/api/admin/profiles/" + draft.id : "/api/admin/profiles", { method: draft.id ? "PUT" : "POST", body: JSON.stringify({ name: draft.name, data: draft.data }) });
-        renderProfiles();
-      } catch (e) { $("#perr").textContent = e.message; }
+        if (isCurrent()) renderProfiles();
+      } catch (e) { if (!isCurrent()) return; $("#perr").textContent = e.message; }
     };
   };
   const collect = () => {
+    if (!isCurrent()) return;
     draft.name = $("#pname").value;
     draft.data.parentalPin = $("#ppin").value || undefined;
     draft.data.splash = $("#psplash").value || undefined;
@@ -572,9 +588,12 @@ function leftText(l) {
   return '<span class="' + cls + '">' + plural(l.daysLeft, "day") + "</span>";
 }
 
-async function renderLines(refresh) {
+async function renderLines(refresh, version) {
+  if (tab !== "lines") return;
+  version ??= ++renderVersion;
   $("#app").innerHTML = '<div class="card muted">' + (refresh ? "Asking the panel about every line…" : "Loading lines…") + "</div>";
   const [panel, data, p] = await Promise.all([api("/api/admin/panel"), api("/api/admin/lines" + (refresh ? "?refresh=1" : "")), api("/api/admin/profiles")]);
+  if (version !== renderVersion || tab !== "lines" || !token) return;
   profiles = p.profiles;
   if (!panel.configured) {
     $("#app").innerHTML = '<div class="card"><h3 style="margin-top:0">Connect the 8K panel</h3><p>Add your reseller API key to the portal as the secret <code>IPTV_PANEL_API_KEY</code>, then redeploy it. ' +
@@ -683,8 +702,11 @@ function addonStatusSelect(attr, value) {
   return '<select ' + attr + ">" + ADDON_STATUS.map(([v, l]) => '<option value="' + v + '"' + (v === value ? " selected" : "") + ">" + l + "</option>").join("") + "</select>";
 }
 
-async function renderAddons() {
+async function renderAddons(version) {
+  if (tab !== "addons") return;
+  version ??= ++renderVersion;
   const [data, p] = await Promise.all([api("/api/admin/addons"), api("/api/admin/profiles")]);
+  if (version !== renderVersion || tab !== "addons" || !token) return;
   profiles = p.profiles;
   const owned = (pid, aid) => data.purchases.find((x) => x.profile_id === pid && x.addon_id === aid);
   let html = '<div class="card"><h3 style="margin-top:0">Add-ons</h3><p class="muted small">Extra features already built into the TV apps, bought once per profile: ' +
@@ -749,12 +771,14 @@ async function renderAddons() {
 }
 
 async function render() {
+  const version = ++renderVersion;
   if (!token) return askToken();
   document.querySelectorAll("nav button").forEach((b) => b.classList.toggle("on", b.dataset.tab === tab));
   try {
     if (!Object.keys(verdicts).length) verdicts = await api("/api/admin/verdicts");
-    if (tab === "devices") await renderDevices(); else if (tab === "lines") await renderLines(); else if (tab === "addons") await renderAddons(); else await renderProfiles();
-  } catch (e) { if (token) $("#app").innerHTML = '<div class="card err">' + esc(e.message) + "</div>"; }
+    if (version !== renderVersion || !token) return;
+    if (tab === "devices") await renderDevices(version); else if (tab === "lines") await renderLines(undefined, version); else if (tab === "addons") await renderAddons(version); else await renderProfiles(undefined, version);
+  } catch (e) { if (token && version === renderVersion) $("#app").innerHTML = '<div class="card err">' + esc(e.message) + "</div>"; }
 }
 document.querySelectorAll("nav button").forEach((b) => (b.onclick = () => { tab = b.dataset.tab; render(); }));
 render();

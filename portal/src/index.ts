@@ -103,7 +103,7 @@ async function requireDevice(req: Request, env: Env): Promise<DeviceRow> {
   return row;
 }
 
-/** A TV's last status; null when missing or cut short (the column keeps 8,000 characters). */
+/** Stored JSON; null when missing or cut short by older writers. */
 function parseStatus(raw: string | null): unknown {
   if (!raw) return null;
   try {
@@ -138,7 +138,9 @@ let latestCache: { at: number; bucket?: R2Bucket; value: { versionCode: number; 
 export async function latestApp(env: Env, req: Request) {
   const now = Date.now();
   if (!latestCache || latestCache.bucket !== env.APPS || now - latestCache.at > 60_000) {
-    const obj = env.APPS ? await env.APPS.get(LATEST_KEY) : null;
+    // Update availability must not interrupt config or command delivery. Cache a failure
+    // briefly too, so an R2 outage does not trigger a read on every heartbeat.
+    const obj = env.APPS ? await env.APPS.get(LATEST_KEY).catch(() => null) : null;
     const value = obj ? ((await obj.json().catch(() => null)) as { versionCode: number; versionName?: string } | null) : null;
     latestCache = { at: now, bucket: env.APPS, value };
   }
@@ -413,7 +415,8 @@ async function deviceDiagnostics(req: Request, env: Env) {
       d.id,
       now,
       verdict,
-      JSON.stringify(b.report ?? null).slice(0, 64000),
+      // body() already bounds the request. Never truncate serialized JSON.
+      JSON.stringify(b.report ?? null),
     ),
     // Keep the last 20 reports per device.
     env.DB.prepare(
@@ -985,13 +988,13 @@ async function adminDeviceDetail(env: Env, id: string) {
   return json({
     diagnostics: diag.results.map((r) => ({
       ...r,
-      report: JSON.parse(r.report_json as string),
+      report: parseStatus(r.report_json as string),
       report_json: undefined,
       ...(VERDICTS[r.verdict as string] ?? { label: r.verdict, advice: "" }),
     })),
     commands: cmds.results,
     // Suggestions from the latest check, against the profile as it is now.
-    suggestions: diag.results.length ? suggestions(JSON.parse(diag.results[0].report_json as string) ?? {}, await loadProfile(env, dev?.profile_id ?? null)) : [],
+    suggestions: diag.results.length ? suggestions((parseStatus(diag.results[0].report_json as string) ?? {}) as Parameters<typeof suggestions>[0], await loadProfile(env, dev?.profile_id ?? null)) : [],
   });
 }
 
