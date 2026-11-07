@@ -76,6 +76,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -272,13 +275,21 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
     // screensaver and sleep take over as usual.
     val view = LocalView.current
     DisposableEffect(view) { onDispose { view.keepScreenOn = false } }
+    // The player is its own activity, so Home stays composed (and this loop keeps running) behind it.
+    // Idle time only counts while Home is in front, and starts again from zero when you come back,
+    // otherwise anything watched for longer than the saver delay ended in the screensaver on Back.
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(lifecycle) {
+        val watch = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_RESUME) idle.backInFront() }
+        lifecycle.addObserver(watch)
+        onDispose { lifecycle.removeObserver(watch) }
+    }
     LaunchedEffect(Unit) {
         while (true) {
             val after = prefs.saverMinutes.value * 60_000L
             view.keepScreenOn = after > 0 && idle.ms < after + SAVER_HOLD_MS
             delay(IDLE_STEP_MS)
-            idle.ms += IDLE_STEP_MS
-            if (!saver && after > 0 && idle.ms >= after && !LivePreview.anyActive) saver = true
+            if (idle.step(lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED), after) && !saver && !LivePreview.anyActive) saver = true
         }
     }
     val backdropCovers = remember { mutableStateOf(false) }
@@ -391,12 +402,22 @@ internal fun GlassHome(vm: MainViewModel, config: DeviceConfig) {
 }
 
 /** The TV home's idle time (ms since the last key) and whether a key is waking the screensaver. */
-private class IdleCount {
+internal class IdleCount {
     var ms = 0L
     var waking = false
+
+    /** One IDLE_STEP_MS has passed. Counts only while Home is in front; true once idle reaches [afterMs] (0 = saver off). */
+    fun step(inFront: Boolean, afterMs: Long): Boolean {
+        if (!inFront) return false
+        ms += IDLE_STEP_MS
+        return afterMs > 0 && ms >= afterMs
+    }
+
+    /** Home is back in front (e.g. Back from the player): idle starts again from zero. */
+    fun backInFront() { ms = 0 }
 }
 
-private const val IDLE_STEP_MS = 15_000L
+internal const val IDLE_STEP_MS = 15_000L
 
 /** How long our screensaver keeps the screen on before the TV may sleep. */
 private const val SAVER_HOLD_MS = 2 * 3_600_000L
