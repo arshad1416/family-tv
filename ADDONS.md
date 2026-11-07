@@ -31,6 +31,10 @@ The portal needs no code change for a new add-on. If the feature calls an outsid
 lives in the portal as a Worker secret behind a portal endpoint that checks the device token and
 that the add-on is active for the TV's profile; the app only ever calls the portal.
 
+A separately installed companion app that supplies sources for a title is a different thing: it
+talks to the app through the external source connector ([docs/CONNECTOR.md](docs/CONNECTOR.md)), and
+its add-on only decides whether the app may use it.
+
 ## Not accepted as add-ons
 
 Real-Debrid, Torrentio and Stremio-style streams, stream proxying, and anything that puts IPTV
