@@ -28,4 +28,17 @@ class CatalogFormatTest {
         assertTrue(catalog.complete)
         db.close()
     }
+
+    @Test
+    fun aFinishedFormat3CatalogLoadsAgainForJoinedSpellings() {
+        val ctx = ApplicationProvider.getApplicationContext<Application>()
+        val db = Room.inMemoryDatabaseBuilder(ctx, AppDb::class.java).allowMainThreadQueries().build()
+        val marks = ctx.getSharedPreferences("catalog-test-f3", Context.MODE_PRIVATE)
+        val catalog = Catalog(db, marks)
+        // A TV on 0.2.96 finished its load at format 3, before search stored "spiderman".
+        marks.edit().putBoolean("complete", true).putInt("format", 3).commit()
+        assertFalse(catalog.complete)
+        assertTrue(Catalog.FORMAT >= 4)
+        db.close()
+    }
 }

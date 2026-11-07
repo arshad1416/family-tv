@@ -571,8 +571,9 @@ class Catalog(private val db: AppDb, private val marks: SharedPreferences? = nul
          * matching, so TVs updated over an existing install load their lists again once.
          * 2: search on clean titles and guide links for regional stations (Oct 26).
          * 3: no guide from another station's id (Global National, Peterborough on BC 1's) (Oct 26).
+         * 4: search text also stores joined spellings, "spider man | spiderman" (Nov 6).
          */
-        const val FORMAT = 3
+        const val FORMAT = 4
         const val GUIDE_RETRY_MS = 20_000L
         /** Thin channels with no extra guide, listed for the admin (the portal keeps a few KB of status). */
         const val MAX_REPORTED = 30
