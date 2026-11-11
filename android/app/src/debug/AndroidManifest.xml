@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Debug builds only: the connector's reference companion (docs/CONNECTOR.md). Release builds have no provider. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <application>
+        <!-- Its own process, so calls cross a real binder like a separate companion app's would. -->
+        <service
+            android:name="app.familytv.connector.ReferenceSourceProvider"
+            android:exported="false"
+            android:process=":connector_reference">
+            <intent-filter>
+                <action android:name="app.familytv.connector.SOURCE_PROVIDER_V1" />
+            </intent-filter>
+            <meta-data android:name="app.familytv.connector.PROTOCOL_MIN" android:value="1" />
+            <meta-data android:name="app.familytv.connector.PROTOCOL_MAX" android:value="1" />
+        </service>
+
+        <!-- Already declared this way in src/main. Repeated only because lint's ForegroundServiceType check
+             reads this file on its own and would otherwise flag OpenOnStart's startForeground call. -->
+        <service
+            android:name="app.familytv.start.OpenOnStartService"
+            android:foregroundServiceType="specialUse"
+            tools:replace="android:foregroundServiceType" />
+    </application>
+</manifest>
