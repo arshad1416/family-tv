@@ -24,6 +24,10 @@ data class XmltvProgramme(
     val year: Int? = null,
     val isNew: Boolean = false,
     val cast: List<String> = emptyList(),
+    /** `<live/>`: shown as it happens. */
+    val isLive: Boolean = false,
+    /** `<previously-shown/>`: a repeat or recording. */
+    val isRepeat: Boolean = false,
 )
 
 /** A `<channel>` from an XMLTV guide: its id and every display name, for matching by name. */
@@ -84,6 +88,8 @@ object XmltvParser {
         val ratings = ArrayList<Pair<String?, String>>()
         var year: Int? = null
         var isNew = false
+        var isLive = false
+        var isRepeat = false
         val cast = ArrayList<String>()
         children(p) {
             when (p.name) {
@@ -103,6 +109,8 @@ object XmltvParser {
                 }
                 "date" -> year = text(p)?.take(4)?.toIntOrNull()?.takeIf { it in 1900..2100 }
                 "new" -> { isNew = true; skip(p) }
+                "live" -> { isLive = true; skip(p) }
+                "previously-shown" -> { isRepeat = true; skip(p) }
                 "credits" -> children(p) { if (p.name == "actor" && cast.size < 5) text(p)?.let(cast::add) else skip(p) }
                 else -> skip(p)
             }
@@ -121,6 +129,8 @@ object XmltvParser {
             year = year,
             isNew = isNew,
             cast = cast,
+            isLive = isLive,
+            isRepeat = isRepeat,
         )
     }
 

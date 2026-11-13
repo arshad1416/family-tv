@@ -129,9 +129,25 @@ data class ProgrammeEntity(
     @ColumnInfo(defaultValue = "0") val isNew: Boolean = false,
     /** Up to five actors, comma separated. */
     val cast: String? = null,
+    /** The guide marks it `<live/>` (added in v7). */
+    @ColumnInfo(defaultValue = "0") val isLive: Boolean = false,
+    /** The guide marks it `<previously-shown/>`: a repeat or recording (added in v7). */
+    @ColumnInfo(defaultValue = "0") val isRepeat: Boolean = false,
 )
 
 data class NowNext(val epgId: String, val title: String, val start: Long, val stop: Long)
+
+/** What a channel is showing right now, with what the Sports tab needs to tell the sport and Live or Replay. */
+data class OnAir(
+    val epgId: String,
+    val title: String,
+    val description: String?,
+    val category: String?,
+    val start: Long,
+    val stop: Long,
+    val isLive: Boolean,
+    val isRepeat: Boolean,
+)
 
 @Dao
 interface CatalogDao {
@@ -197,6 +213,12 @@ interface CatalogDao {
     )
     suspend fun programmes(epgIds: List<String>, now: Long, until: Long): List<NowNext>
 
+    @Query(
+        """SELECT epgId, title, description, category, start, stop, isLive, isRepeat FROM programmes
+           WHERE epgId IN (:epgIds) AND start <= :now AND stop > :now""",
+    )
+    suspend fun onAir(epgIds: List<String>, now: Long): List<OnAir>
+
     @Query("SELECT * FROM programmes WHERE epgId = :epgId AND start = :start LIMIT 1") suspend fun programme(epgId: String, start: Long): ProgrammeEntity?
 
     @Query("SELECT COUNT(*) FROM channels") suspend fun channelCount(): Int
@@ -218,9 +240,9 @@ interface CatalogDao {
 
 @Database(
     entities = [SourceEntity::class, CategoryEntity::class, ChannelEntity::class, MovieEntity::class, SeriesEntity::class, ProgrammeEntity::class],
-    version = 6,
+    version = 7,
     exportSchema = true,
-    autoMigrations = [AutoMigration(from = 3, to = 4), AutoMigration(from = 4, to = 5), AutoMigration(from = 5, to = 6)],
+    autoMigrations = [AutoMigration(from = 3, to = 4), AutoMigration(from = 4, to = 5), AutoMigration(from = 5, to = 6), AutoMigration(from = 6, to = 7)],
 )
 abstract class AppDb : RoomDatabase() {
     abstract fun catalog(): CatalogDao

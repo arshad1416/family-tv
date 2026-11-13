@@ -37,5 +37,6 @@ TRAKT_REDIRECT_URI = "https://familytv.arshadkazi.ca/trakt"
 #   TRAKT_CLIENT_SECRET  optional, older Trakt apps only (new apps are PKCE-only and issue none); only this Worker sees it
 #   OPENSUBTITLES_API_KEY  optional; OpenSubtitles.com API key for online subtitles on movies/episodes
 #   TMDB_API_KEY           optional; TMDB API key (v3 key or v4 read token) for trailers, season overviews and episode stills
+#   OPENROUTER_API_KEY     optional; OpenRouter key for Jev, which sorts the TVs' Sports tab by the sport on air (US$0.042/M input tokens)
 #   TVDB_API_KEY           optional; TheTVDB v4 API key, a fallback when TMDB has no episode still/overview or trailer
 #   IPTV_PANEL_API_KEY     optional; 8K Gold reseller panel API key for the Lines page (credits, expiry, renew, new lines)

@@ -7,6 +7,7 @@ import { daysLeft, loginFromLineUrl, Panel, PanelError, RENEW_MONTHS } from "./p
 import { USAGE_APPS, USAGE_BATCH_MAX, USAGE_KEEP_MS, usageEvent } from "./usage";
 import { addonStates, validateAddon, type AddonRow, type DeviceAddon, type PurchaseStatus } from "./addons";
 import { SCORE_LEAGUES, scoresFor } from "./scores";
+import { classifyProgrammes, sportKey, type ProgrammeIn } from "./sportnow";
 
 export interface Env {
   DB: D1Database;
@@ -28,6 +29,8 @@ export interface Env {
   TVDB_API_KEY?: string;
   /** Optional secret: the 8K Gold reseller panel API key; enables the Lines page (credits, expiry, renew, new lines). */
   IPTV_PANEL_API_KEY?: string;
+  /** Optional secret: OpenRouter key for Jev, which sorts the Sports tab by what each channel is showing. Without it the TVs use their word lists only. */
+  OPENROUTER_API_KEY?: string;
   /** Tests only: stands in for the panel. */
   PANEL?: Panel;
 }
@@ -893,6 +896,38 @@ async function deviceScores(req: Request, env: Env, url: URL) {
   return json({ league, games: await scoresFor(league) });
 }
 
+const SPORT_NOW_MAX = 200;
+
+/**
+ * The sport of each guide programme the TV's word lists couldn't place ([classifyProgrammes]);
+ * paired TVs only. Labels come back in the order asked, null when there's no answer.
+ */
+async function deviceSportNow(req: Request, env: Env) {
+  await requirePaired(req, env);
+  const { items } = await body<{ items?: unknown }>(req);
+  if (!Array.isArray(items) || items.length > SPORT_NOW_MAX) throw new HttpError(400, `items: a list of up to ${SPORT_NOW_MAX}`);
+  const text = (v: unknown, max: number, name: string, required = false): string | undefined => {
+    if (v === undefined || v === null) {
+      if (required) throw new HttpError(400, `${name}: required`);
+      return undefined;
+    }
+    if (typeof v !== "string" || v.length > max || (required && !v.trim())) throw new HttpError(400, `${name}: text up to ${max} characters`);
+    return v;
+  };
+  const list: ProgrammeIn[] = items.map((it) => {
+    const o = (it ?? {}) as Record<string, unknown>;
+    return { title: text(o.title, 200, "title", true)!, desc: text(o.desc, 1000, "desc"), genres: text(o.genres, 200, "genres") };
+  });
+  const labels = await classifyProgrammes(env, list);
+  return json({
+    enabled: Boolean(env.OPENROUTER_API_KEY),
+    labels: list.map((it) => {
+      const l = labels.get(sportKey(it.title, it.genres));
+      return l ? { title: it.title, genres: it.genres ?? null, label: l.label, p: l.p } : null;
+    }),
+  });
+}
+
 /**
  * Anonymous usage stats from a TV, kept only for profiles with Usage stats on (`on: false` tells the
  * TV to stop queueing). Rows past 30 days go as new ones arrive.
@@ -1543,6 +1578,7 @@ export async function handle(req: Request, env: Env): Promise<Response> {
   if (m === "POST" && p === "/api/device/progress") return progressPush(req, env);
   if (m === "POST" && p === "/api/device/usage") return usagePush(req, env);
   if (m === "GET" && p === "/api/device/scores") return deviceScores(req, env, url);
+  if (m === "POST" && p === "/api/device/sport-now") return deviceSportNow(req, env);
   let mm = p.match(/^\/api\/device\/commands\/([a-f0-9]+)\/ack$/);
   if (m === "POST" && mm) return deviceAck(req, env, mm[1]);
 

@@ -344,6 +344,7 @@ class Catalog(private val db: AppDb, private val marks: SharedPreferences? = nul
         subTitle = p.subTitle, season = p.season, episode = p.episode,
         category = p.categories.joinToString(", ").ifEmpty { null }, icon = p.icon, rating = p.rating,
         year = p.year, isNew = p.isNew, cast = p.cast.joinToString(", ").ifEmpty { null },
+        isLive = p.isLive, isRepeat = p.isRepeat,
     )
 
     /**

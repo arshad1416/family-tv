@@ -36,6 +36,8 @@ enum class Sport(val label: String, pattern: String?) {
     Cycling("Cycling", """\b(CYCLING|CICLISMO|TOUR DE FRANCE|GCN)\b"""),
     Volleyball("Volleyball", """\bVOLLEY"""),
     More("More sports", null),
+    /** Studio, talk and highlights programmes on sports channels, by what they show now ([SportNow]). */
+    Shows("Shows & Highlights", null),
     ;
 
     internal val regex = pattern?.let { Regex(it, RegexOption.IGNORE_CASE) }
@@ -72,15 +74,28 @@ enum class Sport(val label: String, pattern: String?) {
  * [channels] (from [categories], in the order the person sees them) grouped by sport, in [Sport]'s
  * order, keeping that category order then each category's own channel order within a sport.
  */
-fun groupBySport(categories: List<CategoryEntity>, channels: List<ChannelEntity>): Map<Sport, List<ChannelEntity>> {
+fun groupBySport(categories: List<CategoryEntity>, channels: List<ChannelEntity>): Map<Sport, List<ChannelEntity>> =
+    groupBySportNow(categories, channels) { ch, category -> Sport.of(ch.name, category)?.let { SportSpot(it) } }.bySport
+
+/** The Sports tab's channels by sport, and the Live or Replay tag of each tagged one ("sourceId/streamId"). */
+data class SportGroups(val bySport: Map<Sport, List<ChannelEntity>>, val tags: Map<String, AirTag>)
+
+/** Like [groupBySport], with [spot] deciding each channel's sport and tag (null leaves it out). */
+fun groupBySportNow(
+    categories: List<CategoryEntity>,
+    channels: List<ChannelEntity>,
+    spot: (ChannelEntity, String) -> SportSpot?,
+): SportGroups {
     val rank = categories.withIndex().associate { (i, c) -> (c.sourceId to c.categoryId) to i }
     val names = categories.associate { (it.sourceId to it.categoryId) to it.name }
     val out = sortedMapOf<Sport, MutableList<ChannelEntity>>()
+    val tags = HashMap<String, AirTag>()
     channels
         .sortedWith(compareBy({ rank[it.sourceId to it.categoryId] ?: Int.MAX_VALUE }, { it.num }, { it.name }))
         .forEach { ch ->
-            val sport = Sport.of(ch.name, names[ch.sourceId to ch.categoryId] ?: return@forEach) ?: return@forEach
-            out.getOrPut(sport) { mutableListOf() }.add(ch)
+            val s = spot(ch, names[ch.sourceId to ch.categoryId] ?: return@forEach) ?: return@forEach
+            out.getOrPut(s.sport) { mutableListOf() }.add(ch)
+            s.tag?.let { tags["${ch.sourceId}/${ch.streamId}"] = it }
         }
-    return out
+    return SportGroups(out, tags)
 }

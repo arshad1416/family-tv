@@ -114,6 +114,7 @@ class ParsersTest {
               <rating system="USA Parental Rating"><value>TV-PG</value></rating>
               <rating system="Canadian Parental Rating"><value>PG</value></rating>
               <new />
+              <live />
             </programme>
             <programme start="20261014190000 +0000" stop="20261014200000 +0000" channel="ctv.ca">
               <title>Movie night</title><episode-num system="onscreen">S16 E10</episode-num><previously-shown />
@@ -136,6 +137,8 @@ class ParsersTest {
         assertEquals(16 to 10, out[1].season to out[1].episode)
         assertFalse(out[1].isNew)
         assertEquals("Movie night", out[1].title)
+        assertTrue(s.isLive && !s.isRepeat)
+        assertTrue(out[1].isRepeat && !out[1].isLive)
     }
 
     @Test

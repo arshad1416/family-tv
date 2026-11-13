@@ -93,3 +93,11 @@ data class HeartbeatResponse(
 
 data class ReachResult(val url: String, val ok: Boolean, val status: Int?, val ms: Long?, val error: String?)
 data class ReachResponse(val results: List<ReachResult>)
+
+/** A guide programme sent to the portal's sport-now route: public guide text only. */
+data class SportNowItem(val title: String, val desc: String? = null, val genres: String? = null)
+
+/** One answer: a [app.familytv.ui.Sport] name, "Show", "NotSport" or "Unsure". */
+data class SportNowLabel(val title: String = "", val genres: String? = null, val label: String = "", val p: Double? = null)
+
+data class SportNowAnswer(val enabled: Boolean = false, val labels: List<SportNowLabel?>? = null)

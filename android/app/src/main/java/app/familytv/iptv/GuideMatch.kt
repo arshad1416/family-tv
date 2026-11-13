@@ -186,6 +186,8 @@ object GuideMatch {
                 rating = p.rating ?: x.rating,
                 year = p.year ?: x.year,
                 isNew = p.isNew || x.isNew,
+                isLive = p.isLive || x.isLive,
+                isRepeat = p.isRepeat || x.isRepeat,
                 cast = p.cast ?: x.cast,
             )
             if (f != p) changed += f

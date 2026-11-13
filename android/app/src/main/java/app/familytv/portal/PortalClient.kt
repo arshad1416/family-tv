@@ -172,6 +172,9 @@ class PortalClient(context: Context, private val baseUrl: String = BuildConfig.P
     suspend fun usage(app: String, appVersion: String, events: List<Usage.Event>): Boolean =
         post("/api/device/usage", mapOf("app" to app, "appVersion" to appVersion, "events" to events), Map::class.java)["on"] != false
 
+    /** The sport of guide programmes the TV's word lists couldn't place (Jev on the portal). 404 from a portal without it. */
+    suspend fun sportNow(items: List<SportNowItem>): SportNowAnswer = post("/api/device/sport-now", mapOf("items" to items), SportNowAnswer::class.java)
+
     private suspend fun <T> get(path: String, type: Class<T>): T = call(Request.Builder().url(baseUrl + path).get(), type, true)
 
     private suspend fun <T> post(path: String, body: Any, type: Class<T>, auth: Boolean = true): T =
