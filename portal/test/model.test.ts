@@ -60,7 +60,7 @@ describe("validateProfile", () => {
 
 describe("profileHosts", () => {
   it("collects every host a TV may use", () => {
-    expect([...profileHosts(profile)].sort()).toEqual(["backup.example.net", "epg.example.org", "epgshare01.online", "line.example.com:8080", "lists.example.org"]);
+    expect([...profileHosts(profile)].sort()).toEqual(["backup.example.net", "epg.example.org", "epgshare01.online", "iptv-epg.org", "line.example.com:8080", "lists.example.org"]);
     expect([...profileHosts({ ...profile, extraGuides: [] })]).not.toContain("epgshare01.online");
   });
 });
