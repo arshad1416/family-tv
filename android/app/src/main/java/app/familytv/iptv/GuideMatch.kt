@@ -110,7 +110,7 @@ object GuideMatch {
 
     /**
      * Letters and digits only, lower case, without the provider's country prefix ("CA|", "[US]",
-     * "IN:", "CA EN:"), picture-quality words (HD, FHD, SD) or a leading "The". "+1" stays: a channel an hour
+     * "IN:", "CA EN:", "CA - "), picture-quality words (HD, FHD, SD) or a leading "The". "+1" stays: a channel an hour
      * behind has another schedule.
      */
     fun key(name: String): String {
@@ -130,15 +130,23 @@ object GuideMatch {
     fun countryOfName(name: String): String? {
         // The prefix's first word: "CA EN:" is Canada, its "EN" the language.
         PREFIX.find(name)?.let { m -> COUNTRIES[m.value.lowercase().split(NOT_WORD).firstOrNull { it.isNotEmpty() }]?.let { return it } }
+        dashCountry(name)?.let { return COUNTRIES[it.groupValues[1].lowercase()] }
         val words = name.lowercase().split(NOT_WORD)
         return words.firstNotNullOfOrNull { COUNTRY_WORDS[it] }
     }
 
     private fun stripPrefix(name: String): String {
         var s = name
-        repeat(3) { s = s.replaceFirst(PREFIX, "") }
+        repeat(3) {
+            s = s.replaceFirst(PREFIX, "")
+            dashCountry(s)?.let { m -> s = s.substring(m.range.last + 1) }
+        }
         return s
     }
+
+    /** A country code before a dash, as iptv-epg.org writes it ("CA - CBC TORONTO"); "CNN - Live" is not one. */
+    private fun dashCountry(name: String): MatchResult? =
+        DASH_PREFIX.find(name)?.takeIf { it.groupValues[1].lowercase() in COUNTRIES }
 
     /**
      * Share of [from]..[until] the programmes cover with real titles (0..1). Placeholders like
@@ -208,6 +216,7 @@ object GuideMatch {
     private val ALIAS = Regex("""\(([A-Z0-9][A-Z0-9-]{2,7})\)""")
     private val SUFFIX = Regex("""\.([a-zA-Z]{2})\d*$""")
     private val PREFIX = Regex("""^\s*(?:\[[^\]]{1,10}]|\([^)]{1,10}\)|[\p{L}\d]{1,8}(?:\s+\p{L}{2,3})?\s*[|:]|24/7)\s*""")
+    private val DASH_PREFIX = Regex("""^\s*(\p{L}{2,3})\s+[-–]\s+""")
     /** Networks whose feeds are regional stations: "Global News Regina" is Global plus a place. */
     private val NETWORKS = listOf("citytv", "global", "ctv", "cbc")
     private val NOT_PLACES = setOf("channel", "network")

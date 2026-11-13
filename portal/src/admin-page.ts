@@ -326,7 +326,7 @@ function guidesCard(d) {
   const pins = Object.entries(d.guidePins || {}).map(([n, g]) => n + " = " + g).join("\\n");
   return '<div class="card"><h3 style="margin-top:0">Extra guides</h3>' +
     '<p class="muted small">Used only for channels the provider guide leaves thin, first one first. One URL per line; empty turns them off.</p>' +
-    '<textarea id="xg" rows="3">' + esc(urls) + "</textarea>" +
+    '<textarea id="xg" rows="4">' + esc(urls) + "</textarea>" +
     '<label>Channel pins, one per line: channel name = guide channel id (for example CA| CTV HD = CTV.Toronto.HD.ca2)</label>' +
     '<textarea id="gp" rows="3">' + esc(pins) + "</textarea>" +
     '<p class="muted small">Each epgshare01 guide lists its channel ids in a .txt file next to it, such as epg_ripper_CA2.txt.</p></div>';

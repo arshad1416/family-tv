@@ -39,6 +39,17 @@ class GuideMatchTest {
     }
 
     @Test
+    fun dashedCountryPrefixesComeOffButOtherDashesStay() {
+        assertEquals("cbctoronto", GuideMatch.key("CA - CBC TORONTO"))
+        assertEquals("cp24", GuideMatch.key("CA - CP 24"))
+        assertEquals("ca", GuideMatch.countryOfName("CA - ATN Colors"))
+        assertEquals("cnnlive", GuideMatch.key("CNN - Live"))
+        assertEquals("cbctoronto", GuideMatch.key("CA| CA - CBC Toronto HD"))
+        val epg = GuideMatch.Index(listOf(XmltvChannel("CBCToronto-CBLT.ca", listOf("CA - CBC TORONTO"))))
+        assertEquals("CBCToronto-CBLT.ca", link("CA| CBC Toronto HD", index = epg)?.guideId)
+    }
+
+    @Test
     fun countryAndLanguagePrefixesComeOffAndTheCountryIsTheFirstWord() {
         assertEquals("ctvnewschannel", GuideMatch.key("CA EN: CTV NEWS CHANNEL HD"))
         assertEquals("ca", GuideMatch.countryOfName("CA EN: CTV NEWS CHANNEL HD"))

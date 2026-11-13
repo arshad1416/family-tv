@@ -45,11 +45,16 @@ export interface ProfileData {
 export const SPLASHES = ["the-nook"] as const;
 export type Splash = (typeof SPLASHES)[number];
 
-/** epgshare01's Canada, US and India guides (free; Gracenote listings, about 6.5 MB each). */
+/**
+ * epgshare01's Canada, US and India guides (free; Gracenote listings, about 6.5 MB each), then
+ * iptv-epg.org's Canada guide (free, about 10 MB) as a backup: a channel an earlier guide already
+ * linked is never relinked, so it only fills what epgshare01 misses or covers while epgshare01 is down.
+ */
 export const DEFAULT_EXTRA_GUIDES = [
   "https://epgshare01.online/epgshare01/epg_ripper_CA2.xml.gz",
   "https://epgshare01.online/epgshare01/epg_ripper_US2.xml.gz",
   "https://epgshare01.online/epgshare01/epg_ripper_IN1.xml.gz",
+  "https://iptv-epg.org/files/epg-ca.xml.gz",
 ];
 const MAX_EXTRA_GUIDES = 4;
 const MAX_PINS = 500;
