@@ -36,12 +36,14 @@ import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Icon
 import androidx.tv.material3.Text
 import app.familytv.app
+import app.familytv.FamilyTvApp
 import app.familytv.data.CatalogDao
 import app.familytv.data.CategoryEntity
 import app.familytv.data.ChannelEntity
 import app.familytv.data.Kind
 import app.familytv.data.displayName
 import app.familytv.portal.Profile
+import app.familytv.scores.ScoreGame
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.flowOf
@@ -77,7 +79,7 @@ fun CategoriesScreen(vm: MainViewModel, profile: Profile) {
     val normal = remember(all, profile, mine) { visibleCategories(all, profile, mine[listKind].orEmpty()) }
     var sports by remember(kind, normal) { mutableStateOf<Map<Sport, List<ChannelEntity>>?>(null) }
     LaunchedEffect(kind, normal) {
-        if (kind == SPORTS) sports = withContext(Dispatchers.IO) { sportsChannels(ctx.app.db.catalog(), normal) }
+        if (kind == SPORTS) sports = withContext(Dispatchers.IO) { sportsNow(ctx.app, ctx.app.db.catalog(), normal).bySport }
     }
     val adults = remember(all, profile, mine) { adultCategories(all, profile, mine[kind].orEmpty()) }
     val cat = (if (adult) adults else normal).firstOrNull { it.chipKey == catKey }
@@ -136,13 +138,42 @@ fun CategoriesScreen(vm: MainViewModel, profile: Profile) {
 
 private const val SPORTS_LABEL = "Sports"
 
-/** The live channels of the sports categories among [categories] (already filtered and ordered), by sport. */
-internal suspend fun sportsChannels(dao: CatalogDao, categories: List<CategoryEntity>): Map<Sport, List<ChannelEntity>> {
+/**
+ * The live channels of the sports categories among [categories] (already filtered and ordered), by
+ * the sport each is showing now ([SportNow]): the guide's programme by the word lists, else Jev on
+ * the portal, else the channel's name. Live or Replay tags come with the games.
+ */
+internal suspend fun sportsNow(app: FamilyTvApp, dao: CatalogDao, categories: List<CategoryEntity>, now: Long = System.currentTimeMillis()): SportGroups {
     val picked = categories.filter { Sport.isSportsCategory(it.name) }
     val channels = picked.groupBy { it.sourceId }.flatMap { (src, cats) ->
         cats.map { it.categoryId }.distinct().chunked(500).flatMap { dao.channelsIn(src, it) }
     }
-    return groupBySport(picked, channels)
+    val onAir = runCatching {
+        channels.mapNotNull { it.epgId }.distinct().chunked(500).flatMap { dao.onAir(it, now) }.associateBy { it.epgId }
+    }.getOrDefault(emptyMap())
+    // Only what the word lists can't place goes to Jev, once per title.
+    val unsure = onAir.values.filter { SportNow.askable(it.title) && SportNow.byRules(it.title, it.category) == null }
+    val labels = if (unsure.isEmpty()) emptyMap() else app.sportLabels.labelsFor(
+        unsure.map { it.title to it.category },
+        unsure.associate { SportNow.key(it.title, it.category) to it.description },
+    )
+    val games = HashMap<String, ScoreGame?>()
+    val names = picked.associate { (it.sourceId to it.categoryId) to it.name }
+    val spots = HashMap<ChannelEntity, SportSpot>()
+    for (ch in channels) {
+        val cat = names[ch.sourceId to ch.categoryId] ?: continue
+        val p = ch.epgId?.let { onAir[it] }
+        val label = p?.let { labels[SportNow.key(it.title, it.category)] }
+        var spot = SportNow.place(ch.name, cat, p, label) ?: continue
+        // No Live or Replay from the guide or title: today's scoreboard may know the game.
+        if (p != null && spot.tag == null && spot.sport != Sport.Shows) {
+            val sport = spot.sport
+            val game = games.getOrPut(p.title) { runCatching { app.liveScores.gameFor(p.title, sport) }.getOrNull() }
+            if (game != null) spot = SportNow.place(ch.name, cat, p, label, game) ?: spot
+        }
+        spots[ch] = spot
+    }
+    return groupBySportNow(picked, channels) { ch, _ -> spots[ch] }
 }
 
 private class Tile(val label: String, val icon: ImageVector? = null, val onClick: () -> Unit)

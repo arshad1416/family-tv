@@ -256,6 +256,8 @@ private fun ChannelBrowser(
     arrival: PageEntry? = null,
     leftTo: PageEntry? = null,
     backTo: Profile? = null,
+    /** Live or Replay beside a channel (Sports), keyed "sourceId/streamId". */
+    tags: Map<String, AirTag> = emptyMap(),
     onPick: (Int) -> Unit = {},
 ) {
     val ctx = LocalContext.current
@@ -298,6 +300,7 @@ private fun ChannelBrowser(
                             ChannelRow(
                                 ch, ch.epgId?.let { progs[it] }.orEmpty(), minute, numbers = !side,
                                 favourite = Favourites.key(Kind.LIVE, ch.sourceId, ch.streamId) in favKeys,
+                                tag = tags["${ch.sourceId}/${ch.streamId}"],
                                 modifier = entryPoint(entry && i == 0)
                                     .then(if (arrival != null) landing(arrival, ch == shown) else Modifier)
                                     .then(if (leftTo != null) Modifier.focusProperties { left = leftTo.orNearest } else Modifier),
@@ -438,6 +441,7 @@ private fun ChannelRow(
     modifier: Modifier,
     onFocus: () -> Unit,
     onFavourite: () -> Unit,
+    tag: AirTag? = null,
     onClick: () -> Unit,
 ) {
     FocusBox(onClick = onClick, onLongClick = onFavourite, onFocus = onFocus, lift = Lift.Glow, scale = BUBBLE_SCALE, color = Color.Transparent, shape = RoundedCornerShape(14.gx), modifier = modifier.fillMaxWidth()) {
@@ -448,7 +452,10 @@ private fun ChannelRow(
             }
             // What's on goes under the name, so the name gets the row's whole width (a fixed name column cut Sports names in half).
             Column(Modifier.weight(1f)) {
-                Text(c.displayName, fontSize = 16.gsp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.gx)) {
+                    Text(c.displayName, fontSize = 16.gsp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                    tag?.let { AirTagPill(it) }
+                }
                 progs.onAt(minute)?.let { Text("Now: ${it.title}", fontSize = 15.gsp, color = Glass.Dim, maxLines = 1, overflow = TextOverflow.Ellipsis) }
                 if (progs.any { it.stop > minute && it.start < minute + TIMELINE }) Timeline(progs, minute, Modifier.padding(top = 5.gx).fillMaxWidth().height(4.gx))
             }
@@ -456,6 +463,19 @@ private fun ChannelRow(
         }
     }
 }
+
+/** "Live" (red) or "Replay" (quiet) beside a sports channel's name. */
+@Composable
+private fun AirTagPill(tag: AirTag) {
+    val live = tag == AirTag.Live
+    Text(
+        tag.label.uppercase(), fontSize = 11.gsp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false,
+        color = if (live) Color.White else Glass.Soft,
+        modifier = Modifier.clip(RoundedCornerShape(6.gx)).background(if (live) LIVE_RED else Glass.Raised).padding(horizontal = 6.gx, vertical = 2.gx),
+    )
+}
+
+private val LIVE_RED = Color(0xFFD93025)
 
 /**
  * The mini guide timeline (backlog item 19): the next two hours from [minute], one segment per
@@ -515,6 +535,11 @@ private enum class SportTile(val label: String, val sports: List<Sport>, private
         listOf(Sport.More, Sport.Rugby, Sport.AussieRules, Sport.Gaelic, Sport.Darts, Sport.HorseRacing, Sport.Cycling, Sport.Volleyball),
         "M6 14q-.825 0-1.412-.587T4 12t.588-1.412T6 10t1.413.588T8 12t-.587 1.413T6 14m6 0q-.825 0-1.412-.587T10 12t.588-1.412T12 10t1.413.588T14 12t-.587 1.413T12 14m6 0q-.825 0-1.412-.587T16 12t.588-1.412T18 10t1.413.588T20 12t-.587 1.413T18 14",
     ),
+    Shows(
+        "Shows & Highlights",
+        listOf(Sport.Shows),
+        "M4 20q-.825 0-1.412-.587T2 18V8q0-.825.588-1.412T4 6h4.6L6.5 3.9l1.4-1.4L11.4 6h1.2l3.5-3.5l1.4 1.4L15.4 6H20q.825 0 1.413.588T22 8v10q0 .825-.587 1.413T20 20zm6-3l6-4l-6-4z",
+    ),
     ;
 
     /** Material Symbols' icon for it (Apache 2.0), as the mockup shows. */
@@ -535,9 +560,16 @@ internal fun SportsTab(profile: Profile) {
     val dao = LocalContext.current.app.db.catalog()
     val cats = categories(profile, Kind.LIVE)
     val favKeys = rememberFavouriteKeys(rememberFavourites())
-    var groups by remember { mutableStateOf<Map<Sport, List<ChannelEntity>>?>(null) }
-    LaunchedEffect(cats) { groups = withContext(Dispatchers.IO) { sportsChannels(dao, cats) } }
-    val g = groups ?: return EmptyState("Finding the sports channels…")
+    val app = LocalContext.current.app
+    var sorted by remember { mutableStateOf<SportGroups?>(null) }
+    // Sorted by what's on now; again every quarter hour while the tab is open, as games start and end.
+    LaunchedEffect(cats) {
+        while (true) {
+            sorted = withContext(Dispatchers.IO) { sportsNow(app, dao, cats) }
+            delay(RESORT_MS)
+        }
+    }
+    val g = sorted?.bySport ?: return EmptyState("Finding the sports channels…")
     val tiles = SportTile.entries.filter { t -> t.sports.any { !g[it].isNullOrEmpty() } }
     if (tiles.isEmpty()) return EmptyState("No sports channels on this line.")
     var picked by rememberSaveable { mutableStateOf<String?>(null) }
@@ -565,11 +597,12 @@ internal fun SportsTab(profile: Profile) {
                 }
             }
         }
-        ChannelBrowser(channels, favKeys, Modifier.weight(1f).fillMaxWidth(), side = true, header = "${tile.label} · live channels")
+        ChannelBrowser(channels, favKeys, Modifier.weight(1f).fillMaxWidth(), side = true, header = "${tile.label} · live channels", tags = sorted?.tags.orEmpty())
     }
 }
 
 private const val HALF_HOUR = 30 * 60_000L
+private const val RESORT_MS = 15 * 60_000L
 private const val TIMELINE = 2 * 60 * 60_000L
 
 /** The programme on at [t], if any (one that has ended is not "now"). */

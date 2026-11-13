@@ -61,6 +61,14 @@ class LiveScores(private val portal: PortalClient, private val clock: () -> Long
     private val boards = HashMap<String, Pair<Long, List<ScoreGame>>>()
 
     /** The score line for a programme called [title] on a channel of [sport], or null. */
+    /** The game [title] names in today's scoreboards for [sport], if exactly one fits. */
+    suspend fun gameFor(title: String, sport: Sport?): ScoreGame? {
+        for (league in ScoreMatch.leagues(sport)) {
+            ScoreMatch.find(title, games(league))?.let { return it }
+        }
+        return null
+    }
+
     suspend fun lineFor(title: String, sport: Sport?): String? {
         for (league in ScoreMatch.leagues(sport)) {
             ScoreMatch.find(title, games(league))?.let { return ScoreMatch.line(it) }

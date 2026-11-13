@@ -17,6 +17,7 @@ import app.familytv.iptv.ServerSwitch
 import app.familytv.perf.Perf
 import app.familytv.portal.PortalClient
 import app.familytv.scores.LiveScores
+import app.familytv.ui.SportNowLabels
 import app.familytv.sync.CommandRunner
 import app.familytv.sync.NewEpisodes
 import app.familytv.sync.PlaybackStatus
@@ -66,6 +67,7 @@ class FamilyTvApp : Application(), ImageLoaderFactory {
     /** The last two live channels per profile, for Left's previous channel. */
     val lastChannels by lazy { LastChannels(this) }
     val liveScores by lazy { LiveScores(portal) }
+    val sportLabels by lazy { SportNowLabels(portal) }
     val viewers by lazy { Viewers(this) }
     /** TMDB's most-voted films and shows, for the order of search results. */
     val mostVoted by lazy { MostVoted(File(filesDir, "most_voted.json")) }
