@@ -99,6 +99,18 @@ enum class LiveGenre(val label: String, pattern: String?) {
     }
 }
 
+/**
+ * Whether a channel's own name says it is a news channel. Live TV's News also lists these from
+ * non-news categories, since providers file some news channels under a country's general list
+ * (CBC News Network, CP24 and CPAC in "CA| GENERAL EN"), which left only CTV and Global under News > Canada.
+ */
+internal fun isNewsChannel(name: String): Boolean = NEWS_CHANNEL.containsMatchIn(Names.clean(name))
+
+private val NEWS_CHANNEL = Regex(
+    """\bNEWS|\bCP ?24\b|\bCPAC\b|\bBNN\b|\bRDI\b|\bLCN\b|\bCNBC\b|BLOOMBERG|AL JAZEERA|\bCNN\b|\bMSNBC\b|FOX BUSINESS""",
+    RegexOption.IGNORE_CASE,
+)
+
 /** Countries that lead Live TV's country column, in this order; the rest follow by channel count. */
 val LEADING_COUNTRIES = listOf("Canada", "USA", "UK", "India", "Pakistan", "Iran", "Philippines")
 

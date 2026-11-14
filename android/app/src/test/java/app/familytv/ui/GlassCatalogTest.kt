@@ -101,4 +101,10 @@ class GlassCatalogTest {
         assertFalse(SearchText.matches("Mustard", "star"))
         assertTrue(SearchText.matches("Anything", " "))
     }
+
+    @Test
+    fun newsChannelsAreKnownByTheirOwnName() {
+        listOf("CA| CBC NEWS NETWORK HD", "CP24", "CP 24 Toronto", "CPAC", "BNN Bloomberg", "CA| CTV NEWS CHANNEL", "RDI").forEach { assertTrue(it, isNewsChannel(it)) }
+        listOf("HGTV", "CTV Comedy", "Global Toronto", "CBC Toronto HD", "Newfoundland Life").forEach { assertFalse(it, isNewsChannel(it)) }
+    }
 }
