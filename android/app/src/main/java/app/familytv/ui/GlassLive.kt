@@ -135,11 +135,18 @@ private fun LiveBrowser(profile: Profile, onGuide: () -> Unit) {
     var loaded by remember { mutableStateOf<List<ChannelEntity>?>(null) }
     LaunchedEffect(genreCats) {
         loaded = null
-        loaded = withContext(Dispatchers.IO) { channelsOf(dao, genreCats) }
+        loaded = withContext(Dispatchers.IO) {
+            val own = channelsOf(dao, genreCats)
+            if (g != LiveGenre.News.label) own else {
+                // News also gathers news channels the provider filed elsewhere (CBC News Network in "CA| GENERAL EN").
+                val seen = own.mapTo(HashSet()) { it.sourceId to it.streamId }
+                own + channelsOf(dao, allCats - genreCats.toSet()).filter { isNewsChannel(it.name) && seen.add(it.sourceId to it.streamId) }
+            }
+        }
     }
     val byCountry: Map<String, List<ChannelEntity>> = remember(g, loaded, favChannels, genreCats) {
         if (g == FAVOURITES) mapOf(ALL to favChannels) else {
-            val where = genreCats.associate { (it.sourceId to it.categoryId) to (liveCountry(it.name) ?: OTHER_COUNTRY) }
+            val where = (if (g == LiveGenre.News.label) allCats else genreCats).associate { (it.sourceId to it.categoryId) to (liveCountry(it.name) ?: OTHER_COUNTRY) }
             loaded.orEmpty().groupBy { where[it.sourceId to it.categoryId] ?: OTHER_COUNTRY }
         }
     }
